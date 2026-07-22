@@ -1,4 +1,4 @@
-# Xeet
+# Xeet (older version)
 
 Simple, beautiful terminal interface for posting to X.com.
 
