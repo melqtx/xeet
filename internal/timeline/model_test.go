@@ -24,6 +24,18 @@ func posts(count int) []api.TimelinePost {
 	return result
 }
 
+func TestHelpAllowsImmediateQuit(t *testing.T) {
+	m := New()
+	m.help = true
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil {
+		t.Fatal("q in help did not request quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("q in help returned a non-quit command")
+	}
+}
+
 func TestPageLoadsAndNavigation(t *testing.T) {
 	m := New()
 	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(10), Cursor: "next"}})

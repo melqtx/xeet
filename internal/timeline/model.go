@@ -263,9 +263,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.help {
-		if key, ok := msg.(tea.KeyMsg); ok && (key.String() == "?" || key.String() == "esc" || key.String() == "enter") {
-			m.help = false
-			return m, m.imageRepaint()
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "?", "esc", "enter":
+				m.help = false
+				return m, m.imageRepaint()
+			}
 		}
 		return m, nil
 	}
