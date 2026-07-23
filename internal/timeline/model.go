@@ -3,8 +3,6 @@ package timeline
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -320,6 +318,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if post, ok := m.currentPost(); ok {
 			return m, openURL(postURL(post))
 		}
+	case "i":
+		if post, ok := m.currentPost(); ok {
+			if len(post.Media) == 0 {
+				m.toast = "this post has no viewable images"
+				return m, nil
+			}
+			m.toast = "opening image viewer..."
+			return m, openPostMedia(post)
+		}
 	case "l":
 		if post, ok := m.currentPost(); ok && !m.liking[post.ID] {
 			liked := !post.Liked
@@ -476,16 +483,7 @@ func postURL(post api.TimelinePost) string {
 
 func openURL(target string) tea.Cmd {
 	return func() tea.Msg {
-		var cmd *exec.Cmd
-		switch runtime.GOOS {
-		case "darwin":
-			cmd = exec.Command("open", target)
-		case "windows":
-			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
-		default:
-			cmd = exec.Command("xdg-open", target)
-		}
-		if err := cmd.Start(); err != nil {
+		if err := openExternalURL(target); err != nil {
 			return actionMsg{err: fmt.Errorf("open post: %w", err)}
 		}
 		return actionMsg{message: "opened in browser"}

@@ -13,6 +13,14 @@ import (
 
 const defaultHomeTimelineQueryID = "lqfNCpeO0wydVAAXAbAU5w"
 
+type TimelineMedia struct {
+	URL     string
+	Type    string
+	AltText string
+	Width   int
+	Height  int
+}
+
 type TimelinePost struct {
 	ID          string
 	Text        string
@@ -24,6 +32,7 @@ type TimelinePost struct {
 	LikeCount   int
 	ViewCount   string
 	MediaCount  int
+	Media       []TimelineMedia
 	Liked       bool
 }
 
@@ -233,7 +242,25 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 	}
 	if entities, ok := legacy["extended_entities"].(map[string]any); ok {
 		if media, ok := entities["media"].([]any); ok {
-			post.MediaCount = len(media)
+			for _, raw := range media {
+				item, _ := raw.(map[string]any)
+				url, _ := item["media_url_https"].(string)
+				if url == "" {
+					url, _ = item["media_url"].(string)
+				}
+				if url == "" {
+					continue
+				}
+				entry := TimelineMedia{URL: url}
+				entry.Type, _ = item["type"].(string)
+				entry.AltText, _ = item["ext_alt_text"].(string)
+				if original, ok := item["original_info"].(map[string]any); ok {
+					entry.Width = intValue(original["width"])
+					entry.Height = intValue(original["height"])
+				}
+				post.Media = append(post.Media, entry)
+			}
+			post.MediaCount = len(post.Media)
 		}
 	}
 	if views, ok := result["views"].(map[string]any); ok {

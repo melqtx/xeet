@@ -150,6 +150,9 @@ func (m Model) renderPost(post api.TimelinePost, selected bool) string {
 		like = "Saving…"
 	}
 	action := fmt.Sprintf("  %s %d  ·  Reply %d", like, post.LikeCount, post.ReplyCount)
+	if post.MediaCount > 0 {
+		action += fmt.Sprintf("  ·  Images %d", post.MediaCount)
+	}
 	action = lipgloss.NewStyle().Foreground(actionColor).Render(action)
 	return lipgloss.JoinVertical(lipgloss.Left, headerLine, text, action)
 }
@@ -188,7 +191,7 @@ func (m Model) viewHelp() string {
 		w = 54
 	}
 	body := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("timeline keys") +
-		"\n\n↑ / k       previous\n↓ / j       next\nl           like / unlike\nr           reply\nR           refresh\nenter       open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nq           quit" +
+		"\n\n↑ / k       previous\n↓ / j       next\nl           like / unlike\nr           reply\nR           refresh\ni           view images\nenter       open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nq           quit" +
 		"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("? or esc close")
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
 		Padding(1, 2).Width(w - 6).Render(body)

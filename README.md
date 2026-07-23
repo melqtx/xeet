@@ -114,6 +114,11 @@ xeet timeline
 ```
 
 Use **j/k** or the arrow keys to move, **l** to like or unlike, **r** to reply
-in place, **R** to refresh, **Enter** to open a post, **y** to copy its link,
-and **P** to write a new post. More posts load automatically near the
-bottom. Press **?** for the in-app key guide.
+in place, **R** to refresh, **Enter** to open a post, **i** to view its images,
+**y** to copy its link, and **P** to write a new post. More posts load
+automatically near the bottom. Press **?** for the in-app key guide.
+
+On Linux, install `feh` for an optional high-resolution image gallery window.
+Xeet downloads up to four original-resolution images into a private temporary
+directory, opens them together in `feh`, and removes them when the viewer exits.
+Without `feh`, images open through the desktop's default browser.

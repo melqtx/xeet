@@ -139,3 +139,28 @@ func TestViewIsFixedHeightAndDoesNotDuplicateRows(t *testing.T) {
 		}
 	}
 }
+
+func TestImageViewerKey(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.posts = []api.TimelinePost{{
+		ID: "123", Text: "photo", MediaCount: 1,
+		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/abc", Type: "photo"}},
+	}}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if cmd == nil || !strings.Contains(m.toast, "opening") {
+		t.Fatalf("image key did not start viewer: toast=%q cmd=%v", m.toast, cmd)
+	}
+}
+
+func TestImageViewerKeyWithoutMedia(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.posts = []api.TimelinePost{{ID: "123", Text: "text only"}}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if cmd != nil || !strings.Contains(m.toast, "no viewable images") {
+		t.Fatalf("missing-media feedback: toast=%q cmd=%v", m.toast, cmd)
+	}
+}

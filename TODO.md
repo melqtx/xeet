@@ -15,6 +15,7 @@
 - Composer with multiline editing, image attachments, upload progress, and draft-safe failures
 - Home timeline with pagination, replies, likes, refresh, browser opening, and link copying
 - X11 and Wayland clipboard support with a file-attachment fallback
+- Timeline media metadata and optional high-resolution `feh` image galleries
 - Bounded API retries, rate-limit errors, session-expiry detection, and cookie-leak tests
 
 ## Next
