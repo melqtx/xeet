@@ -5,11 +5,8 @@ API keys.
 
 > [!WARNING]
 > Xeet uses unsupported internal X web endpoints and browser-session cookies.
-> This may violate X's Terms of Service and can result in account limits,
-> suspension, or loss. The endpoints can change or stop working without notice.
-> Xeet is not affiliated with, endorsed by, or supported by X Corp. Use it only
-> with an account you are prepared to risk. Do not use it for spam, scraping,
-> bulk posting, or automated engagement.
+> This may violate X's Terms of Service. Xeet is unofficial and is not
+> affiliated with, endorsed by, or supported by X Corp.
 
 ```
 ██╗  ██╗███████╗███████╗████████╗
