@@ -13,14 +13,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Config is the whole of xeet's saved state: your x.com browser session.
+// AuthToken is the session cookie (encrypted at rest), CT0 is the matching CSRF
+// token, and CreateTweetQID caches X's rotating GraphQL query id.
 type Config struct {
-	APIKey            string `mapstructure:"api_key"`
-	APISecret         string `mapstructure:"api_secret"`
-	AccessToken       string `mapstructure:"access_token"`
-	AccessTokenSecret string `mapstructure:"access_token_secret"`
-	BearerToken       string `mapstructure:"bearer_token"`
-	UserID            string `mapstructure:"user_id"`
-	Username          string `mapstructure:"username"`
+	AuthToken      string `mapstructure:"auth_token"`
+	CT0            string `mapstructure:"ct0"`
+	CreateTweetQID string `mapstructure:"create_tweet_qid"`
 }
 
 type ConfigManager struct {
@@ -50,9 +49,10 @@ func NewConfigManager() (*ConfigManager, error) {
 }
 
 func (cm *ConfigManager) Load() (*Config, error) {
-	viper.SetConfigFile(cm.configPath)
+	v := viper.New()
+	v.SetConfigFile(cm.configPath)
 
-	if err := viper.ReadInConfig(); err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		if os.IsNotExist(err) {
 			return &Config{}, nil
 		}
@@ -60,60 +60,39 @@ func (cm *ConfigManager) Load() (*Config, error) {
 	}
 
 	var config Config
-	if err := viper.Unmarshal(&config); err != nil {
+	if err := v.Unmarshal(&config); err != nil {
 		return nil, err
 	}
 
-	// Decrypt sensitive fields
-	if config.APISecret != "" {
-		decrypted, err := cm.decrypt(config.APISecret)
+	if config.AuthToken != "" {
+		decrypted, err := cm.decrypt(config.AuthToken)
 		if err != nil {
 			return nil, err
 		}
-		config.APISecret = decrypted
-	}
-
-	if config.AccessTokenSecret != "" {
-		decrypted, err := cm.decrypt(config.AccessTokenSecret)
-		if err != nil {
-			return nil, err
-		}
-		config.AccessTokenSecret = decrypted
+		config.AuthToken = decrypted
 	}
 
 	return &config, nil
 }
 
 func (cm *ConfigManager) Save(config *Config) error {
-	// Encrypt sensitive fields before saving
 	configCopy := *config
-
-	if configCopy.APISecret != "" {
-		encrypted, err := cm.encrypt(configCopy.APISecret)
+	if configCopy.AuthToken != "" {
+		encrypted, err := cm.encrypt(configCopy.AuthToken)
 		if err != nil {
 			return err
 		}
-		configCopy.APISecret = encrypted
+		configCopy.AuthToken = encrypted
 	}
 
-	if configCopy.AccessTokenSecret != "" {
-		encrypted, err := cm.encrypt(configCopy.AccessTokenSecret)
-		if err != nil {
-			return err
-		}
-		configCopy.AccessTokenSecret = encrypted
-	}
+	// Fresh viper so the file contains only the keys we set (no stale fields).
+	v := viper.New()
+	v.SetConfigFile(cm.configPath)
+	v.Set("auth_token", configCopy.AuthToken)
+	v.Set("ct0", configCopy.CT0)
+	v.Set("create_tweet_qid", configCopy.CreateTweetQID)
 
-	viper.SetConfigFile(cm.configPath)
-	viper.Set("api_key", configCopy.APIKey)
-	viper.Set("api_secret", configCopy.APISecret)
-	viper.Set("access_token", configCopy.AccessToken)
-	viper.Set("access_token_secret", configCopy.AccessTokenSecret)
-	viper.Set("bearer_token", configCopy.BearerToken)
-	viper.Set("user_id", configCopy.UserID)
-	viper.Set("username", configCopy.Username)
-
-	return viper.WriteConfig()
+	return v.WriteConfigAs(cm.configPath)
 }
 
 func (cm *ConfigManager) encrypt(plaintext string) (string, error) {

@@ -1,27 +1,27 @@
 # Xeet (older version)
 
-Simple, beautiful terminal interface for posting to X.com.
+A simple, beautiful terminal interface for posting to X — no API keys, no
+posting limits.
 
 ```
 ██╗  ██╗███████╗███████╗████████╗
 ╚██╗██╔╝██╔════╝██╔════╝╚══██╔══╝
- ╚███╔╝ █████╗  █████╗     ██║   
- ██╔██╗ ██╔══╝  ██╔══╝     ██║   
-██╔╝ ██╗███████╗███████╗   ██║   
-╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝   
+ ╚███╔╝ █████╗  █████╗     ██║
+ ██╔██╗ ██╔══╝  ██╔══╝     ██║
+██╔╝ ██╗███████╗███████╗   ██║
+╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝
+             /\_/\
+            ( o.o )
+             > ^ <
+         ready when you are  ✦
 
-┌────────────────────────────────────────────────────────────┐
-│                                                            │
-│  |                                                         │
-│                                                            │
-│  0/280 • Enter to post • Ctrl+C to quit                   │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
+╭────────────────────────────────────────╮
+│ what are you thinking?                 │
+╰────────────────────────────────────────╯
+12/280  •  enter to xeet
 ```
 
-
-
-## Installation
+## Install
 
 ```bash
 git clone https://github.com/melqtx/xeet.git
@@ -29,77 +29,71 @@ cd xeet
 make install
 ```
 
-That's it! The `make install` command will build and install xeet to `/usr/local/bin/`.
+Installs `xeet` to `/usr/local/bin/`, so you can run it from anywhere.
 
-**After installation, you can use xeet from anywhere:**
+## Use it
+
+**1. Connect your account — one command:**
+
 ```bash
-xeet version      # Check version
-xeet auth         # Set up X.com credentials  
-xeet              # Start tweeting
+xeet auth
 ```
 
-No need to stay in the project directory!
+Just make sure you're logged into x.com in your browser first (Chrome, Arc,
+Brave, Dia, or Edge). `xeet auth` finds that session and connects — no
+passwords, no API keys, no login screen. On macOS it asks once to read the
+browser's Keychain key; click Allow.
 
-## Quick Start
+**2. Post:**
 
-1. **Set up your X.com API credentials**:
-   ```bash
-   xeet auth
-   ```
-   Get your credentials from https://developer.x.com/ (you'll need all 4: API Key, API Secret, Access Token, Access Token Secret)
-
-2. **Start tweeting**:
-   ```bash
-   xeet
-   ```
-   That's it! A blue input box appears - type your tweet and hit Enter.
-
-## Usage
-
-### Main Interface
 ```bash
-xeet                 # Opens the tweet input box
-```
-- Type your tweet (280 character limit)
-- Press **Enter** to post
-- Press **Ctrl+V** to paste text or images
-- Press **Alt+Enter** or **Ctrl+J** for line breaks
-- Press **any key** after posting to write another tweet
-- Press **Ctrl+C** or **q** to quit
-
-### Authentication
-```bash
-xeet auth           # Set up X.com API credentials
+xeet                                  # open the interactive composer
+xeet timeline                         # browse your home timeline
+xeet post "hello from my shell"       # one-shot from the terminal
+echo "piped in" | xeet post           # reads stdin
+xeet post "photos" -i one.png -i two.jpg
+xeet post --image meme.png             # image-only post
+xeet post "a reply" --reply 1234567890
 ```
 
-That's it! Only 2 commands to remember.
+## How it works
 
-## X API Setup
+xeet reuses the x.com session already in your browser and talks to the same
+internal endpoints the website does — so it isn't metered like the paid
+developer API. Your session cookie is stored encrypted (AES-256-GCM) in
+`~/.xeet.yaml`; the key lives in `~/.xeet.key` (created automatically).
 
-1. Go to https://developer.x.com/
-2. Create a developer account if you don't have one
-3. Create a new app in your developer portal
-4. Go to the "Keys and Tokens" tab
-5. Generate all required credentials:
-   - **API Key** (Consumer Key)
-   - **API Secret** (Consumer Secret) 
-   - **Access Token**
-   - **Access Token Secret**
-6. Run `xeet auth` and enter these credentials when prompted
+X rotates the internal `CreateTweet` id periodically; xeet discovers the current
+one automatically and caches it. If discovery ever fails it'll tell you to grab
+it manually — open x.com, post a tweet, copy the id from the `CreateTweet`
+request in DevTools → Network, then `xeet setqid <id>`.
 
-**Note**: You need all 4 credentials. The app will test your credentials automatically after setup.
+**Note:** this uses X's internal endpoints, which is against X's Terms of
+Service. It's fine for posting your own stuff; don't use it to spam or automate
+at scale. Currently macOS only.
 
-## uh oh are my keys secured?
+## TUI keys
 
-- API secrets are encrypted using AES-256-GCM before storage
-- Configuration files are stored with restricted permissions (600)
-- OAuth 1.0a authentication with X API
+- **Enter** — post
+- **Alt+Enter** / **Ctrl+J** — line break
+- **Ctrl+V** — read an image or text from the clipboard
+- **Ctrl+O** — attach an image path (you can drag a file into the prompt)
+- **Tab** — move between the editor and attached images
+- **Arrow keys** — select an attached image
+- **Delete** / **Ctrl+X** — remove the selected image
+- **F1** — help
+- **Ctrl+C** / **Esc** — quit (drafts require confirmation)
 
+Up to four PNG, JPEG, GIF, or WebP images can be attached. The composer shows
+the real format, dimensions, and size before anything is uploaded.
 
+## Timeline
 
-## Configuration Files
+```bash
+xeet timeline
+```
 
-- Config: `~/.xeet.yaml` (encrypted sensitive data)
-- Encryption key: `~/.xeet.key` (auto-generated)
-
-
+Use **j/k** or the arrow keys to move, **l** to like or unlike, **r** to reply
+in place, **R** to refresh, **Enter** to open a post, **y** to copy its link,
+and **P** to write a new post. More posts load automatically near the
+bottom. Press **?** for the in-app key guide.

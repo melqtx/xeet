@@ -1,0 +1,258 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"xeet/internal/media"
+	"xeet/pkg/api"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.resize()
+		return m, nil
+	case clipboardMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err
+			return m, nil
+		}
+		m.lastErr = nil
+		if msg.attachment != nil {
+			m.addAttachment(*msg.attachment)
+		} else if msg.text != "" {
+			m.editor.InsertString(msg.text)
+			m.toast = "Pasted text"
+		}
+		return m, nil
+	case attachmentMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err
+			return m, nil
+		}
+		m.lastErr = nil
+		m.addAttachment(msg.attachment)
+		return m, nil
+	case postStartedMsg:
+		m.postEvents = msg.events
+		m.postCancel = msg.cancel
+		return m, tea.Batch(m.spinner.Tick, waitForPost(msg.events))
+	case postProgressMsg:
+		m.postStage = msg.event
+		return m, waitForPost(m.postEvents)
+	case postResultMsg:
+		m.postCancel = nil
+		m.cancelling = false
+		if msg.err != nil {
+			m.screen = screenCompose
+			if errors.Is(msg.err, context.Canceled) {
+				m.lastErr = nil
+				m.toast = "Posting cancelled"
+			} else {
+				m.lastErr = msg.err
+			}
+			m.editor.Focus()
+			return m, nil
+		}
+		m.screen = screenSuccess
+		m.postID = msg.id
+		m.postEvents = nil
+		return m, nil
+	case spinner.TickMsg:
+		if m.screen == screenPosting {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+	}
+
+	key, isKey := msg.(tea.KeyMsg)
+	if isKey {
+		if m.dialog != dialogNone {
+			return m.updateDialog(key)
+		}
+		if m.screen == screenSuccess {
+			return m.updateSuccess(key)
+		}
+		if m.screen == screenPosting {
+			if (key.String() == "ctrl+c" || key.String() == "esc") && m.postCancel != nil && !m.cancelling {
+				m.cancelling = true
+				m.postCancel()
+			}
+			return m, nil
+		}
+
+		switch key.String() {
+		case "ctrl+c":
+			if m.hasDraft() {
+				m.dialog = dialogQuit
+				return m, nil
+			}
+			return m, tea.Quit
+		case "esc":
+			if m.hasDraft() {
+				m.dialog = dialogQuit
+				return m, nil
+			}
+			return m, tea.Quit
+		case "enter":
+			if !m.hasDraft() {
+				m.toast = "Write something or attach an image first"
+				return m, nil
+			}
+			m.lastErr = nil
+			m.toast = ""
+			m.screen = screenPosting
+			m.postStage = api.PostEvent{}
+			m.cancelling = false
+			m.editor.Blur()
+			attachments := append([]media.Attachment(nil), m.attachments...)
+			return m, beginPost(m.editor.Value(), attachments)
+		case "alt+enter", "ctrl+j":
+			if m.focus == focusEditor {
+				m.editor.InsertString("\n")
+			}
+			return m, nil
+		case "ctrl+v":
+			return m, readClipboard(m.clipboard)
+		case "ctrl+o":
+			m.dialog = dialogPath
+			m.pathInput.SetValue("")
+			return m, m.pathInput.Focus()
+		case "f1":
+			m.dialog = dialogHelp
+			return m, nil
+		case "tab":
+			if len(m.attachments) > 0 {
+				if m.focus == focusEditor {
+					m.focus = focusAttachments
+					m.editor.Blur()
+				} else {
+					m.focus = focusEditor
+					return m, m.editor.Focus()
+				}
+			}
+			return m, nil
+		}
+
+		if m.focus == focusAttachments {
+			switch key.String() {
+			case "left", "up", "shift+tab":
+				if m.selected > 0 {
+					m.selected--
+				}
+			case "right", "down":
+				if m.selected < len(m.attachments)-1 {
+					m.selected++
+				}
+			case "backspace", "delete", "ctrl+x":
+				m.removeSelected()
+			case "enter":
+				m.focus = focusEditor
+				return m, m.editor.Focus()
+			}
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.editor, cmd = m.editor.Update(msg)
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) updateDialog(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.dialog {
+	case dialogQuit:
+		switch strings.ToLower(key.String()) {
+		case "y", "enter", "ctrl+c":
+			return m, tea.Quit
+		case "n", "esc":
+			m.dialog = dialogNone
+		}
+		return m, nil
+	case dialogHelp:
+		if key.String() == "esc" || key.String() == "f1" || key.String() == "enter" {
+			m.dialog = dialogNone
+		}
+		return m, nil
+	case dialogPath:
+		switch key.String() {
+		case "esc":
+			m.dialog = dialogNone
+			m.pathInput.Blur()
+			return m, m.editor.Focus()
+		case "enter":
+			path := m.pathInput.Value()
+			m.dialog = dialogNone
+			m.pathInput.Blur()
+			m.focus = focusEditor
+			m.editor.Focus()
+			return m, loadAttachment(path)
+		}
+		var cmd tea.Cmd
+		m.pathInput, cmd = m.pathInput.Update(key)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m Model) updateSuccess(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "q" || key.String() == "esc" || key.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	if key.String() == "enter" || key.String() == "n" {
+		m.screen = screenCompose
+		m.editor.Reset()
+		m.attachments = nil
+		m.selected = 0
+		m.postID = ""
+		m.toast = ""
+		m.lastErr = nil
+		m.focus = focusEditor
+		return m, m.editor.Focus()
+	}
+	return m, nil
+}
+
+func (m *Model) removeSelected() {
+	if len(m.attachments) == 0 {
+		return
+	}
+	name := m.attachments[m.selected].Name
+	m.attachments = append(m.attachments[:m.selected], m.attachments[m.selected+1:]...)
+	if m.selected >= len(m.attachments) && m.selected > 0 {
+		m.selected--
+	}
+	m.toast = "Removed " + name
+	m.resize()
+	if len(m.attachments) == 0 {
+		m.focus = focusEditor
+		m.editor.Focus()
+	}
+}
+
+func (m *Model) resize() {
+	width := m.contentWidth() - 4
+	if width < 24 {
+		width = 24
+	}
+	height := m.height - 18 - len(m.attachments)
+	if height < 4 {
+		height = 4
+	}
+	if height > 8 {
+		height = 8
+	}
+	m.editor.SetWidth(width)
+	m.editor.SetHeight(height)
+	m.pathInput.Width = width - 4
+}

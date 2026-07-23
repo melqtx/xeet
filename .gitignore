@@ -1,5 +1,6 @@
 # Build artifacts
 xeet
+xeet-bin
 xeet.exe
 dist/
 build/
