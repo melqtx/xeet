@@ -15,7 +15,8 @@
 - Composer with multiline editing, image attachments, upload progress, and draft-safe failures
 - Home timeline with pagination, replies, likes, refresh, browser opening, and link copying
 - X11 and Wayland clipboard support with a file-attachment fallback
-- Timeline media metadata and optional high-resolution `feh` image galleries
+- [done] lazy inline truecolor image previews in the timeline
+- multi-image timeline collages and optional native Kitty/iTerm2 previews
 - Bounded API retries, rate-limit errors, session-expiry detection, and cookie-leak tests
 
 ## Next
@@ -29,6 +30,8 @@
 - Configurable theme without changing layout
 - Optional inline image previews for Kitty, iTerm2, and WezTerm
 - Chunked upload for video and large media
+- Animated GIF playback via the Kitty graphics animation protocol
+- tmux passthrough (DCS-wrapped Kitty graphics) for native images inside tmux 3.3+
 - Windows browser-cookie import using DPAPI
 
 Scheduling, bulk posting, scraping, automated engagement, and mass-posting

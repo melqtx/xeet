@@ -41,6 +41,16 @@ func TestParseTimeline(t *testing.T) {
 	}
 }
 
+func TestParseTimelineUnescapesText(t *testing.T) {
+	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+		"rest_id": "1", "legacy": map[string]any{"full_text": "&gt; hello &amp; goodbye"},
+	}}}
+	post, ok := parseTimelineItem(item)
+	if !ok || post.Text != "> hello & goodbye" {
+		t.Fatalf("text=%q ok=%v", post.Text, ok)
+	}
+}
+
 func TestParseTimelineDeduplicatesTweet(t *testing.T) {
 	item := map[string]any{"itemContent": map[string]any{"tweet_results": map[string]any{"result": map[string]any{"rest_id": "1", "legacy": map[string]any{"full_text": "same"}}}}}
 	page := parseTimeline([]any{item, item})

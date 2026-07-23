@@ -28,8 +28,9 @@ type Config struct {
 const keyringService = "xeet"
 
 const (
-	keyAuthToken = "auth_token"
-	keyCT0       = "ct0"
+	keyAuthToken            = "auth_token"
+	keyCT0                  = "ct0"
+	keyLegacySessionCookies = "session_cookies"
 )
 
 // ErrSecretNotFound is returned by a SecretStore when a key has no value.
@@ -201,6 +202,9 @@ func (cm *ConfigManager) Save(config *Config) error {
 	if err := cm.secrets.Set(keyCT0, config.CT0); err != nil {
 		return rollback(err)
 	}
+	// Clean up the short-lived full-cookie experiment. Requests intentionally
+	// use only auth_token and ct0, matching the previously working behavior.
+	_ = cm.secrets.Delete(keyLegacySessionCookies)
 	if err := cm.writeFile(&fileConfig{CreateTweetQID: config.CreateTweetQID}); err != nil {
 		return rollback(err)
 	}
@@ -242,6 +246,7 @@ func (cm *ConfigManager) Erase() error {
 	}
 	keep(cm.secrets.Delete(keyAuthToken))
 	keep(cm.secrets.Delete(keyCT0))
+	keep(cm.secrets.Delete(keyLegacySessionCookies))
 	if err := os.Remove(cm.configPath); err != nil && !os.IsNotExist(err) {
 		keep(err)
 	}

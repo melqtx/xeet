@@ -25,24 +25,14 @@ func init() {
 // runAuth connects by reading the x.com session already present in the user's
 // browser — no passwords, no API keys, no login flow.
 func runAuth(cmd *cobra.Command, args []string) error {
-	browsers := api.DetectBrowsers()
-	if len(browsers) == 0 {
-		return fmt.Errorf("couldn't find a logged-in x.com session\n" +
-			"Open x.com in a supported browser (Chrome, Chromium, Brave, Edge, Firefox, Zen, Arc, or Dia), log in, then run 'xeet auth' again")
+	browsers := api.SupportedBrowsers()
+	sel := promptui.Select{
+		Label: "Which browser is your X account in",
+		Items: browsers,
 	}
-
-	// One session found: use it. More than one: ask which.
-	browserName := browsers[0]
-	if len(browsers) > 1 {
-		sel := promptui.Select{
-			Label: "Which browser is your X account in",
-			Items: browsers,
-		}
-		_, chosen, err := sel.Run()
-		if err != nil {
-			return fmt.Errorf("cancelled")
-		}
-		browserName = chosen
+	_, browserName, err := sel.Run()
+	if err != nil {
+		return fmt.Errorf("cancelled")
 	}
 
 	fmt.Printf("Reading your session from %s (your OS may ask to unlock its keyring)...\n", browserName)
@@ -75,9 +65,9 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	}
 
 	if handle != "" {
-		fmt.Printf("✓ Connected as @%s via %s. Run `xeet` to post.\n", handle, browser)
+		fmt.Printf("✓ Connected as @%s via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", handle, browser)
 	} else {
-		fmt.Printf("✓ Connected via %s. Run `xeet` to post.\n", browser)
+		fmt.Printf("✓ Connected via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", browser)
 	}
 	return nil
 }

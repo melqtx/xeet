@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"os"
@@ -232,6 +233,7 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 	if id == "" || text == "" {
 		return TimelinePost{}, false
 	}
+	text = html.UnescapeString(text)
 
 	post := TimelinePost{ID: id, Text: text}
 	post.ReplyCount = intValue(legacy["reply_count"])

@@ -39,13 +39,9 @@ type chromiumBrowser struct {
 func chromiumBrowsers(home string) []chromiumBrowser {
 	appSup := filepath.Join(home, "Library", "Application Support")
 	return []chromiumBrowser{
-		{"Dia", filepath.Join(appSup, "Dia"), "Dia Safe Storage", "Dia"},
-		{"Arc", filepath.Join(appSup, "Arc"), "Arc Safe Storage", "Arc"},
 		{"Chrome", filepath.Join(appSup, "Google", "Chrome"), "Chrome Safe Storage", "Chrome"},
-		{"Chrome Canary", filepath.Join(appSup, "Google", "Chrome Canary"), "Chrome Safe Storage", "Chrome"},
+		{"Helium", filepath.Join(appSup, "net.imput.helium"), "Helium Storage Key", "Helium"},
 		{"Brave", filepath.Join(appSup, "BraveSoftware", "Brave-Browser"), "Brave Safe Storage", "Brave"},
-		{"Edge", filepath.Join(appSup, "Microsoft Edge"), "Microsoft Edge Safe Storage", "Microsoft Edge"},
-		{"Chromium", filepath.Join(appSup, "Chromium"), "Chromium Safe Storage", "Chromium"},
 	}
 }
 
@@ -66,15 +62,16 @@ func DetectBrowsers() []string {
 	if err != nil {
 		return nil
 	}
+	chromium := chromiumBrowsers(home)
+	gecko := geckoBrowsers(home)
 	var names []string
-	for _, b := range chromiumBrowsers(home) {
-		if b.hasXSession() {
-			names = append(names, b.name)
+	for _, name := range SupportedBrowsers() {
+		if browser, ok := findChromiumBrowser(name, chromium); ok && browser.hasXSession() {
+			names = append(names, name)
+			continue
 		}
-	}
-	for _, b := range geckoBrowsers(home) {
-		if b.hasXSession() {
-			names = append(names, b.name)
+		if browser, ok := findGeckoBrowser(name, gecko); ok && browser.hasXSession() {
+			names = append(names, name)
 		}
 	}
 	return names
@@ -117,15 +114,8 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 		return nil, "", fmt.Errorf("the 'sqlite3' command isn't available (needed to read the cookie database)")
 	}
 
-	var browser *chromiumBrowser
-	for _, b := range chromiumBrowsers(home) {
-		if b.name == name {
-			b := b
-			browser = &b
-			break
-		}
-	}
-	if browser == nil {
+	browser, ok := findChromiumBrowser(name, chromiumBrowsers(home))
+	if !ok {
 		return nil, "", fmt.Errorf("unknown browser %q", name)
 	}
 
@@ -151,9 +141,18 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 	return nil, "", fmt.Errorf("no logged-in x.com session found in %s — open x.com in it, log in, then try again", browser.name)
 }
 
+func findChromiumBrowser(name string, browsers []chromiumBrowser) (chromiumBrowser, bool) {
+	for _, browser := range browsers {
+		if browser.name == name {
+			return browser, true
+		}
+	}
+	return chromiumBrowser{}, false
+}
+
 // cookieDBs walks the browser's data dir to find every "Cookies" SQLite file,
-// regardless of the exact profile layout (handles Default, Profile N, and the
-// "User Data" wrapper that Arc/Dia use).
+// regardless of the exact profile layout (including Default, Profile N, and
+// optional "User Data" wrappers).
 func (b chromiumBrowser) cookieDBs() []string {
 	var out []string
 	skip := map[string]bool{

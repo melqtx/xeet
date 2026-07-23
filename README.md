@@ -49,8 +49,7 @@ xeet auth
 
 First, log into x.com in a supported browser:
 
-- macOS: Chrome, Chromium, Brave, Edge, Arc, Dia, Firefox, or Zen
-- Linux: Chrome, Chrome Beta, Chromium, Brave, Edge, Firefox, or Zen
+- macOS and Linux: Chrome, Helium, Firefox, Brave, or Zen
 - Linux installs from native packages, Snap, and common Flatpak locations are
   detected. Multiple browser profiles are supported.
 
@@ -61,8 +60,10 @@ Keyring, Secret Service, or KDE Wallet.
 **2. Post:**
 
 ```bash
-xeet                                  # open the interactive composer
-xeet timeline                         # browse your home timeline
+xeet                                  # browse your home timeline with images
+xeet --barebones                      # browse a text-only timeline
+xeet --compose                        # open only the interactive composer
+xeet timeline                         # same timeline, with renderer controls
 xeet post "hello from my shell"       # one-shot from the terminal
 echo "piped in" | xeet post           # reads stdin
 xeet post "photos" -i one.png -i two.jpg
@@ -81,7 +82,7 @@ The imported `auth_token` and `ct0` cookies grant account-level access. Treat
 them like a password. Xeet stores them in macOS Keychain or Linux Secret
 Service. It does not store them in the YAML config file. Run `xeet logout` to
 delete the saved session. This removes Xeet's copy but does not log your browser
-out of X.
+out of X. Run `xeet auth` again whenever you want to reconnect.
 
 X rotates the internal `CreateTweet` id periodically; xeet discovers the current
 one automatically and caches it. If discovery fails, Xeet explains how to set
@@ -110,15 +111,42 @@ available.
 ## Timeline
 
 ```bash
-xeet timeline
+xeet                  # automatic image previews
+xeet --barebones      # simple text-only feed
+xeet --compose        # skip the feed and open the composer
+xeet timeline         # explicit timeline command
 ```
 
-Use **j/k** or the arrow keys to move, **l** to like or unlike, **r** to reply
-in place, **R** to refresh, **Enter** to open a post, **i** to view its images,
-**y** to copy its link, and **P** to write a new post. More posts load
-automatically near the bottom. Press **?** for the in-app key guide.
+Use **j/k** or the arrow keys to move (**Ctrl+D/U** jumps five posts),
+**Enter** to read a truncated post in full, **i** to zoom the selected post's
+image to the whole terminal, **l** to like or unlike, **r** to reply in
+place, **o** to open the post in the browser, **y** to copy its link,
+and **P** to write a new post. **R** refreshes in place: new posts stack on
+top while you keep your position. More posts load automatically near the
+bottom. Press **?** for the in-app key guide.
 
-On Linux, install `feh` for an optional high-resolution image gallery window.
-Xeet downloads up to four original-resolution images into a private temporary
-directory, opens them together in `feh`, and removes them when the viewer exits.
-Without `feh`, images open through the desktop's default browser.
+Images are prefetched around your position in the feed and rendered inline
+for nearby posts, so scrolling lands on already-loaded previews. Videos and
+GIFs show their poster frame with a `▶` chip. Press `?` to see which image
+renderer is active and why. Direct Ghostty and Kitty sessions use Kitty Unicode-placeholder
+images. WezTerm uses its native iTerm2 inline-image protocol. Zellij and tmux
+use the portable ANSI renderer because they do not reliably pass these graphics
+protocols through.
+
+In auto mode xeet verifies Kitty graphics before committing to them: apps
+that merely embed libghostty (cmux, for one) inherit a ghostty `TERM` but
+don't reliably render placeholder graphics, so on macOS xeet checks the host
+app's bundle identifier and falls back to ANSI inside embedders. A startup
+probe additionally asks the terminal itself to confirm the protocol, so any
+terminal that advertises graphics it cannot load also falls back instead of
+leaving blank gaps where images should be. If a frame ever glitches, `ctrl+l`
+redraws the screen.
+
+Choose the renderer explicitly when needed:
+
+```bash
+xeet timeline --images auto    # native when confirmed by the terminal; otherwise ANSI
+xeet timeline --images native  # trust the terminal: skip the probe, use its native backend
+xeet timeline --images ansi    # portable block preview
+xeet timeline --images off     # disable previews
+```

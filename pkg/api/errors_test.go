@@ -64,6 +64,27 @@ func TestPostTweetGraphQLAuthError(t *testing.T) {
 	}
 }
 
+func TestPostTweetDuplicateIsActionable(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"errors":[{"message":"Status is a duplicate.","code":187}]}`), nil
+	})
+	_, err := client.PostTweet(context.Background(), "same text", "", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "duplicate post") {
+		t.Fatalf("got %v, want duplicate-post guidance", err)
+	}
+}
+
+func TestPostTweetAutomationBlockIsActionable(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		// X sometimes omits code 226 and only returns the automation text.
+		return response(http.StatusOK, `{"errors":[{"message":"Authorization: This request looks like it might be automated"}]}`), nil
+	})
+	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "don't keep retrying") {
+		t.Fatalf("got %v, want automation-block guidance", err)
+	}
+}
+
 func TestPostTweetNotRetriedOnTransientFailure(t *testing.T) {
 	// CreateTweet is a mutation: a timed-out request may have posted anyway,
 	// so it must never fire twice on its own.

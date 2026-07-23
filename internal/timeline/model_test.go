@@ -109,6 +109,110 @@ func TestReplyPostsWithoutLeavingProgram(t *testing.T) {
 	}
 }
 
+func TestRefreshMergesOnTopAndKeepsPosition(t *testing.T) {
+	m := New()
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(5), Cursor: "first"}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(8), Cursor: "second"}})
+	if len(m.posts) != 8 {
+		t.Fatalf("refresh did not merge: %d posts", len(m.posts))
+	}
+	if m.posts[0].ID != "f" || m.posts[3].ID != "a" {
+		t.Fatalf("new posts were not prepended in order: %+v", m.posts[:4])
+	}
+	if m.posts[m.selected].ID != "b" {
+		t.Fatalf("selection moved off post b: selected=%d", m.selected)
+	}
+	if m.cursor != "first" {
+		t.Fatalf("refresh clobbered the pagination cursor: %q", m.cursor)
+	}
+	if !strings.Contains(m.toast, "3 new") {
+		t.Fatalf("no new-posts toast: %q", m.toast)
+	}
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(8), Cursor: "third"}})
+	if len(m.posts) != 8 || !strings.Contains(m.toast, "caught up") {
+		t.Fatalf("no-change refresh misbehaved: %d posts, toast %q", len(m.posts), m.toast)
+	}
+}
+
+func TestToastExpiresOnlyForLatestSequence(t *testing.T) {
+	m := New()
+	if cmd := m.showToast("first"); cmd == nil || m.toast != "first" {
+		t.Fatal("toast was not shown")
+	}
+	staleSeq := m.toastSeq
+	m.showToast("second")
+	m = update(t, m, toastClearMsg{seq: staleSeq})
+	if m.toast != "second" {
+		t.Fatalf("stale clear removed a newer toast: %q", m.toast)
+	}
+	m = update(t, m, toastClearMsg{seq: m.toastSeq})
+	if m.toast != "" {
+		t.Fatalf("toast did not expire: %q", m.toast)
+	}
+}
+
+func TestEnterExpandsTruncatedPost(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.posts = []api.TimelinePost{{
+		ID: "1", Handle: "alice",
+		Text: strings.Repeat("word ", 60) + "ENDMARKER",
+	}}
+	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	if strings.Contains(m.viewport.View(), "ENDMARKER") {
+		t.Fatal("long post was not truncated")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.expanded {
+		t.Fatal("enter did not expand the post")
+	}
+	content, _, _ := m.renderFeedContent()
+	if !strings.Contains(content, "ENDMARKER") {
+		t.Fatal("expanded post is still truncated")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.expanded {
+		t.Fatal("enter did not collapse the post")
+	}
+}
+
+func TestHalfPageJumpAndScrolloff(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.posts = posts(30)
+	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	if m.selected != 5 {
+		t.Fatalf("ctrl+d selected=%d", m.selected)
+	}
+	for i := 0; i < 4; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	}
+	if m.selected != 25 {
+		t.Fatalf("selected=%d", m.selected)
+	}
+	top := m.viewport.YOffset
+	maxTop := m.ends[len(m.ends)-1] + 1 - m.viewport.Height
+	if end := m.ends[m.selected]; end >= top+m.viewport.Height {
+		t.Fatalf("selection scrolled out of view: end=%d top=%d", end, top)
+	}
+	if end := m.ends[m.selected]; end+2 >= top+m.viewport.Height && top != maxTop {
+		t.Fatal("no scroll margin below the selection")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	if m.selected != 20 {
+		t.Fatalf("ctrl+u selected=%d", m.selected)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	if m.selected != 0 || m.viewport.YOffset != 0 {
+		t.Fatalf("ctrl+u did not clamp: selected=%d offset=%d", m.selected, m.viewport.YOffset)
+	}
+}
+
 func TestPaginationDeduplicates(t *testing.T) {
 	m := New()
 	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(2), Cursor: "one"}})
@@ -128,8 +232,8 @@ func TestViewIsFixedHeightAndDoesNotDuplicateRows(t *testing.T) {
 		}
 		m = update(t, m, tea.WindowSizeMsg{Width: size.width, Height: size.height})
 		view := m.View()
-		if !strings.Contains(view, "Like 0") || !strings.Contains(view, "Reply 0") {
-			t.Fatalf("%dx%d: action counts missing", size.width, size.height)
+		if strings.Count(view, "♡") != 2 {
+			t.Fatalf("%dx%d: action lines missing", size.width, size.height)
 		}
 		if strings.Count(view, "Alice") != 1 || strings.Count(view, "Bob") > 1 {
 			t.Fatalf("%dx%d: duplicated timeline rows", size.width, size.height)
@@ -137,30 +241,5 @@ func TestViewIsFixedHeightAndDoesNotDuplicateRows(t *testing.T) {
 		if lines := strings.Count(view, "\n") + 1; lines != size.height {
 			t.Fatalf("%dx%d: view has %d lines", size.width, size.height, lines)
 		}
-	}
-}
-
-func TestImageViewerKey(t *testing.T) {
-	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{{
-		ID: "123", Text: "photo", MediaCount: 1,
-		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/abc", Type: "photo"}},
-	}}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
-	m = next.(Model)
-	if cmd == nil || !strings.Contains(m.toast, "opening") {
-		t.Fatalf("image key did not start viewer: toast=%q cmd=%v", m.toast, cmd)
-	}
-}
-
-func TestImageViewerKeyWithoutMedia(t *testing.T) {
-	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{{ID: "123", Text: "text only"}}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
-	m = next.(Model)
-	if cmd != nil || !strings.Contains(m.toast, "no viewable images") {
-		t.Fatalf("missing-media feedback: toast=%q cmd=%v", m.toast, cmd)
 	}
 }

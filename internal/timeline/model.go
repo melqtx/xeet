@@ -23,6 +23,9 @@ var (
 	pink     = lipgloss.Color("#F5C2E7")
 	muted    = lipgloss.Color("#7D8590")
 	red      = lipgloss.Color("#FF757F")
+	yellow   = lipgloss.Color("#E0AF68")
+	bright   = lipgloss.Color("#C0CAF5")
+	dim      = lipgloss.Color("#A9B1D6")
 )
 
 type ActionKind int
@@ -43,6 +46,8 @@ const (
 
 type Model struct {
 	width, height int
+	imageMode     imageMode
+	imageNote     string
 	posts         []api.TimelinePost
 	cursor        string
 	selected      int
@@ -52,11 +57,15 @@ type Model struct {
 	loadingMore   bool
 	refreshing    bool
 	help          bool
+	expanded      bool
+	zoom          bool
 	action        Action
 	clipboardOK   bool
 	toast         string
+	toastSeq      int
 	err           error
 	liking        map[string]bool
+	previews      map[string]previewState
 	spinner       spinner.Model
 	viewport      viewport.Model
 
@@ -89,7 +98,48 @@ type replyResultMsg struct {
 	err error
 }
 
+type toastClearMsg struct{ seq int }
+
+type clockTickMsg time.Time
+
+func clockTick() tea.Cmd {
+	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg { return clockTickMsg(t) })
+}
+
+func (m *Model) showToast(text string) tea.Cmd {
+	m.toast = text
+	m.toastSeq++
+	seq := m.toastSeq
+	return tea.Tick(4*time.Second, func(time.Time) tea.Msg { return toastClearMsg{seq} })
+}
+
+type previewState struct {
+	content    string
+	nativePath string
+	nativeData string
+	imageID    uint32
+	columns    int
+	rows       int
+	loading    bool
+	err        error
+}
+
+type previewMsg struct {
+	postID     string
+	content    string
+	nativePath string
+	nativeData string
+	imageID    uint32
+	columns    int
+	rows       int
+	err        error
+}
+
 func New() Model {
+	return NewWithImageMode("auto")
+}
+
+func NewWithImageMode(requested string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	vp := viewport.New(72, 18)
@@ -100,24 +150,37 @@ func New() Model {
 	editor.ShowLineNumbers = false
 	editor.SetWidth(60)
 	editor.SetHeight(6)
+	mode, note := resolveImageMode(requested)
 	return Model{
-		width: 80, height: 24, loading: true, liking: map[string]bool{},
+		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
+		liking: map[string]bool{}, previews: map[string]previewState{},
 		spinner: s, viewport: vp, replyEditor: editor,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchPage("", false))
+	return tea.Batch(m.spinner.Tick, fetchPage("", false), clockTick())
 }
 
-func Run() (Action, error) {
-	m := New()
+func Run(images string) (Action, error) {
+	m := NewWithImageMode(images)
+	// Auto-detected native mode is a claim, not a capability: multiplexers
+	// like cmux inherit ghostty's TERM without reliably rendering graphics.
+	// Confirm with the terminal itself; --images native skips the probe.
+	if m.imageMode == imageModeNative && images != "native" {
+		if err := probeNativeGraphics(); err != nil {
+			m.imageMode = imageModeANSI
+			m.imageNote = "terminal didn't confirm kitty graphics — using ansi (--images native to force)"
+		}
+	}
 	m.clipboardOK = clip.Init() == nil
 	result, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	if err != nil {
 		return Action{}, err
 	}
-	return result.(Model).action, nil
+	final := result.(Model)
+	final.cleanupPreviews()
+	return final.action, nil
 }
 
 func fetchPage(cursor string, more bool) tea.Cmd {
@@ -180,14 +243,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = size.Width, size.Height
 		m.resize()
+		return m, m.imageRepaint()
+	}
+	if _, ok := msg.(clockTickMsg); ok {
+		if m.mode == modeFeed && !m.help {
+			m.syncViewport()
+		}
+		return m, clockTick()
+	}
+	if clear, ok := msg.(toastClearMsg); ok {
+		if clear.seq == m.toastSeq {
+			m.toast = ""
+		}
 		return m, nil
 	}
 
 	if m.help {
 		if key, ok := msg.(tea.KeyMsg); ok && (key.String() == "?" || key.String() == "esc" || key.String() == "enter") {
 			m.help = false
+			return m, m.imageRepaint()
 		}
 		return m, nil
+	}
+	if m.zoom {
+		// Keys close the zoom view; everything else (preview arrivals,
+		// spinner ticks) flows through to the main handler below.
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "i", "esc", "q", "enter":
+				m.zoom = false
+				return m, m.imageRepaint()
+			}
+			return m, nil
+		}
 	}
 	if m.mode == modeReply {
 		return m.updateReply(msg)
@@ -195,7 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
-		if m.loading || m.loadingMore || m.refreshing {
+		if m.loading || m.loadingMore || m.refreshing || m.zoomLoading() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -209,52 +297,80 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
-		selectedID := ""
-		if post, ok := m.currentPost(); ok {
-			selectedID = post.ID
-		}
-		if !msg.more {
-			m.posts = nil
-		}
 		seen := make(map[string]bool, len(m.posts))
 		for _, post := range m.posts {
 			seen[post.ID] = true
 		}
-		for _, post := range msg.page.Posts {
-			if !seen[post.ID] {
-				m.posts = append(m.posts, post)
-				seen[post.ID] = true
+		var toast tea.Cmd
+		if !msg.more && len(m.posts) > 0 {
+			// In-place refresh: unseen posts stack on top, the selection stays
+			// on the same post, and the old cursor keeps pagination intact.
+			var fresh []api.TimelinePost
+			for _, post := range msg.page.Posts {
+				if !seen[post.ID] {
+					fresh = append(fresh, post)
+				}
 			}
+			if len(fresh) > 0 {
+				m.posts = append(fresh, m.posts...)
+				m.selected += len(fresh)
+				label := "posts"
+				if len(fresh) == 1 {
+					label = "post"
+				}
+				toast = m.showToast(fmt.Sprintf("%d new %s · g jumps to top", len(fresh), label))
+			} else {
+				toast = m.showToast("all caught up")
+			}
+		} else {
+			selectedID := ""
+			if post, ok := m.currentPost(); ok {
+				selectedID = post.ID
+			}
+			for _, post := range msg.page.Posts {
+				if !seen[post.ID] {
+					m.posts = append(m.posts, post)
+					seen[post.ID] = true
+				}
+			}
+			m.cursor = msg.page.Cursor
+			m.selected = indexOfPost(m.posts, selectedID)
+			if m.selected < 0 {
+				m.selected = 0
+			}
+			m.toast = ""
 		}
-		m.cursor = msg.page.Cursor
-		m.selected = indexOfPost(m.posts, selectedID)
-		if m.selected < 0 {
-			m.selected = 0
-		}
-		m.toast = ""
 		m.syncViewport()
 		m.ensureSelectedVisible()
-		return m, nil
+		return m, m.imageRepaint(m.requestPreviews(), toast)
 	case actionMsg:
 		if msg.err != nil {
-			m.toast = msg.err.Error()
-		} else {
-			m.toast = msg.message
+			return m, m.showToast(msg.err.Error())
 		}
-		return m, nil
+		return m, m.showToast(msg.message)
+	case previewMsg:
+		m.previews[msg.postID] = previewState{
+			content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
+			columns: msg.columns, rows: msg.rows, err: msg.err,
+		}
+		m.evictDistantPreviews()
+		m.syncViewport()
+		m.ensureSelectedVisible()
+		return m, m.imageRepaint()
 	case likeMsg:
 		delete(m.liking, msg.id)
+		var toast tea.Cmd
 		if msg.err != nil {
 			m.applyLike(msg.id, !msg.liked)
-			m.toast = "couldn't update like"
+			toast = m.showToast("couldn't update like")
 		} else if msg.liked {
-			m.toast = "liked ♥"
+			toast = m.showToast("liked ♥")
 		} else {
-			m.toast = "like removed"
+			toast = m.showToast("like removed")
 		}
 		m.syncViewport()
 		m.ensureSelectedVisible()
-		return m, nil
+		return m, toast
 	}
 
 	key, ok := msg.(tea.KeyMsg)
@@ -262,38 +378,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key.String() {
-	case "q", "esc", "ctrl+c":
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		if m.expanded {
+			m.expanded = false
+			m.syncViewport()
+			m.ensureSelectedVisible()
+			return m, m.imageRepaint()
+		}
 		return m, tea.Quit
 	case "?", "f1":
 		m.help = true
+		return m, m.imageRepaint()
 	case "j", "down":
-		m.toast = ""
-		if m.selected < len(m.posts)-1 {
-			m.selected++
-			m.syncViewport()
-			m.ensureSelectedVisible()
-		}
-		if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
-			m.loadingMore = true
-			return m, tea.Batch(m.spinner.Tick, fetchPage(m.cursor, true))
-		}
+		m.moveSelection(m.selected + 1)
+		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMore())
 	case "k", "up":
-		m.toast = ""
-		if m.selected > 0 {
-			m.selected--
-			m.syncViewport()
-			m.ensureSelectedVisible()
-		}
+		m.moveSelection(m.selected - 1)
+		return m, m.imageRepaint(m.requestPreviews())
+	case "ctrl+d":
+		m.moveSelection(m.selected + 5)
+		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMore())
+	case "ctrl+u":
+		m.moveSelection(m.selected - 5)
+		return m, m.imageRepaint(m.requestPreviews())
 	case "g", "home":
-		m.selected = 0
-		m.syncViewport()
-		m.ensureSelectedVisible()
+		m.moveSelection(0)
+		return m, m.imageRepaint(m.requestPreviews())
 	case "G", "end":
-		if len(m.posts) > 0 {
-			m.selected = len(m.posts) - 1
-			m.syncViewport()
-			m.ensureSelectedVisible()
-		}
+		m.moveSelection(len(m.posts) - 1)
+		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMore())
+	case "ctrl+l":
+		m.syncViewport()
+		return m, func() tea.Msg { return tea.ClearScreen() }
 	case "R", "ctrl+r":
 		if len(m.posts) == 0 {
 			m.loading = true
@@ -301,7 +419,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshing = true
 		}
 		m.err = nil
-		return m, tea.Batch(m.spinner.Tick, fetchPage("", false))
+		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPage("", false)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			m.mode = modeReply
@@ -309,23 +427,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replyErr = nil
 			m.replyEditor.Reset()
 			m.resize()
-			return m, m.replyEditor.Focus()
+			return m, m.imageRepaint(m.replyEditor.Focus())
 		}
 	case "P", "c":
 		m.action = Action{Kind: ActionCompose}
 		return m, tea.Quit
-	case "o", "enter":
+	case "enter":
+		if len(m.posts) > 0 {
+			m.expanded = !m.expanded
+			m.syncViewport()
+			m.ensureSelectedVisible()
+			return m, m.imageRepaint()
+		}
+	case "o":
 		if post, ok := m.currentPost(); ok {
 			return m, openURL(postURL(post))
 		}
 	case "i":
-		if post, ok := m.currentPost(); ok {
-			if len(post.Media) == 0 {
-				m.toast = "this post has no viewable images"
-				return m, nil
+		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
+			if m.imageMode == imageModeOff {
+				return m, m.showToast("image previews are off (--images)")
 			}
-			m.toast = "opening image viewer..."
-			return m, openPostMedia(post)
+			m.zoom = true
+			if zoom := m.requestZoom(); zoom != nil {
+				return m, m.imageRepaint(tea.Batch(m.spinner.Tick, zoom))
+			}
+			return m, m.imageRepaint()
 		}
 	case "l":
 		if post, ok := m.currentPost(); ok && !m.liking[post.ID] {
@@ -339,17 +466,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "y":
 		if post, ok := m.currentPost(); ok {
 			if !m.clipboardOK {
-				m.toast = "clipboard unavailable"
-				return m, nil
+				return m, m.showToast("clipboard unavailable")
 			}
 			if err := clip.WriteText(postURL(post)); err != nil {
-				m.toast = "clipboard unavailable; open the post with Enter"
-				return m, nil
+				return m, m.showToast("clipboard unavailable; open the post with o")
 			}
-			m.toast = "link copied"
+			return m, m.showToast("link copied")
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) moveSelection(target int) {
+	if len(m.posts) == 0 {
+		return
+	}
+	target = max(0, min(len(m.posts)-1, target))
+	if target != m.selected {
+		m.selected = target
+		m.expanded = false
+	}
+	m.toast = ""
+	m.syncViewport()
+	m.ensureSelectedVisible()
+}
+
+func (m *Model) maybeLoadMore() tea.Cmd {
+	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
+		m.loadingMore = true
+		return tea.Batch(m.spinner.Tick, fetchPage(m.cursor, true))
+	}
+	return nil
 }
 
 func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -369,10 +516,10 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeFeed
 		m.replyEditor.Blur()
 		m.replyEditor.Reset()
-		m.toast = "reply sent ♥"
+		toast := m.showToast("reply sent ♥")
 		m.syncViewport()
 		m.ensureSelectedVisible()
-		return m, nil
+		return m, m.imageRepaint(toast)
 	}
 	key, ok := msg.(tea.KeyMsg)
 	if ok {
@@ -385,7 +532,7 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replyEditor.Blur()
 			m.replyErr = nil
 			m.syncViewport()
-			return m, nil
+			return m, m.imageRepaint()
 		case "enter":
 			if strings.TrimSpace(m.replyEditor.Value()) == "" {
 				m.replyErr = fmt.Errorf("write a reply first")
@@ -403,6 +550,22 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.replyEditor, cmd = m.replyEditor.Update(msg)
 	return m, cmd
+}
+
+func (m Model) imageRepaint(cmds ...tea.Cmd) tea.Cmd {
+	filtered := make([]tea.Cmd, 0, len(cmds)+1)
+	for _, cmd := range cmds {
+		if cmd != nil {
+			filtered = append(filtered, cmd)
+		}
+	}
+	if m.imageMode == imageModeWezTerm {
+		filtered = append(filtered, func() tea.Msg { return tea.ClearScreen() })
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return tea.Batch(filtered...)
 }
 
 func (m *Model) resize() {
@@ -430,13 +593,23 @@ func (m *Model) ensureSelectedVisible() {
 	if m.selected < 0 || m.selected >= len(m.starts) {
 		return
 	}
+	// Keep a small margin above and below the selection so movement never
+	// pins it to the viewport edge (vim's scrolloff).
+	const margin = 2
 	start := m.starts[m.selected]
 	end := m.ends[m.selected]
-	if start < m.viewport.YOffset {
-		m.viewport.YOffset = start
-	} else if end >= m.viewport.YOffset+m.viewport.Height {
-		m.viewport.YOffset = max(0, end-m.viewport.Height+1)
+	top := m.viewport.YOffset
+	if start-margin < top {
+		top = max(0, start-margin)
+	} else if end+margin >= top+m.viewport.Height {
+		top = end + margin - m.viewport.Height + 1
 	}
+	// A post taller than the viewport anchors to its own first line.
+	if start < top {
+		top = start
+	}
+	maxTop := max(0, m.ends[len(m.ends)-1]+1-m.viewport.Height)
+	m.viewport.YOffset = max(0, min(top, maxTop))
 }
 
 func (m Model) currentPost() (api.TimelinePost, bool) {

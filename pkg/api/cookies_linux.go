@@ -14,7 +14,6 @@ import (
 	"github.com/browserutils/kooky/browser/brave"
 	"github.com/browserutils/kooky/browser/chrome"
 	"github.com/browserutils/kooky/browser/chromium"
-	"github.com/browserutils/kooky/browser/edge"
 )
 
 type chromiumCookieReader func(context.Context, string, ...kooky.Filter) ([]*kooky.Cookie, error)
@@ -33,20 +32,13 @@ func chromiumBrowsers(home string) []chromiumBrowser {
 			filepath.Join(config, "google-chrome"),
 			filepath.Join(flatpak, "com.google.Chrome", "config", "google-chrome"),
 		}, chrome.ReadCookies},
-		{"Chrome Beta", []string{filepath.Join(config, "google-chrome-beta")}, chrome.ReadCookies},
-		{"Chromium", []string{
-			filepath.Join(config, "chromium"),
-			filepath.Join(home, "snap", "chromium", "common", "chromium"),
-			filepath.Join(flatpak, "org.chromium.Chromium", "config", "chromium"),
+		{"Helium", []string{
+			filepath.Join(config, "net.imput.helium"),
 		}, chromium.ReadCookies},
 		{"Brave", []string{
 			filepath.Join(config, "BraveSoftware", "Brave-Browser"),
 			filepath.Join(flatpak, "com.brave.Browser", "config", "BraveSoftware", "Brave-Browser"),
 		}, brave.ReadCookies},
-		{"Edge", []string{
-			filepath.Join(config, "microsoft-edge"),
-			filepath.Join(config, "microsoft-edge-beta"),
-		}, edge.ReadCookies},
 	}
 }
 
@@ -74,15 +66,16 @@ func DetectBrowsers() []string {
 	if err != nil {
 		return nil
 	}
+	chromium := chromiumBrowsers(home)
+	gecko := geckoBrowsers(home)
 	var names []string
-	for _, browser := range chromiumBrowsers(home) {
-		if len(browser.cookieDBs()) > 0 {
-			names = append(names, browser.name)
+	for _, name := range SupportedBrowsers() {
+		if browser, ok := findChromiumBrowser(name, chromium); ok && len(browser.cookieDBs()) > 0 {
+			names = append(names, name)
+			continue
 		}
-	}
-	for _, browser := range geckoBrowsers(home) {
-		if browser.hasXSession() {
-			names = append(names, browser.name)
+		if browser, ok := findGeckoBrowser(name, gecko); ok && browser.hasXSession() {
+			names = append(names, name)
 		}
 	}
 	return names
@@ -96,12 +89,19 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 	if browser, ok := findGeckoBrowser(name, geckoBrowsers(home)); ok {
 		return importGeckoSession(browser)
 	}
-	for _, browser := range chromiumBrowsers(home) {
-		if browser.name == name {
-			return importChromiumSession(browser)
-		}
+	if browser, ok := findChromiumBrowser(name, chromiumBrowsers(home)); ok {
+		return importChromiumSession(browser)
 	}
 	return nil, "", fmt.Errorf("unknown browser %q", name)
+}
+
+func findChromiumBrowser(name string, browsers []chromiumBrowser) (chromiumBrowser, bool) {
+	for _, browser := range browsers {
+		if browser.name == name {
+			return browser, true
+		}
+	}
+	return chromiumBrowser{}, false
 }
 
 func (b chromiumBrowser) cookieDBs() []string {

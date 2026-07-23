@@ -13,12 +13,14 @@ var (
 	appVersion   string
 	appCommit    string
 	appBuildTime string
+	barebones    bool
+	composeOnly  bool
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "xeet",
-	Short: "Terminal interface for posting to X.com",
-	RunE:  runTUI,
+	Short: "Terminal interface for browsing and posting to X.com",
+	RunE:  runRoot,
 }
 
 func Execute() error { return rootCmd.Execute() }
@@ -31,9 +33,12 @@ func SetVersion(version, commit, buildTime string) {
 
 func init() {
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose output")
+	rootCmd.Flags().BoolVar(&barebones, "barebones", false, "open a text-only timeline without image previews")
+	rootCmd.Flags().BoolVar(&composeOnly, "compose", false, "open only the post composer")
+	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
 }
 
-func runTUI(cmd *cobra.Command, args []string) error {
+func runRoot(cmd *cobra.Command, args []string) error {
 	configMgr, err := config.NewConfigManager()
 	if err == nil {
 		if cfg, loadErr := configMgr.Load(); loadErr == nil && cfg.AuthToken == "" {
@@ -42,5 +47,13 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
-	return tui.Run()
+
+	if composeOnly {
+		return tui.Run()
+	}
+	imageMode := "auto"
+	if barebones {
+		imageMode = "off"
+	}
+	return runTimeline(imageMode)
 }

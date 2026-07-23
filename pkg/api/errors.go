@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -56,11 +57,20 @@ func rateLimitReset(header http.Header) time.Time {
 // mapGraphQLError turns a GraphQL-level error (returned inside an HTTP 200)
 // into the most useful Go error. Known X error codes get first-class handling.
 func mapGraphQLError(code int, message string) error {
+	lowerMessage := strings.ToLower(message)
+	if strings.Contains(lowerMessage, "looks like it might be automated") ||
+		strings.Contains(lowerMessage, "protect our users from spam") {
+		return fmt.Errorf("x blocked this action as suspected automation — don't keep retrying; use x.com in your browser and wait before trying xeet again")
+	}
 	switch code {
 	case 32, 220: // could not authenticate / credentials no longer active
 		return fmt.Errorf("%w (x: %s)", ErrSessionExpired, message)
 	case 88:
 		return &RateLimitError{}
+	case 187:
+		return fmt.Errorf("duplicate post — X already has the same text; change it before posting again")
+	case 226:
+		return fmt.Errorf("x blocked this action as suspected automation — don't keep retrying; use x.com in your browser and wait before trying xeet again")
 	case 326:
 		return fmt.Errorf("account temporarily locked — log into x.com in your browser to unlock it (x: %s)", message)
 	}
