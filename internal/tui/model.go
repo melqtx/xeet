@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"xeet/internal/clip"
 	"xeet/internal/media"
 	"xeet/pkg/api"
 	"xeet/pkg/config"
@@ -13,7 +14,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"golang.design/x/clipboard"
 )
 
 type screen int
@@ -43,19 +43,21 @@ type clipboardReader interface {
 	ReadText() string
 }
 
-type systemClipboard struct{ ready bool }
+type systemClipboard struct{ initErr error }
+
+func (c systemClipboard) ClipboardError() error { return c.initErr }
 
 func (c systemClipboard) ReadImage() []byte {
-	if !c.ready {
+	if c.initErr != nil {
 		return nil
 	}
-	return clipboard.Read(clipboard.FmtImage)
+	return clip.ReadImage()
 }
 func (c systemClipboard) ReadText() string {
-	if !c.ready {
+	if c.initErr != nil {
 		return ""
 	}
-	return string(clipboard.Read(clipboard.FmtText))
+	return clip.ReadText()
 }
 
 type Model struct {
@@ -80,7 +82,7 @@ type Model struct {
 
 func New(clip clipboardReader) Model {
 	if clip == nil {
-		clip = systemClipboard{}
+		clip = systemClipboard{initErr: fmt.Errorf("clipboard unavailable")}
 	}
 	editor := textarea.New()
 	editor.Placeholder = "what are you thinking?"
@@ -105,7 +107,7 @@ func New(clip clipboardReader) Model {
 func (m Model) Init() tea.Cmd { return textarea.Blink }
 
 func Run() error {
-	m := New(systemClipboard{ready: clipboard.Init() == nil})
+	m := New(systemClipboard{initErr: clip.Init()})
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
@@ -131,6 +133,9 @@ type postResultMsg struct {
 
 func readClipboard(clip clipboardReader) tea.Cmd {
 	return func() tea.Msg {
+		if status, ok := clip.(interface{ ClipboardError() error }); ok && status.ClipboardError() != nil {
+			return clipboardMsg{err: fmt.Errorf("system clipboard unavailable; paste text normally or use Ctrl+O to attach an image file: %w", status.ClipboardError())}
+		}
 		if data := clip.ReadImage(); len(data) > 0 {
 			a, err := media.FromClipboard(data)
 			return clipboardMsg{attachment: &a, err: err}

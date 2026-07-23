@@ -224,3 +224,45 @@ func TestErrorsNeverLeakCookies(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifySessionExpired(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return response(http.StatusUnauthorized, `{}`), nil
+	})
+	_, err := client.Verify(context.Background())
+	if !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("got %v, want ErrSessionExpired", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("verification tried %d endpoints after auth rejection, want 1", attempts)
+	}
+}
+
+func TestVerifyRetriesTransientFailure(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return response(http.StatusServiceUnavailable, `temporary`), nil
+		}
+		return response(http.StatusOK, `{"screen_name":"xeet_user"}`), nil
+	})
+	handle, err := client.Verify(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handle != "xeet_user" || attempts != 2 {
+		t.Fatalf("handle=%q attempts=%d", handle, attempts)
+	}
+}
+
+func TestVerifyRejectsEmptyHandle(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{}`), nil
+	})
+	if _, err := client.Verify(context.Background()); err == nil {
+		t.Fatal("expected empty handle response to fail verification")
+	}
+}

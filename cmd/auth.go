@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"xeet/pkg/api"
 	"xeet/pkg/config"
@@ -27,7 +28,7 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	browsers := api.DetectBrowsers()
 	if len(browsers) == 0 {
 		return fmt.Errorf("couldn't find a logged-in x.com session\n" +
-			"Open x.com in your browser (Chrome, Arc, Brave, Dia, or Edge), log in, then run 'xeet auth' again")
+			"Open x.com in a supported browser (Chrome, Chromium, Brave, Edge, Firefox, Zen, Arc, or Dia), log in, then run 'xeet auth' again")
 	}
 
 	// One session found: use it. More than one: ask which.
@@ -44,7 +45,7 @@ func runAuth(cmd *cobra.Command, args []string) error {
 		browserName = chosen
 	}
 
-	fmt.Printf("Reading your session from %s (macOS may ask to allow Keychain access — click Allow)...\n", browserName)
+	fmt.Printf("Reading your session from %s (your OS may ask to unlock its keyring)...\n", browserName)
 	result, browser, err := api.ImportBrowserSession(browserName)
 	if err != nil {
 		return err
@@ -58,17 +59,21 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		cfg = &config.Config{}
 	}
-	cfg.AuthToken = result.AuthToken
-	cfg.CT0 = result.CT0
-	if err := configMgr.Save(cfg); err != nil {
+	// Verify before saving so a stale or wrong browser profile cannot overwrite
+	// an existing working session.
+	candidate := *cfg
+	candidate.AuthToken = result.AuthToken
+	candidate.CT0 = result.CT0
+	ctx, cancel := context.WithTimeout(cmd.Context(), 45*time.Second)
+	defer cancel()
+	handle, err := api.NewWebClient(&candidate).Verify(ctx)
+	if err != nil {
+		return fmt.Errorf("session found in %s but X rejected verification: %w", browser, err)
+	}
+	if err := configMgr.Save(&candidate); err != nil {
 		return err
 	}
 
-	handle, err := api.NewWebClient(cfg).Verify(context.Background())
-	if err != nil {
-		fmt.Printf("✓ Connected via %s. Run `xeet` to post.\n", browser)
-		return nil
-	}
-	fmt.Printf("✓ Connected as @%s. Run `xeet` to post.\n", handle)
+	fmt.Printf("✓ Connected as @%s via %s. Run `xeet` to post.\n", handle, browser)
 	return nil
 }

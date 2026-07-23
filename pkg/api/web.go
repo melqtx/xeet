@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -454,34 +455,41 @@ func (c *WebClient) Verify(ctx context.Context) (string, error) {
 	}
 
 	var lastErr error
-	for _, ep := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep, nil)
+	for _, endpoint := range endpoints {
+		res, err := c.send(ctx, func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				return nil, err
+			}
+			c.setHeaders(req)
+			return req, nil
+		}, true, 2<<20)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		c.setHeaders(req)
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
+		if err := statusToError(res.status, res.header); err != nil {
+			return "", err
 		}
-		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, ep, truncate(respBody))
+		if res.status != http.StatusOK {
+			lastErr = fmt.Errorf("HTTP %d from %s: %s", res.status, endpoint, truncate(res.body))
 			continue
 		}
 		var settings struct {
 			ScreenName string `json:"screen_name"`
 		}
-		if err := json.Unmarshal(respBody, &settings); err != nil {
-			lastErr = fmt.Errorf("decode settings from %s: %w", ep, err)
+		if err := json.Unmarshal(res.body, &settings); err != nil {
+			lastErr = fmt.Errorf("decode settings from %s: %w", endpoint, err)
+			continue
+		}
+		if settings.ScreenName == "" {
+			lastErr = fmt.Errorf("settings response from %s had no account handle", endpoint)
 			continue
 		}
 		return settings.ScreenName, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no verification endpoint succeeded")
 	}
 	return "", lastErr
 }

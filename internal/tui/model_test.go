@@ -6,6 +6,7 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"strings"
 	"testing"
 
 	"xeet/internal/media"
@@ -172,5 +173,24 @@ func TestDraftClearedOnCancelNotOnFailure(t *testing.T) {
 	}
 	if m.lastErr != nil {
 		t.Fatalf("cancel should not surface an error, got %v", m.lastErr)
+	}
+}
+
+type unavailableClipboard struct{}
+
+func (unavailableClipboard) ReadImage() []byte { return nil }
+func (unavailableClipboard) ReadText() string  { return "" }
+func (unavailableClipboard) ClipboardError() error {
+	return errors.New("no display server")
+}
+
+func TestClipboardUnavailableKeepsFileAttachPath(t *testing.T) {
+	msg := readClipboard(unavailableClipboard{})().(clipboardMsg)
+	if msg.err == nil {
+		t.Fatal("expected clipboard error")
+	}
+	message := msg.err.Error()
+	if !strings.Contains(message, "Ctrl+O") || !strings.Contains(message, "paste text normally") {
+		t.Fatalf("clipboard error is not actionable: %q", message)
 	}
 }

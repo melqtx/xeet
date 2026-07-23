@@ -49,7 +49,15 @@ func chromiumBrowsers(home string) []chromiumBrowser {
 	}
 }
 
-// DetectBrowsers returns the names of installed Chromium browsers that hold a
+func geckoBrowsers(home string) []geckoBrowser {
+	appSup := filepath.Join(home, "Library", "Application Support")
+	return []geckoBrowser{
+		{"Firefox", []string{filepath.Join(appSup, "Firefox", "Profiles")}},
+		{"Zen", []string{filepath.Join(appSup, "zen", "Profiles")}},
+	}
+}
+
+// DetectBrowsers returns the names of installed browsers that may hold a
 // logged-in x.com session, in preference order. This only checks that the
 // auth_token cookie row exists — no Keychain access, no decryption — so it's
 // cheap and prompt-free.
@@ -60,6 +68,11 @@ func DetectBrowsers() []string {
 	}
 	var names []string
 	for _, b := range chromiumBrowsers(home) {
+		if b.hasXSession() {
+			names = append(names, b.name)
+		}
+	}
+	for _, b := range geckoBrowsers(home) {
 		if b.hasXSession() {
 			names = append(names, b.name)
 		}
@@ -96,6 +109,9 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", err
+	}
+	if browser, ok := findGeckoBrowser(name, geckoBrowsers(home)); ok {
+		return importGeckoSession(browser)
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return nil, "", fmt.Errorf("the 'sqlite3' command isn't available (needed to read the cookie database)")
@@ -293,31 +309,4 @@ func isPrintableASCII(b []byte) bool {
 		}
 	}
 	return true
-}
-
-func copyFileBytes(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o600)
-}
-
-// copyDB copies a Cookies database (and its WAL/shared-memory sidecars) into a
-// fresh temp dir so we never contend with the running browser's lock. The
-// caller is responsible for removing the returned dir.
-func copyDB(dbPath string) (tmpDir, dst string, err error) {
-	tmpDir, err = os.MkdirTemp("", "xeet-cookies-")
-	if err != nil {
-		return "", "", err
-	}
-	dst = filepath.Join(tmpDir, "Cookies")
-	if err := copyFileBytes(dbPath, dst); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", err
-	}
-	for _, suf := range []string{"-wal", "-shm"} {
-		_ = copyFileBytes(dbPath+suf, dst+suf) // best effort; may not exist
-	}
-	return tmpDir, dst, nil
 }

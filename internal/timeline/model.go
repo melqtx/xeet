@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"xeet/internal/clip"
 	"xeet/pkg/api"
 	"xeet/pkg/config"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"golang.design/x/clipboard"
 )
 
 var (
@@ -114,7 +114,7 @@ func (m Model) Init() tea.Cmd {
 
 func Run() (Action, error) {
 	m := New()
-	m.clipboardOK = clipboard.Init() == nil
+	m.clipboardOK = clip.Init() == nil
 	result, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	if err != nil {
 		return Action{}, err
@@ -335,7 +335,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toast = "clipboard unavailable"
 				return m, nil
 			}
-			clipboard.Write(clipboard.FmtText, []byte(postURL(post)))
+			if err := clip.WriteText(postURL(post)); err != nil {
+				m.toast = "clipboard unavailable; open the post with Enter"
+				return m, nil
+			}
 			m.toast = "link copied"
 		}
 	}
