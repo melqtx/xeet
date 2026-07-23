@@ -159,9 +159,9 @@ Images are prefetched around your position in the feed and rendered inline
 for nearby posts, so scrolling lands on already-loaded previews. Videos and
 GIFs show their poster frame with a `▶` chip. Press `?` to see which image
 renderer is active and why. Direct Ghostty and Kitty sessions use Kitty Unicode-placeholder
-images. WezTerm uses its native iTerm2 inline-image protocol. Zellij and tmux
-use the portable ANSI renderer because they do not reliably pass these graphics
-protocols through.
+images. iTerm2 and WezTerm use the iTerm2 inline-image protocol. Zellij and
+tmux use the portable ANSI renderer because they do not reliably pass these
+graphics protocols through.
 
 In auto mode xeet verifies Kitty graphics before committing to them: apps
 that merely embed libghostty (cmux, for one) inherit a ghostty `TERM` but

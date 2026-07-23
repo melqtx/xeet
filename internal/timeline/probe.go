@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	// probeImageID is only referenced by the startup query; real previews
-	// use the 1..255 range, so the probe can never collide with them.
+	// probeImageID is reserved by previewImageID and cannot collide with a
+	// real timeline preview.
 	probeImageID = 4242
 	probeTimeout = 2 * time.Second
 )

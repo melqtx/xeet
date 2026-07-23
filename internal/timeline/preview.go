@@ -46,7 +46,7 @@ type imageMode string
 
 const (
 	imageModeNative  imageMode = "native"
-	imageModeWezTerm imageMode = "wezterm"
+	imageModeWezTerm imageMode = "iterm2"
 	imageModeANSI    imageMode = "ansi"
 	imageModeOff     imageMode = "off"
 )
@@ -66,11 +66,16 @@ func resolveImageMode(requested string) (imageMode, string) {
 	if os.Getenv("ZELLIJ") != "" || os.Getenv("TMUX") != "" {
 		return imageModeANSI, "tmux/zellij blocks native graphics; run xeet directly in the terminal for sharp images"
 	}
-	program := strings.ToLower(os.Getenv("TERM_PROGRAM"))
+	program := strings.ToLower(strings.TrimSpace(os.Getenv("TERM_PROGRAM")))
 	term := strings.ToLower(os.Getenv("TERM"))
-	// WezTerm does not support Kitty Unicode placeholders, but it does support
-	// the iTerm2 inline-image protocol through its own native renderer.
-	if program == "wezterm" || strings.Contains(term, "wezterm") {
+	lcTerminal := strings.ToLower(os.Getenv("LC_TERMINAL"))
+	// WezTerm and iTerm2 both implement the iTerm2 inline-image protocol.
+	// Check their terminal-specific variables too because TERM_PROGRAM is not
+	// consistently preserved by shells and launchers.
+	if program == "wezterm" || program == "iterm.app" || program == "iterm2" ||
+		strings.Contains(term, "wezterm") || strings.Contains(lcTerminal, "iterm") ||
+		os.Getenv("WEZTERM_PANE") != "" || os.Getenv("WEZTERM_EXECUTABLE") != "" ||
+		os.Getenv("ITERM_SESSION_ID") != "" {
 		return imageModeWezTerm, ""
 	}
 	if program == "ghostty" || os.Getenv("KITTY_WINDOW_ID") != "" || strings.Contains(term, "ghostty") || strings.Contains(term, "kitty") {
@@ -103,6 +108,20 @@ func (m *Model) requestPreviews() tea.Cmd {
 	selectedChanged := false
 	from := max(0, m.selected-prefetchBehind)
 	to := min(len(m.posts)-1, m.selected+prefetchAhead)
+	if m.imageMode == imageModeNative || m.imageMode == imageModeWezTerm {
+		// Native terminals can render every image currently visible without the
+		// large text payload of ANSI previews. Include the viewport so images in
+		// tall windows load before the cursor lands directly on their post.
+		for i := range m.posts {
+			if i >= len(m.starts) || i >= len(m.ends) {
+				break
+			}
+			if m.ends[i] >= m.viewport.YOffset && m.starts[i] < m.viewport.YOffset+m.viewport.Height {
+				from = min(from, max(0, i-1))
+				to = max(to, min(len(m.posts)-1, i+1))
+			}
+		}
+	}
 	for i := from; i <= to; i++ {
 		post := m.posts[i]
 		if len(post.Media) == 0 {
@@ -337,10 +356,21 @@ func nativeCellSize(bounds image.Rectangle, maxColumns, maxRows int) (int, int) 
 func previewImageID(postID string) uint32 {
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(postID))
-	// Indexed foreground colors encode the image ID in Unicode placeholders.
-	// Keep IDs in the unambiguous 1..255 range; only cached timeline previews
-	// coexist, so collisions are exceptionally unlikely and harmless.
-	return hash.Sum32()%255 + 1
+	// Kitty placeholders support a 24-bit image ID through truecolor
+	// foreground components. Restricting IDs to the 8-bit palette caused
+	// frequent collisions as timeline previews accumulated, letting a later
+	// transmission replace an earlier post's image inside the terminal.
+	id := hash.Sum32() & 0xFFFFFF
+	if id == 0 || id == probeImageID {
+		id++
+	}
+	return id
+}
+
+func kittyImageColor(imageID uint32) (red, green, blue uint32) {
+	// Kitty interprets the RGB foreground value as the lower 24 bits of the
+	// image ID, in normal hexadecimal color order.
+	return (imageID >> 16) & 0xFF, (imageID >> 8) & 0xFF, imageID & 0xFF
 }
 
 func kittyTransmit(path string, imageID uint32) string {
@@ -354,10 +384,6 @@ func kittyVirtualPlacement(imageID uint32, columns, rows int) string {
 
 func wezTermDisplay(encoded string, columns, rows int) string {
 	return fmt.Sprintf("\x1b]1337;File=width=%d;height=%d;inline=1;doNotMoveCursor=1:%s\x1b\\", columns, rows, encoded)
-}
-
-func kittyDelete(imageID uint32) string {
-	return fmt.Sprintf("\x1b_Ga=d,d=i,i=%d,q=2\x1b\\", imageID)
 }
 
 var kittyDiacritics = []rune{
@@ -379,8 +405,9 @@ func (m Model) nativePreviewBlock(preview previewState) string {
 	rows := min(preview.rows, len(kittyDiacritics))
 	var output strings.Builder
 	output.WriteString(kittyTransmit(preview.nativePath, preview.imageID))
+	red, green, blue := kittyImageColor(preview.imageID)
 	for row := 0; row < rows; row++ {
-		fmt.Fprintf(&output, "\x1b[38;5;%dm", preview.imageID)
+		fmt.Fprintf(&output, "\x1b[38;2;%d;%d;%dm", red, green, blue)
 		for column := 0; column < columns; column++ {
 			output.WriteRune('\U0010EEEE')
 			output.WriteRune(kittyDiacritics[row])
@@ -418,19 +445,6 @@ func (m Model) wezTermPreviewBlock(preview previewState) string {
 		}
 	}
 	return output.String()
-}
-
-func (m Model) clearNativeImages() string {
-	if m.imageMode != imageModeNative {
-		return ""
-	}
-	var commands strings.Builder
-	for _, preview := range m.previews {
-		if preview.nativePath != "" {
-			commands.WriteString(kittyDelete(preview.imageID))
-		}
-	}
-	return commands.String()
 }
 
 func (m *Model) cleanupPreviews() {

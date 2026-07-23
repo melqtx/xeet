@@ -17,13 +17,13 @@ func (m Model) View() string {
 		return "loading…"
 	}
 	if m.help {
-		return m.clearNativeImages() + m.viewHelp()
+		return m.viewHelp()
 	}
 	if m.zoom {
-		return m.clearNativeImages() + m.viewZoom()
+		return m.viewZoom()
 	}
 	if m.mode == modeReply {
-		return m.clearNativeImages() + m.viewReply()
+		return m.viewReply()
 	}
 
 	footer := m.footer()
@@ -48,7 +48,7 @@ func (m Model) shell(center, footer string) string {
 	// Keep two columns clear on the right. Filling the terminal's final column
 	// triggers autowrap in multiplexers such as Zellij and corrupts frame diffs.
 	left := max(0, (m.width-w)/2)
-	return m.clearNativeImages() + lipgloss.NewStyle().MarginLeft(left).Render(body)
+	return lipgloss.NewStyle().MarginLeft(left).Render(body)
 }
 
 func (m Model) contentWidth() int {
@@ -109,7 +109,14 @@ func (m Model) renderFeedContent() (string, []int, []int) {
 	ends := make([]int, 0, len(m.posts))
 	line := 0
 	for i, post := range m.posts {
-		block := m.renderPost(post, i == m.selected, abs(i-m.selected) <= inlineImageRadius)
+		showImage := abs(i-m.selected) <= inlineImageRadius
+		if m.imageMode == imageModeNative || m.imageMode == imageModeWezTerm {
+			// Native previews are cheap escape sequences rather than large ANSI
+			// mosaics. Keep cached images in the feed so they do not disappear as
+			// soon as the selection moves away from their post.
+			showImage = true
+		}
+		block := m.renderPost(post, i == m.selected, showImage)
 		height := lipgloss.Height(block)
 		starts = append(starts, line)
 		ends = append(ends, line+height-1)

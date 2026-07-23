@@ -37,6 +37,10 @@ func TestNativeModeDetection(t *testing.T) {
 	t.Setenv("ZELLIJ", "")
 	t.Setenv("TMUX", "")
 	t.Setenv("__CFBundleIdentifier", "")
+	t.Setenv("LC_TERMINAL", "")
+	t.Setenv("ITERM_SESSION_ID", "")
+	t.Setenv("WEZTERM_PANE", "")
+	t.Setenv("WEZTERM_EXECUTABLE", "")
 	t.Setenv("TERM_PROGRAM", "ghostty")
 	if got, note := resolveImageMode("auto"); got != imageModeNative || note != "" {
 		t.Fatalf("direct Ghostty resolved to %q (%q)", got, note)
@@ -52,6 +56,20 @@ func TestNativeModeDetection(t *testing.T) {
 	}
 	if got, _ := resolveImageMode("native"); got != imageModeWezTerm {
 		t.Fatalf("WezTerm native mode resolved to %q", got)
+	}
+	t.Setenv("TERM_PROGRAM", "iTerm.app")
+	if got, _ := resolveImageMode("auto"); got != imageModeWezTerm {
+		t.Fatalf("iTerm2 resolved to %q", got)
+	}
+	t.Setenv("TERM_PROGRAM", "")
+	t.Setenv("LC_TERMINAL", "iTerm2")
+	if got, _ := resolveImageMode("auto"); got != imageModeWezTerm {
+		t.Fatalf("iTerm2 LC_TERMINAL resolved to %q", got)
+	}
+	t.Setenv("LC_TERMINAL", "")
+	t.Setenv("WEZTERM_PANE", "7")
+	if got, _ := resolveImageMode("auto"); got != imageModeWezTerm {
+		t.Fatalf("WezTerm pane resolved to %q", got)
 	}
 }
 
@@ -140,13 +158,37 @@ func TestZoomWithoutMediaIsIgnored(t *testing.T) {
 
 func TestKittyPlaceholderBlockOccupiesCells(t *testing.T) {
 	m := NewWithImageMode("native")
-	preview := previewState{nativePath: "/tmp/image.png", imageID: 42, columns: 30, rows: 8}
+	preview := previewState{nativePath: "/tmp/image.png", imageID: 0x030201, columns: 30, rows: 8}
 	block := m.nativePreviewBlock(preview)
 	if height := lipgloss.Height(block); height != 8 {
 		t.Fatalf("native block height=%d", height)
 	}
 	if width := lipgloss.Width(block); width != 30 {
 		t.Fatalf("native placeholder block width=%d", width)
+	}
+	if !strings.Contains(block, "\x1b[38;2;3;2;1m") {
+		t.Fatal("native placeholder does not encode its 24-bit image id as truecolor")
+	}
+}
+
+func TestPreviewImageIDsUse24Bits(t *testing.T) {
+	foundHighID := false
+	seen := make(map[uint32]bool)
+	for i := 0; i < 64; i++ {
+		id := previewImageID(fmt.Sprintf("post-%d", i))
+		if id == 0 || id == probeImageID {
+			t.Fatalf("reserved image id %d was assigned", id)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate image id %d in a small preview set", id)
+		}
+		seen[id] = true
+		if id > 255 {
+			foundHighID = true
+		}
+	}
+	if !foundHighID {
+		t.Fatal("preview ids are still restricted to the collision-prone 8-bit range")
 	}
 }
 
@@ -186,6 +228,38 @@ func TestWezTermTimelineFrameKeepsStableHeight(t *testing.T) {
 	}
 	if strings.Count(view, "Alice") != 1 {
 		t.Fatal("wezterm frame duplicated timeline rows")
+	}
+}
+
+func TestNativeFrameDoesNotDeleteCachedImages(t *testing.T) {
+	m := NewWithImageMode("native")
+	m.loading = false
+	m.posts = []api.TimelinePost{{
+		ID: "1", AuthorName: "Alice", Handle: "alice", Text: "image post",
+		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/a"}},
+	}}
+	m.previews["1"] = previewState{nativePath: "/tmp/image.png", imageID: 7, columns: 20, rows: 4}
+	m.width, m.height = 80, 24
+	m.resize()
+	view := m.View()
+	if strings.Contains(view, "\x1b_Ga=d") {
+		t.Fatal("normal frame deletes native images before Bubble Tea can repaint them")
+	}
+	if !strings.Contains(view, "\x1b_Ga=t") {
+		t.Fatal("normal frame did not transmit its native preview")
+	}
+}
+
+func TestNativeCachedPreviewStaysRenderedAwayFromSelection(t *testing.T) {
+	m := NewWithImageMode("native")
+	m.imageMode = imageModeNative
+	m.loading = false
+	m.posts = mediaPosts(inlineImageRadius + 3)
+	m.selected = len(m.posts) - 1
+	m.previews["p0"] = previewState{nativePath: "/tmp/image.png", imageID: 7, columns: 20, rows: 4}
+	content, _, _ := m.renderFeedContent()
+	if !strings.Contains(content, "\x1b_Ga=t") {
+		t.Fatal("cached native preview disappeared after selection moved away")
 	}
 }
 
@@ -247,6 +321,23 @@ func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 	// A second pass must not refetch what is already cached or in flight.
 	if cmd := m.requestPreviews(); cmd != nil {
 		t.Fatal("prefetch refetched cached previews")
+	}
+}
+
+func TestNativePrefetchIncludesVisiblePosts(t *testing.T) {
+	m := NewWithImageMode("native")
+	m.imageMode = imageModeNative
+	m.loading = false
+	m.posts = mediaPosts(20)
+	m.selected = 10
+	m.syncViewport()
+	m.viewport.YOffset = 0
+	m.viewport.Height = m.ends[4] + 1
+	if cmd := m.requestPreviews(); cmd == nil {
+		t.Fatal("native visible prefetch requested nothing")
+	}
+	if !m.previews["p0"].loading {
+		t.Fatal("visible native post was not prefetched")
 	}
 }
 
