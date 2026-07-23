@@ -1,25 +1,34 @@
-## xeet todo.md
+# Xeet TODO
 
-- tweet scheduling
-- [done] don't use the paid xapi — auth is now ONLY the browser cookie import:
-    - `xeet auth` reads + decrypts the x.com session from your browser
-      (Dia/Arc/Chrome/Brave/Edge), no login, never trips X's login-limiting.
-    - posts via internal CreateTweet GraphQL; queryId is auto-discovered from
-      X's live JS bundles and cached, so rotations self-heal.
-    - image upload works in cookie mode (TUI Ctrl+V paste).
-    - removed all the fluff: OAuth1 API keys, PIN flow, headless login, chromedp
-      browser-launch login. One command to connect.
-- browser cookie import for Windows (DPAPI) + Linux (libsecret/kwallet)
-- chunked upload for video/large media (simple upload only for now)
-- [done] responsive Bubble Tea composer with multiline editing, attachment cards,
-  clipboard/file image import, multi-image upload progress, and draft-safe errors
-- optional inline image previews for Kitty/iTerm2/WezTerm
-- [done] cozy read-only home timeline with pagination, browser opening, link copying,
-  refresh, and a shortcut into the composer
-- [done] optimistic like/unlike from the timeline with rollback on API errors
-- timeline interactions: replies, reposts, Following feed, and conversations
-- anything
+## Done
 
----
+- Browser-cookie authentication only, with no password or developer API key flow
+- macOS Chromium import: Dia, Arc, Chrome, Chromium, Brave, and Edge
+- macOS Firefox-family import: Firefox and Zen
+- Linux Chromium import: Chrome, Chrome Beta, Chromium, Brave, and Edge
+- Linux Firefox-family import: Firefox and Zen
+- Linux Secret Service, GNOME Keyring, and KDE Wallet support
+- Multiple browser profiles plus common native, Snap, and Flatpak paths
+- Session storage in macOS Keychain or Linux Secret Service
+- Session migration, atomic `0600` config writes, symlink refusal, and `xeet logout`
+- CreateTweet query ID discovery and stale-ID recovery
+- Composer with multiline editing, image attachments, upload progress, and draft-safe failures
+- Home timeline with pagination, replies, likes, refresh, browser opening, and link copying
+- X11 and Wayland clipboard support with a file-attachment fallback
+- Bounded API retries, rate-limit errors, session-expiry detection, and cookie-leak tests
 
-*This is a living document. Feel free to add your own ideas and vote on priorities!*
+## Next
+
+- Draft autosave and restore across process exits
+- `xeet doctor` environment and keyring diagnostics
+- `xeet whoami` session/account display
+- Graceful offline handling
+- Accessible image alt text
+- Following timeline option
+- Configurable theme without changing layout
+- Optional inline image previews for Kitty, iTerm2, and WezTerm
+- Chunked upload for video and large media
+- Windows browser-cookie import using DPAPI
+
+Scheduling, bulk posting, scraping, automated engagement, and mass-posting
+features are intentionally out of scope.
