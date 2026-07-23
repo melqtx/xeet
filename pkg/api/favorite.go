@@ -30,7 +30,7 @@ func (c *WebClient) SetTweetLiked(ctx context.Context, tweetID string, liked boo
 		return err
 	}
 	if needsQueryIDRefresh(res) {
-		fresh, discoverErr := DiscoverOperationQueryID(ctx, c.authToken, c.ct0, operation)
+		fresh, discoverErr := c.discoverOperation(ctx, operation)
 		if discoverErr != nil {
 			return fmt.Errorf("%s endpoint changed and discovery failed: %w", operation, discoverErr)
 		}

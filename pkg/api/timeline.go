@@ -112,7 +112,7 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 		return nil, err
 	}
 	if needsQueryIDRefresh(res) {
-		fresh, discoverErr := DiscoverOperationQueryID(ctx, c.authToken, c.ct0, "HomeTimeline")
+		fresh, discoverErr := c.discoverOperation(ctx, "HomeTimeline")
 		if discoverErr != nil {
 			return nil, fmt.Errorf("home timeline endpoint changed and discovery failed: %w", discoverErr)
 		}
@@ -132,13 +132,14 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 	if err := json.Unmarshal(res.body, &payload); err != nil {
 		return nil, fmt.Errorf("decode timeline: %w", err)
 	}
+	root, ok := payload.(map[string]any)
+	if !ok || root["data"] == nil {
+		return nil, fmt.Errorf("x returned a malformed timeline response")
+	}
 	if err := graphQLError(payload); err != nil {
 		return nil, err
 	}
 	page := parseTimeline(payload)
-	if len(page.Posts) == 0 {
-		return nil, fmt.Errorf("x returned a timeline with no readable posts")
-	}
 	return &page, nil
 }
 

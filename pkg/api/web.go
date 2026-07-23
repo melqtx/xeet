@@ -71,6 +71,7 @@ type WebClient struct {
 	queryID    string
 	refreshed  bool          // queryID was re-discovered this session and should be cached
 	retryDelay time.Duration // base backoff between transient retries; tests shrink it
+	discover   func(context.Context, string, string, string) (string, error)
 }
 
 // httpResult is one completed HTTP exchange: everything callers need to
@@ -170,6 +171,13 @@ func NewWebClient(cfg *config.Config) *WebClient {
 // QueryID returns the CreateTweet query id currently in use (possibly one that
 // was auto-discovered this session).
 func (c *WebClient) QueryID() string { return c.queryID }
+
+func (c *WebClient) discoverOperation(ctx context.Context, operation string) (string, error) {
+	if c.discover != nil {
+		return c.discover(ctx, c.authToken, c.ct0, operation)
+	}
+	return DiscoverOperationQueryID(ctx, c.authToken, c.ct0, operation)
+}
 
 // Refreshed reports whether the query id was re-discovered this session, so the
 // caller knows to persist QueryID() back to the config.
@@ -294,7 +302,7 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	// Discover the current one from X's live JS bundles, cache it, retry once.
 	if needsQueryIDRefresh(res) {
 		emitProgress(progress, PostEvent{Stage: PostStageDiscovering})
-		fresh, derr := DiscoverCreateTweetQueryID(ctx, c.authToken, c.ct0)
+		fresh, derr := c.discoverOperation(ctx, "CreateTweet")
 		if derr != nil {
 			return "", fmt.Errorf("the CreateTweet endpoint id is stale and auto-discovery failed (%v).\n"+
 				"Grab it manually: open x.com, post a tweet, in DevTools > Network find the 'CreateTweet' request,\n"+
@@ -337,9 +345,13 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	if len(parsed.Errors) > 0 {
 		return "", mapGraphQLError(parsed.Errors[0].Code, parsed.Errors[0].Message)
 	}
+	postID := parsed.Data.CreateTweet.TweetResults.Result.RestID
+	if postID == "" {
+		return "", fmt.Errorf("x returned success without a created post id")
+	}
 
 	emitProgress(progress, PostEvent{Stage: PostStageComplete})
-	return parsed.Data.CreateTweet.TweetResults.Result.RestID, nil
+	return postID, nil
 }
 
 func emitProgress(progress ProgressFunc, event PostEvent) {

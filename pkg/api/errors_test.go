@@ -266,3 +266,119 @@ func TestVerifyRejectsEmptyHandle(t *testing.T) {
 		t.Fatal("expected empty handle response to fail verification")
 	}
 }
+
+func TestPostTweetRefreshesRotatedQueryID(t *testing.T) {
+	attempts := 0
+	var operations []string
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			if !strings.Contains(req.URL.Path, "/qid/CreateTweet") {
+				t.Fatalf("first path = %s", req.URL.Path)
+			}
+			return response(http.StatusBadRequest, `{"errors":[{"message":"PersistedQueryNotFound"}]}`), nil
+		}
+		if !strings.Contains(req.URL.Path, "/fresh/CreateTweet") {
+			t.Fatalf("retry path = %s", req.URL.Path)
+		}
+		return response(http.StatusOK, `{"data":{"create_tweet":{"tweet_results":{"result":{"rest_id":"99"}}}}}`), nil
+	})
+	client.discover = func(ctx context.Context, auth, ct0, operation string) (string, error) {
+		operations = append(operations, operation)
+		if auth != "auth" || ct0 != "csrf" {
+			t.Fatal("discovery did not receive session credentials")
+		}
+		return "fresh", nil
+	}
+
+	id, err := client.PostTweet(context.Background(), "hello", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "99" || attempts != 2 || len(operations) != 1 || operations[0] != "CreateTweet" {
+		t.Fatalf("id=%q attempts=%d operations=%v", id, attempts, operations)
+	}
+	if !client.Refreshed() || client.QueryID() != "fresh" {
+		t.Fatalf("refreshed=%v qid=%q", client.Refreshed(), client.QueryID())
+	}
+}
+
+func TestPostTweetRejectsMissingCreatedID(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"data":{"create_tweet":{"tweet_results":{"result":{}}}}}`), nil
+	})
+	if _, err := client.PostTweet(context.Background(), "hello", "", nil, nil); err == nil {
+		t.Fatal("missing created post id was reported as success")
+	}
+}
+
+func TestTimelineRefreshesRotatedQueryID(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return response(http.StatusNotFound, `{}`), nil
+		}
+		if !strings.Contains(req.URL.Path, "/fresh/HomeTimeline") {
+			t.Fatalf("retry path = %s", req.URL.Path)
+		}
+		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
+	})
+	client.discover = func(context.Context, string, string, string) (string, error) { return "fresh", nil }
+	page, err := client.FetchHomeTimeline(context.Background(), "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || len(page.Posts) != 0 {
+		t.Fatalf("attempts=%d page=%+v", attempts, page)
+	}
+}
+
+func TestLikeRefreshesRotatedQueryID(t *testing.T) {
+	attempts := 0
+	operation := ""
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return response(http.StatusNotFound, `{}`), nil
+		}
+		if !strings.Contains(req.URL.Path, "/fresh/FavoriteTweet") {
+			t.Fatalf("retry path = %s", req.URL.Path)
+		}
+		return response(http.StatusOK, `{"data":{"favorite_tweet":"Done"}}`), nil
+	})
+	client.discover = func(ctx context.Context, auth, ct0, op string) (string, error) {
+		operation = op
+		return "fresh", nil
+	}
+	if err := client.SetTweetLiked(context.Background(), "123", true); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || operation != "FavoriteTweet" {
+		t.Fatalf("attempts=%d operation=%q", attempts, operation)
+	}
+}
+
+func TestTimelineRejectsMalformedPayload(t *testing.T) {
+	for _, body := range []string{`[]`, `{}`, `{"not_data":{}}`} {
+		client := newTestClient(func(req *http.Request) (*http.Response, error) {
+			return response(http.StatusOK, body), nil
+		})
+		if _, err := client.FetchHomeTimeline(context.Background(), "", 30); err == nil {
+			t.Errorf("payload %s was accepted", body)
+		}
+	}
+}
+
+func TestTimelineAllowsValidEmptyPage(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
+	})
+	page, err := client.FetchHomeTimeline(context.Background(), "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Posts) != 0 {
+		t.Fatalf("posts = %d, want 0", len(page.Posts))
+	}
+}
