@@ -201,7 +201,7 @@ func (m Model) viewDialog() string {
 			"\n\nYour words and pics will disappear." +
 			"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("y leave  •  n stay")
 	}
-	box := dialogStyle.Copy().Width(w - 6).Render(body)
+	box := dialogStyle.Width(w - 6).Render(body)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

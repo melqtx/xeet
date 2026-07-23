@@ -129,7 +129,7 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 	}
 	page := parseTimeline(payload)
 	if len(page.Posts) == 0 {
-		return nil, fmt.Errorf("X returned a timeline with no readable posts")
+		return nil, fmt.Errorf("x returned a timeline with no readable posts")
 	}
 	return &page, nil
 }

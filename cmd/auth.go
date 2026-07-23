@@ -26,8 +26,8 @@ func init() {
 func runAuth(cmd *cobra.Command, args []string) error {
 	browsers := api.DetectBrowsers()
 	if len(browsers) == 0 {
-		return fmt.Errorf("couldn't find a logged-in x.com session.\n" +
-			"Open x.com in your browser (Chrome, Arc, Brave, Dia, or Edge), log in, then run 'xeet auth' again.")
+		return fmt.Errorf("couldn't find a logged-in x.com session\n" +
+			"Open x.com in your browser (Chrome, Arc, Brave, Dia, or Edge), log in, then run 'xeet auth' again")
 	}
 
 	// One session found: use it. More than one: ask which.
