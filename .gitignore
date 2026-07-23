@@ -3,6 +3,7 @@ xeet
 xeet-bin
 xeet.exe
 dist/
+private-dist/
 build/
 coverage.out
 coverage.html

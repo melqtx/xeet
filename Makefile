@@ -34,26 +34,26 @@ build:
 build-all: clean
 	@echo "Building $(BINARY_NAME) for all platforms..."
 	@mkdir -p $(DIST_DIR)
-	
+
 	# macOS AMD64
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-darwin-amd64 .
-	
+
 	# macOS ARM64 (Apple Silicon)
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-darwin-arm64 .
-	
+
 	# Linux AMD64
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-linux-amd64 .
-	
+
 	# Linux ARM64
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-linux-arm64 .
-	
+
 	# Windows AMD64
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe .
-	
+
 	# Windows ARM64
 	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-windows-arm64.exe .
-	
-	@echo " Built binaries for all platforms in $(DIST_DIR)/"
+
+	@echo "Built binaries for all platforms in $(DIST_DIR)/"
 
 # Install locally
 .PHONY: install
@@ -64,7 +64,7 @@ install: build
 	else \
 		sudo mv $(BINARY_NAME) /usr/local/bin/; \
 	fi
-	@echo " $(BINARY_NAME) installed successfully!"
+	@echo "$(BINARY_NAME) installed successfully!"
 
 # Uninstall
 .PHONY: uninstall
@@ -75,7 +75,7 @@ uninstall:
 	else \
 		sudo rm -f /usr/local/bin/$(BINARY_NAME); \
 	fi
-	@echo " $(BINARY_NAME) uninstalled successfully!"
+	@echo "$(BINARY_NAME) uninstalled successfully!"
 
 # Run tests
 .PHONY: test
@@ -143,7 +143,7 @@ dev-setup:
 		echo "Installing golangci-lint..."; \
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.54.2; \
 	fi
-	@echo " Development environment ready!"
+	@echo "Development environment ready!"
 
 # Create release (for GitHub Actions)
 .PHONY: release
@@ -152,20 +152,24 @@ release: build-all
 	@cd $(DIST_DIR) && \
 	for file in *; do \
 		if [ -f "$$file" ]; then \
-			sha256sum "$$file" > "$$file.sha256"; \
-		fi \
+			if command -v sha256sum >/dev/null 2>&1; then \
+				sha256sum "$$file" > "$$file.sha256"; \
+			else \
+				shasum -a 256 "$$file" > "$$file.sha256"; \
+			fi; \
+		fi; \
 	done
-	@echo " Release assets created with checksums"
+	@echo "Release assets created with checksums"
 
 # Quick development build and test
 .PHONY: dev
 dev: clean fmt vet build test
-	@echo " Development build completed successfully!"
+	@echo "Development build completed successfully!"
 
 # CI/CD pipeline
 .PHONY: ci
 ci: tidy fmt vet lint test build-all
-	@echo " CI pipeline completed successfully!"
+	@echo "CI pipeline completed successfully!"
 
 # Help
 .PHONY: help

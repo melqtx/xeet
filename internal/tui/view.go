@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -83,7 +84,18 @@ func (m Model) viewComposer() string {
 		rows = append(rows, "", m.viewAttachments(w))
 	}
 	if m.lastErr != nil {
-		rows = append(rows, "", lipgloss.NewStyle().Foreground(red).Width(w).Render("oops — "+m.lastErr.Error()))
+		rows = append(rows, "", lipgloss.NewStyle().Foreground(red).Width(w).Render("oops: "+m.lastErr.Error()))
+		if canOpenDraftInX(m.lastErr) && strings.TrimSpace(m.editor.Value()) != "" {
+			hint := "b open text in X"
+			var ambiguous *api.AmbiguousPostError
+			if errors.As(m.lastErr, &ambiguous) {
+				hint = "check profile, then b open text in X"
+			}
+			rows = append(rows, lipgloss.NewStyle().Foreground(pink).Width(w).Render(hint))
+		}
+		if m.postDiagnostic != "" {
+			rows = append(rows, lipgloss.NewStyle().Foreground(muted).Width(w).Render("details: "+m.postDiagnostic))
+		}
 	} else if m.toast != "" {
 		rows = append(rows, "", lipgloss.NewStyle().Foreground(muted).Width(w).Render("✦ "+m.toast))
 	}
@@ -160,6 +172,8 @@ func (m Model) viewPosting() string {
 			stage = "finding the way to X…"
 		case api.PostStagePublishing:
 			stage = "sending your xeet…"
+		case api.PostStageReconciling:
+			stage = "checking whether it landed…"
 		}
 	}
 	body := m.renderLogo(m.contentWidth()) + "\n" +

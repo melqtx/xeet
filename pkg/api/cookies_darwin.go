@@ -14,11 +14,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // This file extracts an existing x.com session directly from a locally
-// installed browser's cookie store — no login request to X, no browser
+// installed browser's cookie store: no login request to X, no browser
 // automation, so nothing here can trip X's "we've temporarily limited your
 // login" anti-bot wall. You log in once in your normal browser (which X trusts)
 // and xeet reads the resulting auth_token + ct0 cookies off disk.
@@ -55,7 +58,7 @@ func geckoBrowsers(home string) []geckoBrowser {
 
 // DetectBrowsers returns the names of installed browsers that may hold a
 // logged-in x.com session, in preference order. This only checks that the
-// auth_token cookie row exists — no Keychain access, no decryption — so it's
+// auth_token cookie row exists, with no Keychain access or decryption, so it's
 // cheap and prompt-free.
 func DetectBrowsers() []string {
 	home, err := os.UserHomeDir()
@@ -121,7 +124,7 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 
 	dbs := browser.cookieDBs()
 	if len(dbs) == 0 {
-		return nil, "", fmt.Errorf("%s has no cookie database — is it installed and set up?", browser.name)
+		return nil, "", fmt.Errorf("%s has no cookie database. Is it installed and set up?", browser.name)
 	}
 
 	key, err := browser.deriveKey()
@@ -129,16 +132,28 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 		return nil, "", fmt.Errorf("couldn't read %s's Keychain key: %v", browser.name, err)
 	}
 
+	var best *LoginResult
 	for _, db := range dbs {
-		auth, ct0, err := extractXCookies(db, key)
+		result, err := extractXCookies(db, key)
 		if err != nil {
 			continue
 		}
-		if auth != "" && ct0 != "" {
-			return &LoginResult{AuthToken: auth, CT0: ct0}, browser.name, nil
+		if result != nil {
+			result.Profile = cookieProfile(db)
+			if result.LastUsedAt.IsZero() {
+				if info, statErr := os.Stat(db); statErr == nil {
+					result.LastUsedAt = info.ModTime()
+				}
+			}
+			if betterLoginResult(result, best) {
+				best = result
+			}
 		}
 	}
-	return nil, "", fmt.Errorf("no logged-in x.com session found in %s — open x.com in it, log in, then try again", browser.name)
+	if best != nil {
+		return best, browser.name, nil
+	}
+	return nil, "", fmt.Errorf("no logged-in x.com session found in %s. Open x.com in it, log in, then try again", browser.name)
 }
 
 func findChromiumBrowser(name string, browsers []chromiumBrowser) (chromiumBrowser, bool) {
@@ -183,6 +198,7 @@ func (b chromiumBrowser) cookieDBs() []string {
 		}
 		return nil
 	})
+	sort.Strings(out)
 	return out
 }
 
@@ -208,30 +224,32 @@ func (b chromiumBrowser) deriveKey() ([]byte, error) {
 
 // extractXCookies reads and decrypts the x.com auth_token and ct0 cookies from
 // a single Cookies database.
-func extractXCookies(dbPath string, key []byte) (authToken, ct0 string, err error) {
+func extractXCookies(dbPath string, key []byte) (*LoginResult, error) {
 	tmp, dst, err := copyDB(dbPath)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	defer os.RemoveAll(tmp)
 
-	const query = "SELECT name, hex(encrypted_value), value FROM cookies " +
+	const query = "SELECT host_key, name, hex(encrypted_value), value, expires_utc, last_access_utc FROM cookies " +
 		"WHERE (host_key LIKE '%x.com' OR host_key LIKE '%twitter.com') " +
-		"AND name IN ('auth_token','ct0');"
+		"AND name IN ('auth_token','ct0') " +
+		"ORDER BY last_access_utc DESC, host_key ASC, name ASC;"
 	out, err := exec.Command("sqlite3", "-separator", "|", dst, query).Output()
 	if err != nil {
-		return "", "", fmt.Errorf("sqlite3 read failed: %w", err)
+		return nil, fmt.Errorf("sqlite3 read failed: %w", err)
 	}
 
+	var values []sessionCookieValue
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "|", 3)
-		if len(parts) < 3 {
+		parts := strings.SplitN(line, "|", 6)
+		if len(parts) < 6 {
 			continue
 		}
-		name, encHex, plain := parts[0], parts[1], parts[2]
+		domain, name, encHex, plain := parts[0], parts[1], parts[2], parts[3]
 
 		value := plain
 		if encHex != "" {
@@ -244,14 +262,26 @@ func extractXCookies(dbPath string, key []byte) (authToken, ct0 string, err erro
 		if value == "" {
 			continue
 		}
-		switch name {
-		case "auth_token":
-			authToken = value
-		case "ct0":
-			ct0 = value
-		}
+		expiresRaw, _ := strconv.ParseInt(parts[4], 10, 64)
+		lastUsedRaw, _ := strconv.ParseInt(parts[5], 10, 64)
+		values = append(values, sessionCookieValue{
+			name: name, value: value, domain: domain,
+			expires: chromeCookieTime(expiresRaw), lastUsed: chromeCookieTime(lastUsedRaw),
+		})
 	}
-	return authToken, ct0, nil
+	return selectLoginResult(values, time.Now()), nil
+}
+
+// Chromium stores timestamps as microseconds since 1601-01-01 UTC.
+func chromeCookieTime(microseconds int64) time.Time {
+	const unixEpochInChromeMicroseconds = int64(11_644_473_600_000_000)
+	if microseconds <= 0 {
+		return time.Time{}
+	}
+	unixMicroseconds := microseconds - unixEpochInChromeMicroseconds
+	seconds := unixMicroseconds / 1_000_000
+	nanoseconds := (unixMicroseconds % 1_000_000) * 1_000
+	return time.Unix(seconds, nanoseconds).UTC()
 }
 
 // decryptChromeValue decrypts one Chromium-encrypted cookie value on macOS.

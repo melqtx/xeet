@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"xeet/internal/media"
@@ -51,6 +52,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case postResultMsg:
 		m.postCancel = nil
 		m.cancelling = false
+		m.postDiagnostic = msg.diagnostic
 		if msg.err != nil {
 			m.screen = screenCompose
 			if errors.Is(msg.err, context.Canceled) {
@@ -64,7 +66,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.screen = screenSuccess
 		m.postID = msg.id
+		m.postDiagnostic = ""
 		m.postEvents = nil
+		return m, nil
+	case browserOpenedMsg:
+		if msg.err != nil {
+			m.lastErr = fmt.Errorf("couldn't open X: %w", msg.err)
+			return m, nil
+		}
+		m.lastErr = nil
+		m.postDiagnostic = ""
+		m.toast = "Opened your draft in X"
 		return m, nil
 	case spinner.TickMsg:
 		if m.screen == screenPosting {
@@ -91,6 +103,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch key.String() {
+		case "b":
+			if canOpenDraftInX(m.lastErr) && strings.TrimSpace(m.editor.Value()) != "" {
+				return m, openDraftInX(m.editor.Value())
+			}
 		case "ctrl+c":
 			if m.hasDraft() {
 				m.dialog = dialogQuit
@@ -109,6 +125,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.lastErr = nil
+			m.postDiagnostic = ""
 			m.toast = ""
 			m.screen = screenPosting
 			m.postStage = api.PostEvent{}
@@ -169,6 +186,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func canOpenDraftInX(err error) bool {
+	var automated *api.AutomationBlockedError
+	if errors.As(err, &automated) {
+		return true
+	}
+	var restricted *api.PostingRestrictedError
+	if errors.As(err, &restricted) {
+		return true
+	}
+	var recent *api.RecentlyPostedError
+	if errors.As(err, &recent) {
+		return true
+	}
+	var ambiguous *api.AmbiguousPostError
+	return errors.As(err, &ambiguous)
+}
+
 func (m Model) updateDialog(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.dialog {
 	case dialogQuit:
@@ -217,6 +251,7 @@ func (m Model) updateSuccess(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.postID = ""
 		m.toast = ""
 		m.lastErr = nil
+		m.postDiagnostic = ""
 		m.focus = focusEditor
 		return m, m.editor.Focus()
 	}

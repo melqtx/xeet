@@ -64,7 +64,7 @@ func resolveImageMode(requested string) (imageMode, string) {
 	// Zellij does not currently pass the Kitty graphics protocol through.
 	// tmux requires explicit passthrough configuration we cannot assume.
 	if os.Getenv("ZELLIJ") != "" || os.Getenv("TMUX") != "" {
-		return imageModeANSI, "tmux/zellij blocks native graphics — run xeet directly in the terminal for sharp images"
+		return imageModeANSI, "tmux/zellij blocks native graphics; run xeet directly in the terminal for sharp images"
 	}
 	program := strings.ToLower(os.Getenv("TERM_PROGRAM"))
 	term := strings.ToLower(os.Getenv("TERM"))
@@ -80,7 +80,7 @@ func resolveImageMode(requested string) (imageMode, string) {
 		// launching app's bundle identifier exposes them.
 		if bundle := os.Getenv("__CFBundleIdentifier"); requested != "native" &&
 			bundle != "" && bundle != "com.mitchellh.ghostty" && bundle != "net.kovidgoyal.kitty" {
-			return imageModeANSI, bundle + " advertises ghostty/kitty graphics it may not render — using ansi (--images native to force)"
+			return imageModeANSI, bundle + " advertises ghostty/kitty graphics it may not render; using ansi (--images native to force)"
 		}
 		return imageModeNative, ""
 	}

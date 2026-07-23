@@ -160,7 +160,7 @@ func TestImageBlockIsPaddedWithGutterLines(t *testing.T) {
 func TestHelpShowsImageModeNote(t *testing.T) {
 	m := New()
 	m.imageMode = imageModeANSI
-	m.imageNote = "tmux/zellij blocks native graphics — run xeet directly in the terminal for sharp images"
+	m.imageNote = "tmux/zellij blocks native graphics; run xeet directly in the terminal for sharp images"
 	m.width, m.height = 80, 30
 	m.help = true
 	view := m.View()

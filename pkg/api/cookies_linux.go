@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/browserutils/kooky"
@@ -133,6 +134,7 @@ func (b chromiumBrowser) cookieDBs() []string {
 			return nil
 		})
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -154,6 +156,7 @@ func importChromiumSession(browser chromiumBrowser) (*LoginResult, string, error
 	}
 
 	var lastErr error
+	var best *LoginResult
 	for _, db := range dbs {
 		tmp, copied, err := copyDB(db)
 		if err != nil {
@@ -167,8 +170,19 @@ func importChromiumSession(browser chromiumBrowser) (*LoginResult, string, error
 			continue
 		}
 		if result := sessionFromCookies(cookies); result != nil {
-			return result, browser.name, nil
+			result.Profile = cookieProfile(db)
+			if result.LastUsedAt.IsZero() {
+				if info, statErr := os.Stat(db); statErr == nil {
+					result.LastUsedAt = info.ModTime()
+				}
+			}
+			if betterLoginResult(result, best) {
+				best = result
+			}
 		}
+	}
+	if best != nil {
+		return best, browser.name, nil
 	}
 
 	if lastErr != nil {

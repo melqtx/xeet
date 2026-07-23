@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/browserutils/kooky"
 )
@@ -12,18 +13,49 @@ import (
 func TestSessionFromCookies(t *testing.T) {
 	cookies := []*kooky.Cookie{
 		{Cookie: http.Cookie{Name: "unrelated", Value: "ignore"}},
-		{Cookie: http.Cookie{Name: "auth_token", Value: "token"}},
-		{Cookie: http.Cookie{Name: "ct0", Value: "csrf"}},
+		{Cookie: http.Cookie{Name: "auth_token", Value: "token", Domain: ".x.com"}},
+		{Cookie: http.Cookie{Name: "ct0", Value: "csrf", Domain: ".x.com"}},
 	}
 	got := sessionFromCookies(cookies)
-	if got == nil || got.AuthToken != "token" || got.CT0 != "csrf" {
+	if got == nil || got.AuthToken != "token" || got.CT0 != "csrf" || got.CookieDomain != "x.com" {
 		t.Fatalf("sessionFromCookies() = %+v", got)
 	}
 }
 
 func TestSessionFromCookiesRequiresBothValues(t *testing.T) {
-	if got := sessionFromCookies([]*kooky.Cookie{{Cookie: http.Cookie{Name: "auth_token", Value: "token"}}}); got != nil {
+	if got := sessionFromCookies([]*kooky.Cookie{{
+		Cookie: http.Cookie{Name: "auth_token", Value: "token", Domain: ".x.com"},
+	}}); got != nil {
 		t.Fatalf("got partial session %+v", got)
+	}
+}
+
+func TestSessionFromCookiesKeepsPairOnSameDomain(t *testing.T) {
+	now := time.Now()
+	cookies := []*kooky.Cookie{
+		{Cookie: http.Cookie{Name: "auth_token", Value: "x-auth", Domain: ".x.com"}, Creation: now},
+		{Cookie: http.Cookie{Name: "ct0", Value: "twitter-ct0", Domain: ".twitter.com"}, Creation: now.Add(time.Minute)},
+		{Cookie: http.Cookie{Name: "ct0", Value: "x-ct0", Domain: ".x.com"}, Creation: now.Add(-time.Minute)},
+		{Cookie: http.Cookie{Name: "auth_token", Value: "twitter-auth", Domain: ".twitter.com"}, Creation: now.Add(2 * time.Minute)},
+	}
+	got := sessionFromCookies(cookies)
+	if got == nil || got.AuthToken != "x-auth" || got.CT0 != "x-ct0" || got.CookieDomain != "x.com" {
+		t.Fatalf("mixed or wrong-domain session selected: %+v", got)
+	}
+}
+
+func TestSessionFromCookiesUsesNewestUnexpiredPair(t *testing.T) {
+	now := time.Now()
+	cookies := []*kooky.Cookie{
+		{Cookie: http.Cookie{Name: "auth_token", Value: "old-auth", Domain: ".x.com"}, Creation: now.Add(-time.Hour)},
+		{Cookie: http.Cookie{Name: "ct0", Value: "old-ct0", Domain: ".x.com"}, Creation: now.Add(-time.Hour)},
+		{Cookie: http.Cookie{Name: "auth_token", Value: "new-auth", Domain: ".x.com", Expires: now.Add(time.Hour)}, Creation: now},
+		{Cookie: http.Cookie{Name: "ct0", Value: "new-ct0", Domain: ".x.com", Expires: now.Add(time.Hour)}, Creation: now},
+		{Cookie: http.Cookie{Name: "auth_token", Value: "expired-auth", Domain: ".x.com", Expires: now.Add(-time.Minute)}, Creation: now.Add(time.Minute)},
+	}
+	got := sessionFromCookies(cookies)
+	if got == nil || got.AuthToken != "new-auth" || got.CT0 != "new-ct0" {
+		t.Fatalf("newest valid pair not selected: %+v", got)
 	}
 }
 

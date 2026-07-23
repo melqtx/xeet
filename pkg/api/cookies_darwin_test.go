@@ -7,6 +7,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"testing"
+	"time"
 )
 
 // encryptLikeChrome mirrors Chromium's macOS cookie encryption so we can verify
@@ -70,5 +71,20 @@ func TestPkcs7Unpad(t *testing.T) {
 	out, err := pkcs7Unpad([]byte{'h', 'i', 0x02, 0x02})
 	if err != nil || string(out) != "hi" {
 		t.Errorf("got %q, %v", out, err)
+	}
+}
+
+func TestChromeCookieTime(t *testing.T) {
+	const unixEpochInChromeMicroseconds = int64(11_644_473_600_000_000)
+	if got := chromeCookieTime(unixEpochInChromeMicroseconds); !got.Equal(time.Unix(0, 0).UTC()) {
+		t.Fatalf("Chrome epoch converted to %v", got)
+	}
+	want := time.Date(2026, 7, 23, 12, 34, 56, 789_000_000, time.UTC)
+	chromeValue := unixEpochInChromeMicroseconds + want.UnixMicro()
+	if got := chromeCookieTime(chromeValue); !got.Equal(want) {
+		t.Fatalf("converted=%v want=%v", got, want)
+	}
+	if got := chromeCookieTime(0); !got.IsZero() {
+		t.Fatalf("zero Chrome time converted to %v", got)
 	}
 }

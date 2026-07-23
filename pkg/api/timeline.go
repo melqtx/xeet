@@ -98,7 +98,7 @@ var timelineFieldToggles = map[string]bool{
 // FetchHomeTimeline retrieves one page of the authenticated For You feed.
 func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count int) (*TimelinePage, error) {
 	if c.authToken == "" || c.ct0 == "" {
-		return nil, fmt.Errorf("no session — run 'xeet auth' first")
+		return nil, fmt.Errorf("no session; run 'xeet auth' first")
 	}
 	if count <= 0 || count > 100 {
 		count = 30

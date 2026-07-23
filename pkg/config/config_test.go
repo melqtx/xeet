@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeStore struct {
@@ -42,7 +43,12 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	store := newFakeStore()
 	cm := newConfigManagerAt(dir, store)
 
-	in := &Config{AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789"}
+	in := &Config{
+		AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789",
+		SessionBrowser: "Firefox", SessionProfile: "default-release", SessionDomain: "x.com",
+		SessionExpires:  time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC),
+		SessionImported: time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC),
+	}
 	if err := cm.Save(in); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +66,10 @@ func TestTokensNeverTouchDisk(t *testing.T) {
 	dir := t.TempDir()
 	cm := newConfigManagerAt(dir, newFakeStore())
 
-	if err := cm.Save(&Config{AuthToken: "supersecret", CT0: "alsosecret", CreateTweetQID: "qid"}); err != nil {
+	if err := cm.Save(&Config{
+		AuthToken: "supersecret", CT0: "alsosecret", CreateTweetQID: "qid",
+		SessionBrowser: "Firefox", SessionProfile: "default-release",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -73,6 +82,9 @@ func TestTokensNeverTouchDisk(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "qid") {
 		t.Fatalf("expected create_tweet_qid in config file, got:\n%s", data)
+	}
+	if !strings.Contains(string(data), "Firefox") || !strings.Contains(string(data), "default-release") {
+		t.Fatalf("expected non-secret session source metadata, got:\n%s", data)
 	}
 }
 
@@ -101,6 +113,25 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 	if *cfg != (Config{}) {
 		t.Fatalf("expected zero config, got %+v", cfg)
+	}
+}
+
+func TestMalformedSessionMetadataDoesNotBreakSavedSession(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".xeet.yaml"), []byte(
+		"session_browser: Chrome\nsession_expires: definitely-not-a-time\n",
+	), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := newFakeStore()
+	store.data[keyAuthToken] = "auth"
+	store.data[keyCT0] = "ct0"
+	cfg, err := newConfigManagerAt(dir, store).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthToken != "auth" || cfg.SessionBrowser != "Chrome" || !cfg.SessionExpires.IsZero() {
+		t.Fatalf("config=%+v", cfg)
 	}
 }
 

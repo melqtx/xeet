@@ -1,4 +1,4 @@
-# Xeet (older version)
+# Xeet v0.1.8-alpha
 
 A simple terminal interface for posting to and browsing X without developer
 API keys.
@@ -57,6 +57,29 @@ First, log into x.com in a supported browser:
 macOS may request Keychain access. Linux may request that you unlock GNOME
 Keyring, Secret Service, or KDE Wallet.
 
+If a saved session behaves differently from the browser, inspect it without
+posting:
+
+```bash
+xeet doctor            # metadata plus one authenticated timeline read
+xeet doctor --offline  # local metadata only
+```
+
+The diagnostic prints a short session fingerprint and the selected
+browser/profile, never the cookie values.
+
+To compare a successful browser post with Xeet without exposing the HAR's
+contents:
+
+```bash
+xeet inspect-har /path/to/x.com.har
+```
+
+Export the HAR from browser developer tools after one successful website post.
+Keep the HAR local because the file contains session cookies. The command
+prints names and structural keys only, never values, post text, or response
+bodies.
+
 **2. Post:**
 
 ```bash
@@ -88,6 +111,15 @@ X rotates the internal `CreateTweet` id periodically; xeet discovers the current
 one automatically and caches it. If discovery fails, Xeet explains how to set
 it manually from the `CreateTweet` request in browser developer tools.
 
+CreateTweet mutations are never retried after a transient or ambiguous outcome.
+(A request explicitly rejected as an unknown persisted-query id is refreshed
+and sent once with the current id.) If X returns an unclear result, Xeet
+performs one read-only timeline check. When it still cannot prove whether the
+post landed, it preserves the draft and asks you to check your profile before
+retrying. The accompanying `details` line contains only a response-shape
+fingerprint, status, type names, and rate-limit metadata; it never contains the
+draft or session cookies.
+
 ## TUI keys
 
 - **Enter**: post
@@ -97,6 +129,7 @@ it manually from the `CreateTweet` request in browser developer tools.
 - **Tab**: move between the editor and attached images
 - **Arrow keys**: select an attached image
 - **Delete** / **Ctrl+X**: remove the selected image
+- **B** after a restricted or unclear result: open the text in X
 - **F1**: help
 - **Ctrl+C** / **Esc**: quit (drafts require confirmation)
 

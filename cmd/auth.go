@@ -23,7 +23,7 @@ func init() {
 }
 
 // runAuth connects by reading the x.com session already present in the user's
-// browser — no passwords, no API keys, no login flow.
+// browser, with no passwords, API keys, or login flow.
 func runAuth(cmd *cobra.Command, args []string) error {
 	browsers := api.SupportedBrowsers()
 	sel := promptui.Select{
@@ -54,6 +54,11 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	candidate := *cfg
 	candidate.AuthToken = result.AuthToken
 	candidate.CT0 = result.CT0
+	candidate.SessionBrowser = browser
+	candidate.SessionProfile = result.Profile
+	candidate.SessionDomain = result.CookieDomain
+	candidate.SessionExpires = result.ExpiresAt
+	candidate.SessionImported = time.Now()
 	ctx, cancel := context.WithTimeout(cmd.Context(), 45*time.Second)
 	defer cancel()
 	handle, err := api.NewWebClient(&candidate).Verify(ctx)
@@ -64,10 +69,14 @@ func runAuth(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	source := browser
+	if result.Profile != "" {
+		source = fmt.Sprintf("%s profile %q", browser, result.Profile)
+	}
 	if handle != "" {
-		fmt.Printf("✓ Connected as @%s via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", handle, browser)
+		fmt.Printf("✓ Connected as @%s via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", handle, source)
 	} else {
-		fmt.Printf("✓ Connected via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", browser)
+		fmt.Printf("✓ Connected via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", source)
 	}
 	return nil
 }

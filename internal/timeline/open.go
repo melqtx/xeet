@@ -1,8 +1,11 @@
 package timeline
 
 import (
+	"net/url"
 	"os/exec"
 	"runtime"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func openExternalURL(target string) error {
@@ -16,4 +19,18 @@ func openExternalURL(target string) error {
 		cmd = exec.Command("xdg-open", target)
 	}
 	return cmd.Start()
+}
+
+func openReplyInX(postID, text string) tea.Cmd {
+	return func() tea.Msg {
+		return replyBrowserMsg{err: openExternalURL(replyIntentURL(postID, text))}
+	}
+}
+
+func replyIntentURL(postID, text string) string {
+	query := url.Values{
+		"in_reply_to": []string{postID},
+		"text":        []string{text},
+	}
+	return "https://x.com/intent/tweet?" + query.Encode()
 }

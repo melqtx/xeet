@@ -109,6 +109,69 @@ func TestReplyPostsWithoutLeavingProgram(t *testing.T) {
 	}
 }
 
+func TestRejectedReplyOffersBrowserFallback(t *testing.T) {
+	m := New()
+	m.mode = modeReply
+	m.replyPost = api.TimelinePost{ID: "123", Handle: "alice"}
+	m.replyEditor.SetValue("no")
+	m.replyErr = &api.PostingRestrictedError{}
+
+	if !strings.Contains(m.View(), "press b to try in X") {
+		t.Fatal("reply browser fallback was not shown")
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = next.(Model)
+	if cmd == nil || m.replyEditor.Value() != "no" || m.replyPost.ID != "123" {
+		t.Fatalf("cmd=%v text=%q post=%q", cmd, m.replyEditor.Value(), m.replyPost.ID)
+	}
+}
+
+func TestAutomationRejectedReplyOffersBrowserFallback(t *testing.T) {
+	m := New()
+	m.mode = modeReply
+	m.replyPost = api.TimelinePost{ID: "123", Handle: "alice"}
+	m.replyEditor.SetValue("keep these exact words")
+	m.replyErr = &api.AutomationBlockedError{}
+
+	view := m.View()
+	if !strings.Contains(view, "suspected automation; press b to try it in X") {
+		t.Fatalf("automation fallback was not shown: %s", view)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = next.(Model)
+	if cmd == nil || m.replyEditor.Value() != "keep these exact words" {
+		t.Fatalf("cmd=%v text=%q", cmd, m.replyEditor.Value())
+	}
+}
+
+func TestReplyBrowserSuccessKeepsDraft(t *testing.T) {
+	m := New()
+	m.mode = modeReply
+	m.replyEditor.SetValue("no")
+	m.replyErr = &api.PostingRestrictedError{}
+	m = update(t, m, replyBrowserMsg{})
+	if m.replyErr != nil || m.replyNotice != "opened reply in X" || m.replyEditor.Value() != "no" {
+		t.Fatalf("err=%v notice=%q text=%q", m.replyErr, m.replyNotice, m.replyEditor.Value())
+	}
+}
+
+func TestAmbiguousReplyOffersCautiousBrowserFallback(t *testing.T) {
+	m := New()
+	m.mode = modeReply
+	m.replyPost = api.TimelinePost{ID: "123", Handle: "alice"}
+	m.replyEditor.SetValue("possibly posted")
+	m.replyErr = &api.AmbiguousPostError{}
+
+	if !strings.Contains(m.View(), "check your profile, then press b") {
+		t.Fatal("ambiguous reply fallback was not shown")
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = next.(Model)
+	if cmd == nil || m.replyEditor.Value() != "possibly posted" {
+		t.Fatalf("cmd=%v text=%q", cmd, m.replyEditor.Value())
+	}
+}
+
 func TestRefreshMergesOnTopAndKeepsPosition(t *testing.T) {
 	m := New()
 	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(5), Cursor: "first"}})

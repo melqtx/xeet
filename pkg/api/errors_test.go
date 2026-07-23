@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -69,8 +70,9 @@ func TestPostTweetDuplicateIsActionable(t *testing.T) {
 		return response(http.StatusOK, `{"errors":[{"message":"Status is a duplicate.","code":187}]}`), nil
 	})
 	_, err := client.PostTweet(context.Background(), "same text", "", nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "duplicate post") {
-		t.Fatalf("got %v, want duplicate-post guidance", err)
+	var recent *RecentlyPostedError
+	if !errors.As(err, &recent) {
+		t.Fatalf("got %v, want RecentlyPostedError", err)
 	}
 }
 
@@ -80,25 +82,55 @@ func TestPostTweetAutomationBlockIsActionable(t *testing.T) {
 		return response(http.StatusOK, `{"errors":[{"message":"Authorization: This request looks like it might be automated"}]}`), nil
 	})
 	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "don't keep retrying") {
+	var blocked *AutomationBlockedError
+	if !errors.As(err, &blocked) || !strings.Contains(err.Error(), "try the exact text in X") {
 		t.Fatalf("got %v, want automation-block guidance", err)
+	}
+}
+
+func TestGraphQLErrorIgnoresNestedContentErrors(t *testing.T) {
+	var payload any
+	if err := json.Unmarshal([]byte(`{"data":{"operation":{"errors":[{"code":226,"message":"automated"}]}}}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := graphQLError(payload); err != nil {
+		t.Fatalf("nested content error escaped: %v", err)
+	}
+}
+
+func TestTimelineIgnoresNestedContentErrors(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"data":{"home":{
+			"errors":[{"code":226,"message":"nested content unavailable"}],
+			"instructions":[]
+		}}}`), nil
+	})
+	page, err := client.FetchHomeTimeline(context.Background(), "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Posts) != 0 {
+		t.Fatalf("posts=%d", len(page.Posts))
 	}
 }
 
 func TestPostTweetNotRetriedOnTransientFailure(t *testing.T) {
 	// CreateTweet is a mutation: a timed-out request may have posted anyway,
 	// so it must never fire twice on its own.
-	attempts := 0
+	postAttempts := 0
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {
-		attempts++
-		return response(http.StatusServiceUnavailable, `oops`), nil
+		if req.Method == http.MethodPost {
+			postAttempts++
+			return response(http.StatusServiceUnavailable, `oops`), nil
+		}
+		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
 	})
 	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if attempts != 1 {
-		t.Fatalf("CreateTweet fired %d times, want 1", attempts)
+	if postAttempts != 1 {
+		t.Fatalf("CreateTweet fired %d times, want 1", postAttempts)
 	}
 }
 

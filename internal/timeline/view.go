@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -340,7 +341,19 @@ func (m Model) viewReply() string {
 	if m.replyPosting {
 		status = lipgloss.NewStyle().Foreground(muted).Render(m.spinner.View() + " sending reply…")
 	} else if m.replyErr != nil {
-		status = lipgloss.NewStyle().Foreground(red).Render(m.replyErr.Error())
+		message := m.replyErr.Error()
+		var ambiguous *api.AmbiguousPostError
+		var automated *api.AutomationBlockedError
+		if errors.As(m.replyErr, &ambiguous) {
+			message = "X did not confirm this reply; check your profile, then press b"
+		} else if errors.As(m.replyErr, &automated) {
+			message = "X rejected this reply as suspected automation; press b to try it in X"
+		} else if canOpenReplyInX(m.replyErr) {
+			message = "X rejected this reply; add more text or press b to try in X"
+		}
+		status = lipgloss.NewStyle().Foreground(red).Render(message)
+	} else if m.replyNotice != "" {
+		status = lipgloss.NewStyle().Foreground(muted).Render(m.replyNotice)
 	}
 	content := lipgloss.NewStyle().Foreground(pink).Bold(true).Render(title) + "\n" +
 		strings.Join(originalLines, "\n") + "\n\n" + editor + "\n\n" + status

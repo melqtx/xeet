@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"xeet/internal/media"
+	"xeet/pkg/api"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -97,9 +98,94 @@ func TestPostErrorPreservesDraft(t *testing.T) {
 	m := New(fakeClipboard{})
 	m.editor.SetValue("keep me")
 	m.screen = screenPosting
-	m = updateModel(t, m, postResultMsg{err: errors.New("nope")})
+	m = updateModel(t, m, postResultMsg{err: errors.New("nope"), diagnostic: "status=200 body=abc123"})
 	if m.screen != screenCompose || m.editor.Value() != "keep me" || m.lastErr == nil {
 		t.Fatalf("draft was not preserved: %+v", m)
+	}
+	if !strings.Contains(m.View(), "status=200 body=abc123") {
+		t.Fatal("safe post diagnostic was not shown")
+	}
+}
+
+func TestPostingRestrictionOffersBrowserFallback(t *testing.T) {
+	m := New(fakeClipboard{})
+	m.editor.SetValue("preserve this")
+	m.screen = screenPosting
+	m = updateModel(t, m, postResultMsg{
+		err:        &api.PostingRestrictedError{},
+		diagnostic: "status=200 errors=344",
+	})
+	if !strings.Contains(m.View(), "b open text in X") {
+		t.Fatal("browser fallback was not shown")
+	}
+
+	next, command := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = next.(Model)
+	if command == nil {
+		t.Fatal("browser fallback did not start")
+	}
+	if m.editor.Value() != "preserve this" {
+		t.Fatalf("draft changed: %q", m.editor.Value())
+	}
+}
+
+func TestRecentlyPostedOffersBrowserFallback(t *testing.T) {
+	m := New(fakeClipboard{})
+	m.editor.SetValue("keep the exact text")
+	m.lastErr = &api.RecentlyPostedError{}
+
+	if !strings.Contains(m.View(), "b open text in X") {
+		t.Fatal("browser fallback was not shown")
+	}
+	next, command := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = next.(Model)
+	if command == nil || m.editor.Value() != "keep the exact text" {
+		t.Fatalf("fallback command=%v draft=%q", command, m.editor.Value())
+	}
+}
+
+func TestAutomationRejectionOffersBrowserFallback(t *testing.T) {
+	m := New(fakeClipboard{})
+	m.editor.SetValue("keep these exact words")
+	m.lastErr = &api.AutomationBlockedError{}
+
+	view := m.View()
+	if !strings.Contains(view, "x rejected this post as suspected automation") {
+		t.Fatalf("honest automation message missing from view: %s", view)
+	}
+	if !strings.Contains(view, "b open text in X") {
+		t.Fatalf("browser fallback missing from view: %s", view)
+	}
+	next, command := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = next.(Model)
+	if command == nil || m.editor.Value() != "keep these exact words" {
+		t.Fatalf("command=%v draft=%q", command, m.editor.Value())
+	}
+}
+
+func TestAmbiguousPostOffersCautiousBrowserFallback(t *testing.T) {
+	m := New(fakeClipboard{})
+	m.editor.SetValue("possibly posted")
+	m.lastErr = &api.AmbiguousPostError{Reconciliation: "the home timeline could not confirm it"}
+
+	view := m.View()
+	if !strings.Contains(view, "check profile, then b open text in X") {
+		t.Fatalf("fallback hint missing from view: %s", view)
+	}
+	next, command := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = next.(Model)
+	if command == nil || m.editor.Value() != "possibly posted" {
+		t.Fatalf("command=%v draft=%q", command, m.editor.Value())
+	}
+}
+
+func TestImageOnlyFailureDoesNotOfferTextFallback(t *testing.T) {
+	m := New(fakeClipboard{})
+	m.attachments = []media.Attachment{{Name: "pic.png", MIME: "image/png", Data: []byte("image")}}
+	m.lastErr = &api.AmbiguousPostError{Reconciliation: "image-only results cannot be verified safely"}
+
+	if strings.Contains(m.View(), "open text in X") {
+		t.Fatal("text-only browser fallback was offered for an image-only draft")
 	}
 }
 

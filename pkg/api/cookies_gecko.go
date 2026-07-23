@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/browserutils/kooky"
 	"github.com/browserutils/kooky/browser/firefox"
@@ -39,6 +41,7 @@ func (b geckoBrowser) cookieDBs() []string {
 			return nil
 		})
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -77,6 +80,7 @@ func importGeckoSession(b geckoBrowser) (*LoginResult, string, error) {
 	}
 
 	var lastErr error
+	var best *LoginResult
 	for _, db := range dbs {
 		tmp, copied, err := copyDBAs(db, "cookies.sqlite")
 		if err != nil {
@@ -90,8 +94,19 @@ func importGeckoSession(b geckoBrowser) (*LoginResult, string, error) {
 			continue
 		}
 		if result := sessionFromCookies(cookies); result != nil {
-			return result, b.name, nil
+			result.Profile = cookieProfile(db)
+			if result.LastUsedAt.IsZero() {
+				if info, statErr := os.Stat(db); statErr == nil {
+					result.LastUsedAt = info.ModTime()
+				}
+			}
+			if betterLoginResult(result, best) {
+				best = result
+			}
 		}
+	}
+	if best != nil {
+		return best, b.name, nil
 	}
 
 	if lastErr != nil {
@@ -101,22 +116,177 @@ func importGeckoSession(b geckoBrowser) (*LoginResult, string, error) {
 }
 
 func sessionFromCookies(cookies []*kooky.Cookie) *LoginResult {
-	result := &LoginResult{}
+	now := time.Now()
+	values := make([]sessionCookieValue, 0, len(cookies))
 	for _, cookie := range cookies {
-		if cookie == nil || cookie.Value == "" {
+		if !usableSessionCookie(cookie, now) {
 			continue
 		}
-		switch cookie.Name {
+		values = append(values, sessionCookieValue{
+			name: cookie.Name, value: cookie.Value, domain: cookie.Domain,
+			expires: cookie.Expires, lastUsed: cookie.Creation,
+		})
+	}
+	return selectLoginResult(values, now)
+}
+
+type sessionCookieValue struct {
+	name     string
+	value    string
+	domain   string
+	expires  time.Time
+	lastUsed time.Time
+}
+
+func selectLoginResult(values []sessionCookieValue, now time.Time) *LoginResult {
+	type pair struct {
+		auth   *sessionCookieValue
+		ct0    *sessionCookieValue
+		domain string
+	}
+	pairs := map[string]*pair{}
+	for i := range values {
+		value := &values[i]
+		if value.value == "" || (!value.expires.IsZero() && !value.expires.After(now)) {
+			continue
+		}
+		domain := cookieDomainFamily(value.domain)
+		if domain == "" {
+			continue
+		}
+		current := pairs[domain]
+		if current == nil {
+			current = &pair{domain: domain}
+			pairs[domain] = current
+		}
+		switch value.name {
 		case "auth_token":
-			result.AuthToken = cookie.Value
+			if betterSessionValue(value, current.auth) {
+				current.auth = value
+			}
 		case "ct0":
-			result.CT0 = cookie.Value
+			if betterSessionValue(value, current.ct0) {
+				current.ct0 = value
+			}
 		}
 	}
-	if result.AuthToken == "" || result.CT0 == "" {
-		return nil
+	var best *LoginResult
+	for _, candidate := range pairs {
+		if candidate.auth == nil || candidate.ct0 == nil {
+			continue
+		}
+		result := &LoginResult{
+			AuthToken:    candidate.auth.value,
+			CT0:          candidate.ct0.value,
+			CookieDomain: candidate.domain,
+			ExpiresAt:    earliestExpiry(candidate.auth.expires, candidate.ct0.expires),
+			LastUsedAt:   latestTime(candidate.auth.lastUsed, candidate.ct0.lastUsed),
+		}
+		if betterLoginResult(result, best) {
+			best = result
+		}
 	}
-	return result
+	return best
+}
+
+func usableSessionCookie(cookie *kooky.Cookie, now time.Time) bool {
+	if cookie == nil || cookie.Value == "" || cookie.MaxAge < 0 {
+		return false
+	}
+	return cookie.Expires.IsZero() || cookie.Expires.After(now)
+}
+
+func cookieDomainFamily(domain string) string {
+	domain = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(domain)), ".")
+	switch {
+	case domain == "x.com" || strings.HasSuffix(domain, ".x.com"):
+		return "x.com"
+	case domain == "twitter.com" || strings.HasSuffix(domain, ".twitter.com"):
+		return "twitter.com"
+	default:
+		return ""
+	}
+}
+
+func betterSessionValue(candidate, current *sessionCookieValue) bool {
+	if current == nil {
+		return true
+	}
+	if !candidate.lastUsed.Equal(current.lastUsed) {
+		return candidate.lastUsed.After(current.lastUsed)
+	}
+	if !candidate.expires.Equal(current.expires) {
+		if candidate.expires.IsZero() {
+			return true
+		}
+		if current.expires.IsZero() {
+			return false
+		}
+		return candidate.expires.After(current.expires)
+	}
+	if candidate.domain != current.domain {
+		return candidate.domain < current.domain
+	}
+	return candidate.value < current.value
+}
+
+func betterLoginResult(candidate, current *LoginResult) bool {
+	if candidate == nil {
+		return false
+	}
+	if current == nil {
+		return true
+	}
+	if candidate.CookieDomain != current.CookieDomain {
+		if candidate.CookieDomain == "x.com" {
+			return true
+		}
+		if current.CookieDomain == "x.com" {
+			return false
+		}
+	}
+	if !candidate.LastUsedAt.Equal(current.LastUsedAt) {
+		return candidate.LastUsedAt.After(current.LastUsedAt)
+	}
+	if !candidate.ExpiresAt.Equal(current.ExpiresAt) {
+		if candidate.ExpiresAt.IsZero() {
+			return true
+		}
+		if current.ExpiresAt.IsZero() {
+			return false
+		}
+		return candidate.ExpiresAt.After(current.ExpiresAt)
+	}
+	return candidate.Profile < current.Profile
+}
+
+func earliestExpiry(first, second time.Time) time.Time {
+	if first.IsZero() {
+		return second
+	}
+	if second.IsZero() || first.Before(second) {
+		return first
+	}
+	return second
+}
+
+func latestTime(first, second time.Time) time.Time {
+	if first.After(second) {
+		return first
+	}
+	return second
+}
+
+func cookieProfile(dbPath string) string {
+	dir := filepath.Dir(dbPath)
+	if filepath.Base(dir) == "Network" {
+		dir = filepath.Dir(dir)
+	}
+	profile := filepath.Base(dir)
+	if profile == "." || profile == string(filepath.Separator) || profile == "" {
+		return "unknown"
+	}
+	return profile
 }
 
 func findGeckoBrowser(name string, browsers []geckoBrowser) (geckoBrowser, bool) {

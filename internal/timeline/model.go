@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -74,6 +75,7 @@ type Model struct {
 	replyPost    api.TimelinePost
 	replyPosting bool
 	replyErr     error
+	replyNotice  string
 }
 
 type pageMsg struct {
@@ -97,6 +99,8 @@ type replyResultMsg struct {
 	id  string
 	err error
 }
+
+type replyBrowserMsg struct{ err error }
 
 type toastClearMsg struct{ seq int }
 
@@ -170,7 +174,7 @@ func Run(images string) (Action, error) {
 	if m.imageMode == imageModeNative && images != "native" {
 		if err := probeNativeGraphics(); err != nil {
 			m.imageMode = imageModeANSI
-			m.imageNote = "terminal didn't confirm kitty graphics — using ansi (--images native to force)"
+			m.imageNote = "terminal didn't confirm kitty graphics; using ansi (--images native to force)"
 		}
 	}
 	m.clipboardOK = clip.Init() == nil
@@ -425,6 +429,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = modeReply
 			m.replyPost = post
 			m.replyErr = nil
+			m.replyNotice = ""
 			m.replyEditor.Reset()
 			m.resize()
 			return m, m.imageRepaint(m.replyEditor.Focus())
@@ -511,6 +516,7 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.replyPosting = false
 		if msg.err != nil {
 			m.replyErr = msg.err
+			m.replyNotice = ""
 			return m, m.replyEditor.Focus()
 		}
 		m.mode = modeFeed
@@ -520,6 +526,15 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		return m, m.imageRepaint(toast)
+	case replyBrowserMsg:
+		if msg.err != nil {
+			m.replyErr = fmt.Errorf("couldn't open X: %w", msg.err)
+			m.replyNotice = ""
+			return m, nil
+		}
+		m.replyErr = nil
+		m.replyNotice = "opened reply in X"
+		return m, nil
 	}
 	key, ok := msg.(tea.KeyMsg)
 	if ok {
@@ -527,10 +542,15 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key.String() {
+		case "b":
+			if canOpenReplyInX(m.replyErr) {
+				return m, openReplyInX(m.replyPost.ID, m.replyEditor.Value())
+			}
 		case "esc", "ctrl+c":
 			m.mode = modeFeed
 			m.replyEditor.Blur()
 			m.replyErr = nil
+			m.replyNotice = ""
 			m.syncViewport()
 			return m, m.imageRepaint()
 		case "enter":
@@ -540,6 +560,7 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.replyPosting = true
 			m.replyErr = nil
+			m.replyNotice = ""
 			m.replyEditor.Blur()
 			return m, tea.Batch(m.spinner.Tick, sendReply(m.replyPost.ID, m.replyEditor.Value()))
 		case "alt+enter", "ctrl+j":
@@ -550,6 +571,23 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.replyEditor, cmd = m.replyEditor.Update(msg)
 	return m, cmd
+}
+
+func canOpenReplyInX(err error) bool {
+	var automated *api.AutomationBlockedError
+	if errors.As(err, &automated) {
+		return true
+	}
+	var restricted *api.PostingRestrictedError
+	if errors.As(err, &restricted) {
+		return true
+	}
+	var recent *api.RecentlyPostedError
+	if errors.As(err, &recent) {
+		return true
+	}
+	var ambiguous *api.AmbiguousPostError
+	return errors.As(err, &ambiguous)
 }
 
 func (m Model) imageRepaint(cmds ...tea.Cmd) tea.Cmd {

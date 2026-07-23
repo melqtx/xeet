@@ -93,10 +93,17 @@ func runPost(cmd *cobra.Command, args []string) error {
 				fmt.Fprintln(os.Stderr, "refreshing X endpoint…")
 			case api.PostStagePublishing:
 				fmt.Fprintln(os.Stderr, "publishing…")
+			case api.PostStageReconciling:
+				fmt.Fprintln(os.Stderr, "checking whether the post landed…")
 			}
 		}
 	})
 	if err != nil {
+		if v, _ := cmd.Flags().GetBool("verbose"); v {
+			if diagnostic := client.LastDiagnostic(); diagnostic != "" {
+				fmt.Fprintf(os.Stderr, "diagnostic: %s\n", diagnostic)
+			}
+		}
 		return err
 	}
 	// Cache a freshly discovered query id so we don't rediscover next time.

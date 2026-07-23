@@ -61,23 +61,24 @@ func (c systemClipboard) ReadText() string {
 }
 
 type Model struct {
-	width, height int
-	screen        screen
-	dialog        dialog
-	focus         focus
-	editor        textarea.Model
-	pathInput     textinput.Model
-	spinner       spinner.Model
-	attachments   []media.Attachment
-	selected      int
-	toast         string
-	lastErr       error
-	postStage     api.PostEvent
-	postEvents    <-chan tea.Msg
-	postCancel    context.CancelFunc
-	cancelling    bool
-	postID        string
-	clipboard     clipboardReader
+	width, height  int
+	screen         screen
+	dialog         dialog
+	focus          focus
+	editor         textarea.Model
+	pathInput      textinput.Model
+	spinner        spinner.Model
+	attachments    []media.Attachment
+	selected       int
+	toast          string
+	lastErr        error
+	postDiagnostic string
+	postStage      api.PostEvent
+	postEvents     <-chan tea.Msg
+	postCancel     context.CancelFunc
+	cancelling     bool
+	postID         string
+	clipboard      clipboardReader
 }
 
 func New(clip clipboardReader) Model {
@@ -127,8 +128,9 @@ type postStartedMsg struct {
 }
 type postProgressMsg struct{ event api.PostEvent }
 type postResultMsg struct {
-	id  string
-	err error
+	id         string
+	err        error
+	diagnostic string
 }
 
 func readClipboard(clip clipboardReader) tea.Cmd {
@@ -186,7 +188,7 @@ func beginPost(text string, attachments []media.Attachment) tea.Cmd {
 				cfg.CreateTweetQID = client.QueryID()
 				_ = mgr.Save(cfg)
 			}
-			events <- postResultMsg{id: id, err: err}
+			events <- postResultMsg{id: id, err: err, diagnostic: client.LastDiagnostic()}
 			close(events)
 		}()
 		return postStartedMsg{events: events, cancel: cancel}

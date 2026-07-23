@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"xeet/pkg/config"
@@ -24,15 +25,21 @@ const webBearer = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3
 // createTweetQueryID is the GraphQL persisted-query id for CreateTweet. X
 // rotates these periodically; override with XEET_CREATETWEET_QID if posting
 // starts returning 404 from the GraphQL endpoint.
-const defaultCreateTweetQueryID = "znk3sQMwOEHIDfrHvCK7yQ"
+const defaultCreateTweetQueryID = "hIL9XdleMYEtVXOZVbr8Bg"
 
-// loginUA is the browser User-Agent used for x.com/CDN requests.
-const loginUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+// loginUA is the browser User-Agent used for x.com/CDN requests. It must stay
+// consistent with the Sec-Ch-Ua client hints sent on CreateTweet: a mismatched
+// pair is a bot-detection signal.
+const loginUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 
 // LoginResult is the session material an auth method yields.
 type LoginResult struct {
-	AuthToken string
-	CT0       string
+	AuthToken    string
+	CT0          string
+	Profile      string
+	CookieDomain string
+	ExpiresAt    time.Time
+	LastUsedAt   time.Time
 }
 
 // Upload is one image to upload and attach to a post.
@@ -48,6 +55,7 @@ const (
 	PostStageUploading   PostStage = "uploading"
 	PostStageDiscovering PostStage = "discovering"
 	PostStagePublishing  PostStage = "publishing"
+	PostStageReconciling PostStage = "reconciling"
 	PostStageComplete    PostStage = "complete"
 )
 
@@ -64,13 +72,19 @@ type ProgressFunc func(PostEvent)
 // WebClient posts through x.com's internal GraphQL API using a logged-in
 // browser session (auth_token + ct0 cookies) instead of the developer API.
 type WebClient struct {
-	httpClient *http.Client
-	authToken  string
-	ct0        string
-	queryID    string
-	refreshed  bool          // queryID was re-discovered this session and should be cached
-	retryDelay time.Duration // base backoff between transient retries; tests shrink it
-	discover   func(context.Context, string, string, string) (string, error)
+	httpClient     *http.Client
+	authToken      string
+	ct0            string
+	queryID        string
+	refreshed      bool          // queryID was re-discovered this session and should be cached
+	retryDelay     time.Duration // base backoff between transient retries; tests shrink it
+	reconcileDelay time.Duration
+	lastDiagnostic string
+	userAgent      string
+	clientPlatform string
+	transactionIDs *transactionIDGenerator
+	transactionID  func(context.Context, string, string) (string, error)
+	discover       func(context.Context, string, string, string) (string, error)
 }
 
 // httpResult is one completed HTTP exchange: everything callers need to
@@ -151,7 +165,7 @@ func needsQueryIDRefresh(res *httpResult) bool {
 
 func NewWebClient(cfg *config.Config) *WebClient {
 	// Prefer an explicit override, then the cached id, then a built-in default
-	// (which may be stale — PostTweet re-discovers automatically on a 404).
+	// (which may be stale; PostTweet re-discovers automatically on a 404).
 	qid := defaultCreateTweetQueryID
 	if cfg.CreateTweetQID != "" {
 		qid = cfg.CreateTweetQID
@@ -159,12 +173,17 @@ func NewWebClient(cfg *config.Config) *WebClient {
 	if v := os.Getenv("XEET_CREATETWEET_QID"); v != "" {
 		qid = v
 	}
-	return &WebClient{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		authToken:  cfg.AuthToken,
-		ct0:        cfg.CT0,
-		queryID:    qid,
+	client := &WebClient{
+		httpClient:     &http.Client{Timeout: 30 * time.Second},
+		authToken:      cfg.AuthToken,
+		ct0:            cfg.CT0,
+		queryID:        qid,
+		reconcileDelay: 1500 * time.Millisecond,
+		userAgent:      chromiumUserAgent(runtime.GOOS),
+		clientPlatform: chromiumClientPlatform(runtime.GOOS),
 	}
+	client.transactionID = client.generateTransactionID
+	return client
 }
 
 // QueryID returns the CreateTweet query id currently in use (possibly one that
@@ -182,6 +201,45 @@ func (c *WebClient) discoverOperation(ctx context.Context, operation string) (st
 // caller knows to persist QueryID() back to the config.
 func (c *WebClient) Refreshed() bool { return c.refreshed }
 
+// LastDiagnostic returns sanitized response-shape metadata from the most recent
+// CreateTweet call. It never includes cookies, request bodies, or post text.
+func (c *WebClient) LastDiagnostic() string { return c.lastDiagnostic }
+
+func chromiumUserAgent(goos string) string {
+	if goos == "linux" {
+		return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+	}
+	if goos == "windows" {
+		return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+	}
+	return loginUA
+}
+
+func chromiumClientPlatform(goos string) string {
+	switch goos {
+	case "linux":
+		return `"Linux"`
+	case "windows":
+		return `"Windows"`
+	default:
+		return `"macOS"`
+	}
+}
+
+func (c *WebClient) browserUserAgent() string {
+	if c.userAgent != "" {
+		return c.userAgent
+	}
+	return loginUA
+}
+
+func (c *WebClient) browserClientPlatform() string {
+	if c.clientPlatform != "" {
+		return c.clientPlatform
+	}
+	return `"macOS"`
+}
+
 // setHeaders applies the header set the web client sends on every
 // authenticated GraphQL request.
 func (c *WebClient) setHeaders(req *http.Request) {
@@ -192,53 +250,98 @@ func (c *WebClient) setHeaders(req *http.Request) {
 	req.Header.Set("X-Twitter-Auth-Type", "OAuth2Session")
 	req.Header.Set("X-Twitter-Active-User", "yes")
 	req.Header.Set("X-Twitter-Client-Language", "en")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", c.browserUserAgent())
 	req.Header.Set("Referer", "https://x.com/home")
 	req.Header.Set("Origin", "https://x.com")
+}
+
+// setCreateTweetBrowserHeaders applies the captured browser request metadata
+// that does not vary per request.
+func (c *WebClient) setCreateTweetBrowserHeaders(req *http.Request) {
+	c.setHeaders(req)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Priority", "u=1, i")
+	req.Header.Set("Referer", "https://x.com/compose/post")
+	req.Header.Set("Sec-Ch-Ua", `"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", c.browserClientPlatform())
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+}
+
+// setCreateTweetHeaders adds X's per-request transaction proof. A captured
+// transaction id cannot be replayed because it includes the method, path,
+// current time, and X's rotating browser animation key.
+func (c *WebClient) setCreateTweetHeaders(req *http.Request) error {
+	c.setCreateTweetBrowserHeaders(req)
+	// Tests and custom clients can omit the generator; production clients
+	// created by NewWebClient always install it.
+	if c.transactionID == nil {
+		return nil
+	}
+	transactionID, err := c.transactionID(req.Context(), req.Method, req.URL.Path)
+	if err != nil {
+		return fmt.Errorf("generate X transaction id: %w", err)
+	}
+	req.Header.Set("X-Client-Transaction-Id", transactionID)
+	return nil
 }
 
 // createTweetFeatures is the feature flag set CreateTweet requires. Missing
 // keys cause the endpoint to reject the request, so this mirrors what the web
 // client sends.
 var createTweetFeatures = map[string]bool{
+	"premium_content_api_read_enabled":                                        false,
 	"communities_web_enable_tweet_community_results_fetch":                    true,
 	"c9s_tweet_anatomy_moderator_badge_enabled":                               true,
 	"responsive_web_grok_analyze_button_fetch_trends_enabled":                 false,
 	"responsive_web_grok_analyze_post_followups_enabled":                      true,
-	"responsive_web_jetfuel_frame":                                            false,
+	"rweb_cashtags_composer_attachment_enabled":                               true,
+	"responsive_web_jetfuel_frame":                                            true,
 	"responsive_web_grok_share_attachment_enabled":                            true,
-	"tweetypie_unmention_optimization_enabled":                                true,
+	"responsive_web_grok_annotations_enabled":                                 true,
 	"responsive_web_edit_tweet_api_enabled":                                   true,
+	"rweb_conversational_replies_downvote_enabled":                            false,
 	"graphql_is_translatable_rweb_tweet_is_translatable_enabled":              true,
 	"view_counts_everywhere_api_enabled":                                      true,
 	"longform_notetweets_consumption_enabled":                                 true,
 	"responsive_web_twitter_article_tweet_consumption_enabled":                true,
-	"tweet_awards_web_tipping_enabled":                                        false,
+	"content_disclosure_indicator_enabled":                                    true,
+	"content_disclosure_ai_generated_indicator_enabled":                       true,
+	"responsive_web_grok_show_grok_translated_post":                           true,
 	"responsive_web_grok_analysis_button_from_backend":                        true,
-	"creator_subscriptions_quote_tweet_preview_enabled":                       false,
+	"post_ctas_fetch_enabled":                                                 false,
 	"longform_notetweets_rich_text_read_enabled":                              true,
-	"longform_notetweets_inline_media_enabled":                                true,
+	"longform_notetweets_inline_media_enabled":                                false,
 	"profile_label_improvements_pcf_label_in_post_enabled":                    true,
-	"rweb_tipjar_consumption_enabled":                                         true,
-	"responsive_web_graphql_exclude_directive_enabled":                        true,
-	"verified_phone_label_enabled":                                            false,
+	"responsive_web_profile_redirect_enabled":                                 true,
+	"rweb_tipjar_consumption_enabled":                                         false,
+	"verified_phone_label_enabled":                                            true,
 	"articles_preview_enabled":                                                true,
-	"rweb_video_timestamps_enabled":                                           true,
+	"rweb_cashtags_enabled":                                                   true,
+	"responsive_web_grok_community_note_auto_translation_is_enabled":          true,
 	"responsive_web_graphql_skip_user_profile_image_extensions_enabled":       false,
 	"freedom_of_speech_not_reach_fetch_enabled":                               true,
 	"standardized_nudges_misinfo":                                             true,
 	"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": true,
 	"responsive_web_grok_image_annotation_enabled":                            true,
+	"responsive_web_grok_imagine_annotation_enabled":                          true,
 	"responsive_web_graphql_timeline_navigation_enabled":                      true,
-	"responsive_web_enhance_cards_enabled":                                    false,
 }
 
 type createTweetVariables struct {
-	TweetText             string   `json:"tweet_text"`
-	DarkRequest           bool     `json:"dark_request"`
-	Media                 ctMedia  `json:"media"`
-	SemanticAnnotationIDs []string `json:"semantic_annotation_ids"`
-	Reply                 *ctReply `json:"reply,omitempty"`
+	TweetText                 string                      `json:"tweet_text"`
+	Media                     ctMedia                     `json:"media"`
+	SemanticAnnotationIDs     []string                    `json:"semantic_annotation_ids"`
+	DisallowedReplyOptions    []string                    `json:"disallowed_reply_options"`
+	SemanticAnnotationOptions ctSemanticAnnotationOptions `json:"semantic_annotation_options"`
+	Reply                     *ctReply                    `json:"reply,omitempty"`
+}
+
+type ctSemanticAnnotationOptions struct {
+	Source string `json:"source"`
 }
 
 type ctMedia struct {
@@ -256,11 +359,22 @@ type ctReply struct {
 	ExcludeReplyUserIDs []string `json:"exclude_reply_user_ids"`
 }
 
+func newCreateTweetVariables(text string) createTweetVariables {
+	return createTweetVariables{
+		TweetText:                 text,
+		Media:                     ctMedia{MediaEntities: []mediaEntity{}, PossiblySensitive: false},
+		SemanticAnnotationIDs:     []string{},
+		DisallowedReplyOptions:    nil,
+		SemanticAnnotationOptions: ctSemanticAnnotationOptions{Source: "Htl"},
+	}
+}
+
 // PostTweet posts through the web GraphQL endpoint and returns the created id.
 // Images are uploaded first and attached to the same CreateTweet operation.
 func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploads []Upload, progress ProgressFunc) (string, error) {
+	c.lastDiagnostic = ""
 	if c.authToken == "" || c.ct0 == "" {
-		return "", fmt.Errorf("no session — run 'xeet auth' first")
+		return "", fmt.Errorf("no session; run 'xeet auth' first")
 	}
 	if len(uploads) > 4 {
 		return "", fmt.Errorf("a post can have at most 4 images")
@@ -273,12 +387,7 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 			return "", fmt.Errorf("image %d is empty", i+1)
 		}
 	}
-	vars := createTweetVariables{
-		TweetText:             text,
-		DarkRequest:           false,
-		Media:                 ctMedia{MediaEntities: []mediaEntity{}, PossiblySensitive: false},
-		SemanticAnnotationIDs: []string{},
-	}
+	vars := newCreateTweetVariables(text)
 	for i, upload := range uploads {
 		emitProgress(progress, PostEvent{Stage: PostStageUploading, Current: i + 1, Total: len(uploads), Name: upload.Filename})
 		mediaID, err := c.uploadMedia(ctx, upload)
@@ -292,9 +401,16 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	}
 
 	emitProgress(progress, PostEvent{Stage: PostStagePublishing})
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	attemptedAt := time.Now()
 	res, err := c.doCreateTweet(ctx, vars, c.queryID)
 	if err != nil {
-		return "", err
+		return c.finishAmbiguousCreate(
+			ctx, text, replyToID, len(uploads), attemptedAt,
+			createTransportDiagnostic(err), progress,
+		)
 	}
 
 	// A 404 (or a 400 blaming the persisted query) means the query id rotated.
@@ -309,48 +425,30 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 		}
 		c.queryID = fresh
 		c.refreshed = true
+		attemptedAt = time.Now()
 		res, err = c.doCreateTweet(ctx, vars, fresh)
 		if err != nil {
-			return "", err
+			return c.finishAmbiguousCreate(
+				ctx, text, replyToID, len(uploads), attemptedAt,
+				createTransportDiagnostic(err), progress,
+			)
 		}
 	}
 
-	if err := statusToError(res.status, res.header); err != nil {
-		return "", err
+	outcome := parseCreateTweetResponse(res)
+	c.lastDiagnostic = outcome.diagnostic
+	if outcome.ambiguous {
+		return c.finishAmbiguousCreate(
+			ctx, text, replyToID, len(uploads), attemptedAt,
+			outcome.diagnostic, progress,
+		)
 	}
-	if res.status != http.StatusOK {
-		return "", fmt.Errorf("web API error %d: %s", res.status, truncate(res.body))
-	}
-
-	// GraphQL returns 200 even for logical errors, in an "errors" array.
-	var parsed struct {
-		Errors []struct {
-			Message string `json:"message"`
-			Code    int    `json:"code"`
-		} `json:"errors"`
-		Data struct {
-			CreateTweet struct {
-				TweetResults struct {
-					Result struct {
-						RestID string `json:"rest_id"`
-					} `json:"result"`
-				} `json:"tweet_results"`
-			} `json:"create_tweet"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(res.body, &parsed); err != nil {
-		return "", fmt.Errorf("decode response: %w (body: %s)", err, truncate(res.body))
-	}
-	if len(parsed.Errors) > 0 {
-		return "", mapGraphQLError(parsed.Errors[0].Code, parsed.Errors[0].Message)
-	}
-	postID := parsed.Data.CreateTweet.TweetResults.Result.RestID
-	if postID == "" {
-		return "", fmt.Errorf("x returned success without a created post id")
+	if outcome.err != nil {
+		return "", outcome.err
 	}
 
 	emitProgress(progress, PostEvent{Stage: PostStageComplete})
-	return postID, nil
+	return outcome.id, nil
 }
 
 func emitProgress(progress ProgressFunc, event PostEvent) {
@@ -379,7 +477,9 @@ func (c *WebClient) doCreateTweet(ctx context.Context, vars createTweetVariables
 		if err != nil {
 			return nil, err
 		}
-		c.setHeaders(req)
+		if err := c.setCreateTweetHeaders(req); err != nil {
+			return nil, err
+		}
 		return req, nil
 	}, false, 4<<20)
 }

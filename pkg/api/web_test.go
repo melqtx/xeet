@@ -9,6 +9,15 @@ import (
 	"testing"
 )
 
+func TestChromiumFingerprintMatchesPlatform(t *testing.T) {
+	if got := chromiumUserAgent("darwin"); !strings.Contains(got, "Macintosh") || chromiumClientPlatform("darwin") != `"macOS"` {
+		t.Fatalf("macOS fingerprint = %q / %q", got, chromiumClientPlatform("darwin"))
+	}
+	if got := chromiumUserAgent("linux"); !strings.Contains(got, "X11; Linux") || chromiumClientPlatform("linux") != `"Linux"` {
+		t.Fatalf("Linux fingerprint = %q / %q", got, chromiumClientPlatform("linux"))
+	}
+}
+
 func TestCreateTweetPayloadShape(t *testing.T) {
 	vars := createTweetVariables{
 		TweetText:             "hello",

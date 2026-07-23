@@ -16,7 +16,7 @@ const (
 // SetTweetLiked likes or unlikes a post using X's web GraphQL mutation.
 func (c *WebClient) SetTweetLiked(ctx context.Context, tweetID string, liked bool) error {
 	if c.authToken == "" || c.ct0 == "" {
-		return fmt.Errorf("no session — run 'xeet auth' first")
+		return fmt.Errorf("no session; run 'xeet auth' first")
 	}
 	if tweetID == "" {
 		return fmt.Errorf("tweet id is empty")

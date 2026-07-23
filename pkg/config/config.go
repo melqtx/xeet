@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/zalando/go-keyring"
 	"gopkg.in/yaml.v3"
@@ -16,12 +17,18 @@ import (
 // Config is the whole of xeet's saved state: your x.com browser session plus
 // one cached, non-secret value. AuthToken is the session cookie and CT0 is the
 // matching CSRF token; both live in the OS keyring (macOS Keychain, Linux
-// Secret Service), never on disk. CreateTweetQID caches X's rotating GraphQL
-// query id and is the only thing stored in the config file.
+// Secret Service), never on disk. The config file contains only non-secret
+// state: X's rotating GraphQL query id and browser-session source metadata used
+// by `xeet doctor`.
 type Config struct {
-	AuthToken      string `yaml:"-"`
-	CT0            string `yaml:"-"`
-	CreateTweetQID string `yaml:"create_tweet_qid"`
+	AuthToken       string    `yaml:"-"`
+	CT0             string    `yaml:"-"`
+	CreateTweetQID  string    `yaml:"create_tweet_qid"`
+	SessionBrowser  string    `yaml:"session_browser,omitempty"`
+	SessionProfile  string    `yaml:"session_profile,omitempty"`
+	SessionDomain   string    `yaml:"session_domain,omitempty"`
+	SessionExpires  time.Time `yaml:"session_expires,omitempty"`
+	SessionImported time.Time `yaml:"session_imported,omitempty"`
 }
 
 // keyringService is the service name xeet registers its secrets under.
@@ -79,9 +86,14 @@ func (systemKeyring) Delete(key string) error {
 // fileConfig is the on-disk shape. auth_token and ct0 are only read for
 // migration from the pre-keyring layout and are never written back.
 type fileConfig struct {
-	AuthToken      string `yaml:"auth_token,omitempty"`
-	CT0            string `yaml:"ct0,omitempty"`
-	CreateTweetQID string `yaml:"create_tweet_qid,omitempty"`
+	AuthToken       string `yaml:"auth_token,omitempty"`
+	CT0             string `yaml:"ct0,omitempty"`
+	CreateTweetQID  string `yaml:"create_tweet_qid,omitempty"`
+	SessionBrowser  string `yaml:"session_browser,omitempty"`
+	SessionProfile  string `yaml:"session_profile,omitempty"`
+	SessionDomain   string `yaml:"session_domain,omitempty"`
+	SessionExpires  string `yaml:"session_expires,omitempty"`
+	SessionImported string `yaml:"session_imported,omitempty"`
 }
 
 type ConfigManager struct {
@@ -112,7 +124,22 @@ func (cm *ConfigManager) Load() (*Config, error) {
 		return nil, err
 	}
 
-	config := &Config{CreateTweetQID: fc.CreateTweetQID}
+	config := &Config{
+		CreateTweetQID: fc.CreateTweetQID,
+		SessionBrowser: fc.SessionBrowser,
+		SessionProfile: fc.SessionProfile,
+		SessionDomain:  fc.SessionDomain,
+	}
+	if fc.SessionExpires != "" {
+		if parsed, parseErr := time.Parse(time.RFC3339, fc.SessionExpires); parseErr == nil {
+			config.SessionExpires = parsed
+		}
+	}
+	if fc.SessionImported != "" {
+		if parsed, parseErr := time.Parse(time.RFC3339, fc.SessionImported); parseErr == nil {
+			config.SessionImported = parsed
+		}
+	}
 
 	token, err := cm.secrets.Get(keyAuthToken)
 	switch {
@@ -205,10 +232,26 @@ func (cm *ConfigManager) Save(config *Config) error {
 	// Clean up the short-lived full-cookie experiment. Requests intentionally
 	// use only auth_token and ct0, matching the previously working behavior.
 	_ = cm.secrets.Delete(keyLegacySessionCookies)
-	if err := cm.writeFile(&fileConfig{CreateTweetQID: config.CreateTweetQID}); err != nil {
+	if err := cm.writeFile(fileConfigFor(config)); err != nil {
 		return rollback(err)
 	}
 	return nil
+}
+
+func fileConfigFor(config *Config) *fileConfig {
+	result := &fileConfig{
+		CreateTweetQID: config.CreateTweetQID,
+		SessionBrowser: config.SessionBrowser,
+		SessionProfile: config.SessionProfile,
+		SessionDomain:  config.SessionDomain,
+	}
+	if !config.SessionExpires.IsZero() {
+		result.SessionExpires = config.SessionExpires.UTC().Format(time.RFC3339)
+	}
+	if !config.SessionImported.IsZero() {
+		result.SessionImported = config.SessionImported.UTC().Format(time.RFC3339)
+	}
+	return result
 }
 
 type secretSnapshot struct {
