@@ -190,8 +190,11 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	body := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("timeline keys") +
-		"\n\n↑ / k       previous\n↓ / j       next\nl           like / unlike\nr           reply\nR           refresh\ni           view images\nenter       open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nq           quit" +
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nl           like / unlike\nr           reply\nR           refresh\ni           view images\nenter       open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nq           quit"
+	if m.height < 20 {
+		keys = "\n\nj/k move  ·  g/G ends\nl like    ·  r reply\nR refresh ·  i images\nenter open · y copy\nP compose ·  q quit"
+	}
+	body := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("timeline keys") + keys +
 		"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("? or esc close")
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
 		Padding(1, 2).Width(w - 6).Render(body)
