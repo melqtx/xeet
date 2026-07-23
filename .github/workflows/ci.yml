@@ -51,10 +51,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev
 
       - name: staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
+      - name: Dependency license audit
+        run: >-
+          go run github.com/google/go-licenses@v1.6.0 check ./...
+          --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
 
   cross-compile:
     name: cross (${{ matrix.goos }}/${{ matrix.goarch }})
