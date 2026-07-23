@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -451,59 +450,18 @@ func (c *WebClient) uploadMedia(ctx context.Context, upload Upload) (string, err
 	return out.MediaIDString, nil
 }
 
-// Verify confirms the session cookies work with a cheap authenticated GET that
-// echoes the account handle. It returns the screen name on success. The web
-// client reaches 1.1 endpoints through the same-origin x.com/i/api proxy; the
-// bare api.x.com host 404s several of them, so try the proxy first.
+// Verify confirms the session cookies with a non-mutating authenticated
+// timeline read. X no longer exposes the old web-session account settings
+// endpoint, so the account handle is currently unavailable and the returned
+// string is empty on success.
 func (c *WebClient) Verify(ctx context.Context) (string, error) {
 	if c.authToken == "" || c.ct0 == "" {
 		return "", fmt.Errorf("web session not configured")
 	}
-
-	endpoints := []string{
-		"https://x.com/i/api/1.1/account/settings.json",
-		"https://api.x.com/1.1/account/settings.json",
-		"https://api.twitter.com/1.1/account/settings.json",
+	if _, err := c.FetchHomeTimeline(ctx, "", 1); err != nil {
+		return "", err
 	}
-
-	var lastErr error
-	for _, endpoint := range endpoints {
-		res, err := c.send(ctx, func() (*http.Request, error) {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-			if err != nil {
-				return nil, err
-			}
-			c.setHeaders(req)
-			return req, nil
-		}, true, 2<<20)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if err := statusToError(res.status, res.header); err != nil {
-			return "", err
-		}
-		if res.status != http.StatusOK {
-			lastErr = fmt.Errorf("HTTP %d from %s: %s", res.status, endpoint, truncate(res.body))
-			continue
-		}
-		var settings struct {
-			ScreenName string `json:"screen_name"`
-		}
-		if err := json.Unmarshal(res.body, &settings); err != nil {
-			lastErr = fmt.Errorf("decode settings from %s: %w", endpoint, err)
-			continue
-		}
-		if settings.ScreenName == "" {
-			lastErr = fmt.Errorf("settings response from %s had no account handle", endpoint)
-			continue
-		}
-		return settings.ScreenName, nil
-	}
-	if lastErr == nil {
-		lastErr = errors.New("no verification endpoint succeeded")
-	}
-	return "", lastErr
+	return "", nil
 }
 
 func truncate(b []byte) string {

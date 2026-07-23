@@ -247,23 +247,23 @@ func TestVerifyRetriesTransientFailure(t *testing.T) {
 		if attempts == 1 {
 			return response(http.StatusServiceUnavailable, `temporary`), nil
 		}
-		return response(http.StatusOK, `{"screen_name":"xeet_user"}`), nil
+		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
 	})
 	handle, err := client.Verify(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if handle != "xeet_user" || attempts != 2 {
+	if handle != "" || attempts != 2 {
 		t.Fatalf("handle=%q attempts=%d", handle, attempts)
 	}
 }
 
-func TestVerifyRejectsEmptyHandle(t *testing.T) {
+func TestVerifyRejectsMalformedTimeline(t *testing.T) {
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{}`), nil
 	})
 	if _, err := client.Verify(context.Background()); err == nil {
-		t.Fatal("expected empty handle response to fail verification")
+		t.Fatal("expected malformed verification response to fail")
 	}
 }
 

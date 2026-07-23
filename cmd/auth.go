@@ -74,6 +74,10 @@ func runAuth(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("✓ Connected as @%s via %s. Run `xeet` to post.\n", handle, browser)
+	if handle != "" {
+		fmt.Printf("✓ Connected as @%s via %s. Run `xeet` to post.\n", handle, browser)
+	} else {
+		fmt.Printf("✓ Connected via %s. Run `xeet` to post.\n", browser)
+	}
 	return nil
 }
