@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -99,33 +98,33 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 		qid = value
 	}
 
-	status, body, err := c.doHomeTimeline(ctx, qid, cursor, count)
+	res, err := c.doHomeTimeline(ctx, qid, cursor, count)
 	if err != nil {
 		return nil, err
 	}
-	if status == http.StatusNotFound {
+	if needsQueryIDRefresh(res) {
 		fresh, discoverErr := DiscoverOperationQueryID(ctx, c.authToken, c.ct0, "HomeTimeline")
 		if discoverErr != nil {
 			return nil, fmt.Errorf("home timeline endpoint changed and discovery failed: %w", discoverErr)
 		}
-		status, body, err = c.doHomeTimeline(ctx, fresh, cursor, count)
+		res, err = c.doHomeTimeline(ctx, fresh, cursor, count)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return nil, fmt.Errorf("session expired — run 'xeet auth' again")
+	if err := statusToError(res.status, res.header); err != nil {
+		return nil, err
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("timeline API error %d: %s", status, truncate(body))
+	if res.status != http.StatusOK {
+		return nil, fmt.Errorf("timeline API error %d: %s", res.status, truncate(res.body))
 	}
 
 	var payload any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.Unmarshal(res.body, &payload); err != nil {
 		return nil, fmt.Errorf("decode timeline: %w", err)
 	}
-	if message := firstGraphQLError(payload); message != "" {
-		return nil, fmt.Errorf("x graphql error: %s", message)
+	if err := graphQLError(payload); err != nil {
+		return nil, err
 	}
 	page := parseTimeline(payload)
 	if len(page.Posts) == 0 {
@@ -134,7 +133,8 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 	return &page, nil
 }
 
-func (c *WebClient) doHomeTimeline(ctx context.Context, qid, cursor string, count int) (int, []byte, error) {
+// doHomeTimeline is a read, so transient failures are retried.
+func (c *WebClient) doHomeTimeline(ctx context.Context, qid, cursor string, count int) (*httpResult, error) {
 	variables := map[string]any{
 		"count":                  count,
 		"includePromotedContent": true,
@@ -156,29 +156,14 @@ func (c *WebClient) doHomeTimeline(ctx context.Context, qid, cursor string, coun
 	params.Set("features", string(featuresJSON))
 	params.Set("fieldToggles", string(fieldTogglesJSON))
 	endpoint := fmt.Sprintf("https://x.com/i/api/graphql/%s/HomeTimeline?%s", qid, params.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return 0, nil, err
-	}
-	c.setHeaders(req)
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return 0, nil, fmt.Errorf("fetch timeline: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
-	return resp.StatusCode, body, nil
-}
-
-func firstGraphQLError(payload any) string {
-	root, _ := payload.(map[string]any)
-	errors, _ := root["errors"].([]any)
-	if len(errors) == 0 {
-		return ""
-	}
-	first, _ := errors[0].(map[string]any)
-	message, _ := first["message"].(string)
-	return message
+	return c.send(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	}, true, 20<<20)
 }
 
 func parseTimeline(payload any) TimelinePage {

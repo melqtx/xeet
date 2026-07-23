@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -26,56 +25,54 @@ func (c *WebClient) SetTweetLiked(ctx context.Context, tweetID string, liked boo
 	if !liked {
 		operation, qid = "UnfavoriteTweet", defaultUnfavoriteTweetQueryID
 	}
-	status, body, err := c.doTweetLike(ctx, operation, qid, tweetID)
+	res, err := c.doTweetLike(ctx, operation, qid, tweetID)
 	if err != nil {
 		return err
 	}
-	if status == http.StatusNotFound {
+	if needsQueryIDRefresh(res) {
 		fresh, discoverErr := DiscoverOperationQueryID(ctx, c.authToken, c.ct0, operation)
 		if discoverErr != nil {
 			return fmt.Errorf("%s endpoint changed and discovery failed: %w", operation, discoverErr)
 		}
-		status, body, err = c.doTweetLike(ctx, operation, fresh, tweetID)
+		res, err = c.doTweetLike(ctx, operation, fresh, tweetID)
 		if err != nil {
 			return err
 		}
 	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return fmt.Errorf("session expired — run 'xeet auth' again")
+	if err := statusToError(res.status, res.header); err != nil {
+		return err
 	}
-	if status != http.StatusOK {
-		return fmt.Errorf("like API error %d: %s", status, truncate(body))
+	if res.status != http.StatusOK {
+		return fmt.Errorf("like API error %d: %s", res.status, truncate(res.body))
 	}
 	var payload any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.Unmarshal(res.body, &payload); err != nil {
 		return fmt.Errorf("decode like response: %w", err)
 	}
-	if message := firstGraphQLError(payload); message != "" {
-		return fmt.Errorf("x graphql error: %s", message)
+	if err := graphQLError(payload); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (c *WebClient) doTweetLike(ctx context.Context, operation, qid, tweetID string) (int, []byte, error) {
+// doTweetLike is idempotent (liking twice is a no-op), so transient failures
+// are retried.
+func (c *WebClient) doTweetLike(ctx context.Context, operation, qid, tweetID string) (*httpResult, error) {
 	payload := map[string]any{
 		"variables": map[string]string{"tweet_id": tweetID},
 		"queryId":   qid,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	endpoint := fmt.Sprintf("https://x.com/i/api/graphql/%s/%s", qid, operation)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return 0, nil, err
-	}
-	c.setHeaders(req)
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return 0, nil, fmt.Errorf("update like: %w", err)
-	}
-	defer resp.Body.Close()
-	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	return resp.StatusCode, responseBody, nil
+	return c.send(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	}, true, 2<<20)
 }

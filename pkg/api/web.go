@@ -68,7 +68,84 @@ type WebClient struct {
 	authToken  string
 	ct0        string
 	queryID    string
-	refreshed  bool // queryID was re-discovered this session and should be cached
+	refreshed  bool          // queryID was re-discovered this session and should be cached
+	retryDelay time.Duration // base backoff between transient retries; tests shrink it
+}
+
+// httpResult is one completed HTTP exchange: everything callers need to
+// classify the outcome without holding the response open.
+type httpResult struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+// maxRequestAttempts bounds transient retries: 1 try + 2 retries.
+const maxRequestAttempts = 3
+
+// send issues the request produced by build. When retryTransient is set it
+// retries network errors and gateway-flavored 5xx responses with a short
+// exponential backoff, bounded by maxRequestAttempts and the context.
+// Requests are rebuilt per attempt because bodies are consumed. Mutations
+// that must not double-fire (CreateTweet) pass retryTransient=false.
+func (c *WebClient) send(ctx context.Context, build func() (*http.Request, error), retryTransient bool, bodyLimit int64) (*httpResult, error) {
+	delay := c.retryDelay
+	if delay == 0 {
+		delay = 500 * time.Millisecond
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRequestAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			delay *= 2
+		}
+
+		req, err := build()
+		if err != nil {
+			return nil, fmt.Errorf("request: %w", err)
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			if !retryTransient {
+				return nil, fmt.Errorf("http: %w", err)
+			}
+			lastErr = err
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, bodyLimit))
+		resp.Body.Close()
+
+		if retryTransient && isTransientStatus(resp.StatusCode) && attempt < maxRequestAttempts {
+			lastErr = fmt.Errorf("x returned HTTP %d", resp.StatusCode)
+			continue
+		}
+		return &httpResult{status: resp.StatusCode, header: resp.Header, body: body}, nil
+	}
+	return nil, fmt.Errorf("request failed after %d attempts: %w", maxRequestAttempts, lastErr)
+}
+
+func isTransientStatus(status int) bool {
+	switch status {
+	case http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// needsQueryIDRefresh reports whether a response indicates the persisted-query
+// id rotated: a plain 404, or a 400 that names the persisted query problem.
+func needsQueryIDRefresh(res *httpResult) bool {
+	if res.status == http.StatusNotFound {
+		return true
+	}
+	return res.status == http.StatusBadRequest &&
+		(bytes.Contains(res.body, []byte("PersistedQueryNotFound")) || bytes.Contains(res.body, []byte("queryId")))
 }
 
 func NewWebClient(cfg *config.Config) *WebClient {
@@ -207,14 +284,14 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	}
 
 	emitProgress(progress, PostEvent{Stage: PostStagePublishing})
-	status, respBody, err := c.doCreateTweet(ctx, vars, c.queryID)
+	res, err := c.doCreateTweet(ctx, vars, c.queryID)
 	if err != nil {
 		return "", err
 	}
 
-	// A 404 means the persisted-query id rotated. Discover the current one from
-	// X's live JS bundles, cache it, and retry once.
-	if status == http.StatusNotFound {
+	// A 404 (or a 400 blaming the persisted query) means the query id rotated.
+	// Discover the current one from X's live JS bundles, cache it, retry once.
+	if needsQueryIDRefresh(res) {
 		emitProgress(progress, PostEvent{Stage: PostStageDiscovering})
 		fresh, derr := DiscoverCreateTweetQueryID(ctx, c.authToken, c.ct0)
 		if derr != nil {
@@ -224,23 +301,24 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 		}
 		c.queryID = fresh
 		c.refreshed = true
-		status, respBody, err = c.doCreateTweet(ctx, vars, fresh)
+		res, err = c.doCreateTweet(ctx, vars, fresh)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	if status == http.StatusForbidden || status == http.StatusUnauthorized {
-		return "", fmt.Errorf("session rejected (HTTP %d) — your cookies may have expired, re-run 'xeet auth'. Response: %s", status, truncate(respBody))
+	if err := statusToError(res.status, res.header); err != nil {
+		return "", err
 	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("web API error %d: %s", status, truncate(respBody))
+	if res.status != http.StatusOK {
+		return "", fmt.Errorf("web API error %d: %s", res.status, truncate(res.body))
 	}
 
 	// GraphQL returns 200 even for logical errors, in an "errors" array.
 	var parsed struct {
 		Errors []struct {
 			Message string `json:"message"`
+			Code    int    `json:"code"`
 		} `json:"errors"`
 		Data struct {
 			CreateTweet struct {
@@ -252,11 +330,11 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 			} `json:"create_tweet"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", fmt.Errorf("decode response: %w (body: %s)", err, truncate(respBody))
+	if err := json.Unmarshal(res.body, &parsed); err != nil {
+		return "", fmt.Errorf("decode response: %w (body: %s)", err, truncate(res.body))
 	}
 	if len(parsed.Errors) > 0 {
-		return "", fmt.Errorf("x graphql error: %s", parsed.Errors[0].Message)
+		return "", mapGraphQLError(parsed.Errors[0].Code, parsed.Errors[0].Message)
 	}
 
 	emitProgress(progress, PostEvent{Stage: PostStageComplete})
@@ -269,9 +347,10 @@ func emitProgress(progress ProgressFunc, event PostEvent) {
 	}
 }
 
-// doCreateTweet issues one CreateTweet GraphQL request with the given query id
-// and returns the HTTP status and body.
-func (c *WebClient) doCreateTweet(ctx context.Context, vars createTweetVariables, queryID string) (int, []byte, error) {
+// doCreateTweet issues one CreateTweet GraphQL request with the given query
+// id. It is a mutation, so transient failures are never auto-retried: a
+// timed-out request may still have posted, and retrying risks a double post.
+func (c *WebClient) doCreateTweet(ctx context.Context, vars createTweetVariables, queryID string) (*httpResult, error) {
 	payload := map[string]any{
 		"variables": vars,
 		"features":  createTweetFeatures,
@@ -279,23 +358,18 @@ func (c *WebClient) doCreateTweet(ctx context.Context, vars createTweetVariables
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return 0, nil, fmt.Errorf("marshal: %w", err)
+		return nil, fmt.Errorf("marshal: %w", err)
 	}
 
 	endpoint := fmt.Sprintf("https://x.com/i/api/graphql/%s/CreateTweet", queryID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return 0, nil, fmt.Errorf("request: %w", err)
-	}
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return 0, nil, fmt.Errorf("http: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, respBody, nil
+	return c.send(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	}, false, 4<<20)
 }
 
 // uploadMedia does a simple (non-chunked) image upload through the cookie
@@ -329,32 +403,37 @@ func (c *WebClient) uploadMedia(ctx context.Context, upload Upload) (string, err
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://upload.twitter.com/1.1/media/upload.json", &buf)
+	// Retrying an upload is safe: the worst case is an orphaned media id that
+	// X garbage-collects, never a duplicate post.
+	formBody := buf.Bytes()
+	res, err := c.send(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			"https://upload.twitter.com/1.1/media/upload.json", bytes.NewReader(formBody))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		req.Header.Set("Content-Type", w.FormDataContentType()) // override the JSON default
+		return req, nil
+	}, true, 4<<20)
 	if err != nil {
 		return "", err
 	}
-	c.setHeaders(req)
-	req.Header.Set("Content-Type", w.FormDataContentType()) // override the JSON default
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
+	if err := statusToError(res.status, res.header); err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("upload HTTP %d: %s", resp.StatusCode, truncate(body))
+	if res.status != http.StatusOK && res.status != http.StatusCreated {
+		return "", fmt.Errorf("upload HTTP %d: %s", res.status, truncate(res.body))
 	}
 
 	var out struct {
 		MediaIDString string `json:"media_id_string"`
 	}
-	if err := json.Unmarshal(body, &out); err != nil {
+	if err := json.Unmarshal(res.body, &out); err != nil {
 		return "", fmt.Errorf("decode upload response: %w", err)
 	}
 	if out.MediaIDString == "" {
-		return "", fmt.Errorf("upload returned no media id: %s", truncate(body))
+		return "", fmt.Errorf("upload returned no media id: %s", truncate(res.body))
 	}
 	return out.MediaIDString, nil
 }

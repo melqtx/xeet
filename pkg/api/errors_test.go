@@ -1,0 +1,226 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+func newTestClient(handler func(*http.Request) (*http.Response, error)) *WebClient {
+	return &WebClient{
+		authToken:  "auth",
+		ct0:        "csrf",
+		queryID:    "qid",
+		retryDelay: time.Millisecond,
+		httpClient: &http.Client{Transport: roundTripFunc(handler)},
+	}
+}
+
+func TestPostTweetSessionExpired(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		client := newTestClient(func(req *http.Request) (*http.Response, error) {
+			return response(status, `{"errors":[{"message":"nope"}]}`), nil
+		})
+		_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+		if !errors.Is(err, ErrSessionExpired) {
+			t.Errorf("HTTP %d: got %v, want ErrSessionExpired", status, err)
+		}
+	}
+}
+
+func TestPostTweetRateLimited(t *testing.T) {
+	reset := time.Now().Add(10 * time.Minute).Unix()
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		resp := response(http.StatusTooManyRequests, `{}`)
+		resp.Header.Set("x-rate-limit-reset", strconv.FormatInt(reset, 10))
+		return resp, nil
+	})
+	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	var rle *RateLimitError
+	if !errors.As(err, &rle) {
+		t.Fatalf("got %v, want RateLimitError", err)
+	}
+	if rle.Reset.Unix() != reset {
+		t.Errorf("reset = %v, want unix %d", rle.Reset, reset)
+	}
+	if !strings.Contains(rle.Error(), "min") {
+		t.Errorf("error message should mention minutes: %q", rle.Error())
+	}
+}
+
+func TestPostTweetGraphQLAuthError(t *testing.T) {
+	// GraphQL errors arrive inside an HTTP 200. Code 32 is "could not
+	// authenticate you" and must map to ErrSessionExpired.
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"errors":[{"message":"Could not authenticate you","code":32}]}`), nil
+	})
+	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	if !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("got %v, want ErrSessionExpired", err)
+	}
+}
+
+func TestPostTweetNotRetriedOnTransientFailure(t *testing.T) {
+	// CreateTweet is a mutation: a timed-out request may have posted anyway,
+	// so it must never fire twice on its own.
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return response(http.StatusServiceUnavailable, `oops`), nil
+	})
+	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if attempts != 1 {
+		t.Fatalf("CreateTweet fired %d times, want 1", attempts)
+	}
+}
+
+func TestUploadRetriesTransientFailures(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.Path, "media/upload") {
+			attempts++
+			if attempts < 3 {
+				return response(http.StatusServiceUnavailable, `flaky`), nil
+			}
+			return response(http.StatusOK, `{"media_id_string":"777"}`), nil
+		}
+		return response(http.StatusOK, `{"data":{"create_tweet":{"tweet_results":{"result":{"rest_id":"1"}}}}}`), nil
+	})
+	id, err := client.PostTweet(context.Background(), "pic", "",
+		[]Upload{{Filename: "a.png", ContentType: "image/png", Data: []byte("x")}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "1" || attempts != 3 {
+		t.Fatalf("id=%q attempts=%d, want id=1 attempts=3", id, attempts)
+	}
+}
+
+func TestUploadGivesUpAfterMaxAttempts(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return response(http.StatusBadGateway, `down`), nil
+	})
+	_, err := client.PostTweet(context.Background(), "pic", "",
+		[]Upload{{Filename: "a.png", ContentType: "image/png", Data: []byte("x")}}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if attempts != maxRequestAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, maxRequestAttempts)
+	}
+}
+
+func TestFetchHomeTimelineSessionExpired(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusUnauthorized, `{}`), nil
+	})
+	_, err := client.FetchHomeTimeline(context.Background(), "", 30)
+	if !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("got %v, want ErrSessionExpired", err)
+	}
+}
+
+func TestFetchHomeTimelineRateLimited(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusTooManyRequests, `{}`), nil
+	})
+	_, err := client.FetchHomeTimeline(context.Background(), "", 30)
+	var rle *RateLimitError
+	if !errors.As(err, &rle) {
+		t.Fatalf("got %v, want RateLimitError", err)
+	}
+}
+
+func TestSetTweetLikedRetriesTransient(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return response(http.StatusServiceUnavailable, `flaky`), nil
+		}
+		return response(http.StatusOK, `{"data":{}}`), nil
+	})
+	if err := client.SetTweetLiked(context.Background(), "123", true); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestSetTweetLikedGraphQLRateLimit(t *testing.T) {
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"errors":[{"message":"Rate limit exceeded","code":88}]}`), nil
+	})
+	err := client.SetTweetLiked(context.Background(), "123", true)
+	var rle *RateLimitError
+	if !errors.As(err, &rle) {
+		t.Fatalf("got %v, want RateLimitError", err)
+	}
+}
+
+func TestNeedsQueryIDRefresh(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		want   bool
+	}{
+		{http.StatusNotFound, ``, true},
+		{http.StatusBadRequest, `{"errors":[{"message":"PersistedQueryNotFound"}]}`, true},
+		{http.StatusBadRequest, `{"errors":[{"message":"bad queryId"}]}`, true},
+		{http.StatusBadRequest, `{"errors":[{"message":"features cannot be null"}]}`, false},
+		{http.StatusOK, ``, false},
+		{http.StatusUnauthorized, ``, false},
+	}
+	for _, tc := range cases {
+		res := &httpResult{status: tc.status, body: []byte(tc.body)}
+		if got := needsQueryIDRefresh(res); got != tc.want {
+			t.Errorf("needsQueryIDRefresh(%d, %q) = %v, want %v", tc.status, tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestSendRespectsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		cancel() // cancel while the first attempt is in flight
+		return response(http.StatusServiceUnavailable, `down`), nil
+	})
+	client.retryDelay = time.Hour // a retry sleep would hang the test if ctx were ignored
+	_, err := client.FetchHomeTimeline(ctx, "", 30)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestErrorsNeverLeakCookies(t *testing.T) {
+	// Every error path must keep session material out of messages.
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusInternalServerError, `server error`), nil
+	})
+	client.authToken = "tok_hunter2_secret"
+	client.ct0 = "csrf_hunter2_secret"
+	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	for _, secret := range []string{"tok_hunter2_secret", "csrf_hunter2_secret"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error message leaks session material %q: %s", secret, err)
+		}
+	}
+}

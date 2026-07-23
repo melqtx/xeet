@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"image"
 	"image/png"
@@ -127,5 +128,49 @@ func TestResizeBoundsEditor(t *testing.T) {
 	m = updateModel(t, m, tea.WindowSizeMsg{Width: 44, Height: 15})
 	if m.editor.Width() < 24 || m.editor.Height() < 4 {
 		t.Fatalf("bad compact dimensions: %dx%d", m.editor.Width(), m.editor.Height())
+	}
+}
+
+func TestDraftPreservedOnPostFailure(t *testing.T) {
+	// Regression guard: every posting failure must return to the composer
+	// with the draft text and attachments intact.
+	m := New(fakeClipboard{})
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.editor.SetValue("my precious draft")
+	m.attachments = append(m.attachments, media.Attachment{Name: "pic.png", MIME: "image/png", Data: pngBytes(t, 4)})
+	m.screen = screenPosting
+
+	m = updateModel(t, m, postResultMsg{err: errors.New("x is down")})
+
+	if m.screen != screenCompose {
+		t.Fatalf("screen = %v, want screenCompose", m.screen)
+	}
+	if m.editor.Value() != "my precious draft" {
+		t.Fatalf("draft lost: %q", m.editor.Value())
+	}
+	if len(m.attachments) != 1 {
+		t.Fatalf("attachments lost: %d", len(m.attachments))
+	}
+	if m.lastErr == nil {
+		t.Fatal("error not surfaced to the user")
+	}
+}
+
+func TestDraftClearedOnCancelNotOnFailure(t *testing.T) {
+	m := New(fakeClipboard{})
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.editor.SetValue("still here")
+	m.screen = screenPosting
+
+	m = updateModel(t, m, postResultMsg{err: context.Canceled})
+
+	if m.screen != screenCompose {
+		t.Fatalf("screen = %v, want screenCompose", m.screen)
+	}
+	if m.editor.Value() != "still here" {
+		t.Fatalf("draft lost on cancel: %q", m.editor.Value())
+	}
+	if m.lastErr != nil {
+		t.Fatalf("cancel should not surface an error, got %v", m.lastErr)
 	}
 }
