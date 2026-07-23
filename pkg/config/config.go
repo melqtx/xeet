@@ -35,6 +35,10 @@ const (
 // ErrSecretNotFound is returned by a SecretStore when a key has no value.
 var ErrSecretNotFound = errors.New("secret not found")
 
+// ErrSessionIncomplete means only one of the two required session values is
+// present. Re-authentication is safer than trying to use a mismatched pair.
+var ErrSessionIncomplete = errors.New("saved session is incomplete; run 'xeet auth' to reconnect")
+
 // SecretStore is where session tokens live. The real implementation is the OS
 // keyring; tests inject an in-memory fake.
 type SecretStore interface {
@@ -112,11 +116,22 @@ func (cm *ConfigManager) Load() (*Config, error) {
 	token, err := cm.secrets.Get(keyAuthToken)
 	switch {
 	case err == nil:
-		config.AuthToken = token
-		if ct0, err := cm.secrets.Get(keyCT0); err == nil {
-			config.CT0 = ct0
+		ct0, ct0Err := cm.secrets.Get(keyCT0)
+		if errors.Is(ct0Err, ErrSecretNotFound) || token == "" || ct0 == "" {
+			return nil, ErrSessionIncomplete
 		}
+		if ct0Err != nil {
+			return nil, ct0Err
+		}
+		config.AuthToken = token
+		config.CT0 = ct0
 	case errors.Is(err, ErrSecretNotFound):
+		// A leftover ct0 without auth_token is also corruption.
+		if ct0, ct0Err := cm.secrets.Get(keyCT0); ct0Err == nil && ct0 != "" {
+			return nil, ErrSessionIncomplete
+		} else if ct0Err != nil && !errors.Is(ct0Err, ErrSecretNotFound) {
+			return nil, ct0Err
+		}
 		// Nothing in the keyring. If the config file still holds tokens from
 		// the old layout, migrate them into the keyring now.
 		if fc.AuthToken != "" {
@@ -137,12 +152,14 @@ func (cm *ConfigManager) Load() (*Config, error) {
 // deletes the now-useless key file.
 func (cm *ConfigManager) migrateLegacy(fc *fileConfig, config *Config) error {
 	token := fc.AuthToken
-	if key, err := os.ReadFile(cm.legacyKeyPath); err == nil {
+	if key, err := secureReadFile(cm.legacyKeyPath); err == nil {
 		decrypted, err := legacyDecrypt(token, key)
 		if err != nil {
 			return fmt.Errorf("migrating legacy session: %w (run 'xeet auth' to reconnect)", err)
 		}
 		token = decrypted
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("migrating legacy session key: %w", err)
 	}
 
 	config.AuthToken = token
@@ -156,17 +173,61 @@ func (cm *ConfigManager) migrateLegacy(fc *fileConfig, config *Config) error {
 }
 
 func (cm *ConfigManager) Save(config *Config) error {
-	if config.AuthToken != "" {
-		if err := cm.secrets.Set(keyAuthToken, config.AuthToken); err != nil {
-			return err
-		}
+	if config == nil {
+		return errors.New("config is nil")
 	}
-	if config.CT0 != "" {
-		if err := cm.secrets.Set(keyCT0, config.CT0); err != nil {
-			return err
-		}
+	if (config.AuthToken == "") != (config.CT0 == "") {
+		return ErrSessionIncomplete
 	}
-	return cm.writeFile(&fileConfig{CreateTweetQID: config.CreateTweetQID})
+	if config.AuthToken == "" {
+		return cm.writeFile(&fileConfig{CreateTweetQID: config.CreateTweetQID})
+	}
+
+	oldAuth, err := cm.snapshotSecret(keyAuthToken)
+	if err != nil {
+		return err
+	}
+	oldCT0, err := cm.snapshotSecret(keyCT0)
+	if err != nil {
+		return err
+	}
+	rollback := func(cause error) error {
+		return errors.Join(cause, cm.restoreSecret(keyAuthToken, oldAuth), cm.restoreSecret(keyCT0, oldCT0))
+	}
+
+	if err := cm.secrets.Set(keyAuthToken, config.AuthToken); err != nil {
+		return err
+	}
+	if err := cm.secrets.Set(keyCT0, config.CT0); err != nil {
+		return rollback(err)
+	}
+	if err := cm.writeFile(&fileConfig{CreateTweetQID: config.CreateTweetQID}); err != nil {
+		return rollback(err)
+	}
+	return nil
+}
+
+type secretSnapshot struct {
+	value  string
+	exists bool
+}
+
+func (cm *ConfigManager) snapshotSecret(key string) (secretSnapshot, error) {
+	value, err := cm.secrets.Get(key)
+	if errors.Is(err, ErrSecretNotFound) {
+		return secretSnapshot{}, nil
+	}
+	if err != nil {
+		return secretSnapshot{}, err
+	}
+	return secretSnapshot{value: value, exists: true}, nil
+}
+
+func (cm *ConfigManager) restoreSecret(key string, snapshot secretSnapshot) error {
+	if snapshot.exists {
+		return cm.secrets.Set(key, snapshot.value)
+	}
+	return cm.secrets.Delete(key)
 }
 
 // Erase deletes the saved session: keyring entries, config file, and any
@@ -191,18 +252,10 @@ func (cm *ConfigManager) Erase() error {
 }
 
 func (cm *ConfigManager) readFile() (*fileConfig, error) {
-	fi, err := os.Lstat(cm.configPath)
+	data, err := secureReadFile(cm.configPath)
 	if os.IsNotExist(err) {
 		return &fileConfig{}, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("config file %s is a symlink; refusing to follow it", cm.configPath)
-	}
-
-	data, err := os.ReadFile(cm.configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -242,10 +295,17 @@ func (cm *ConfigManager) writeFile(fc *fileConfig) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, cm.configPath)
+	if err := os.Rename(tmpPath, cm.configPath); err != nil {
+		return err
+	}
+	return syncDirectory(dir)
 }
 
 // legacyDecrypt undoes the old AES-GCM-with-key-on-disk scheme, used only to

@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -215,4 +216,100 @@ func legacyEncrypt(t *testing.T, plaintext string, key []byte) string {
 		t.Fatal(err)
 	}
 	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(plaintext), nil))
+}
+
+type failingStore struct {
+	*fakeStore
+	failKey   string
+	failValue string
+}
+
+func (f *failingStore) Set(key, value string) error {
+	if key == f.failKey && value == f.failValue {
+		return errors.New("injected keyring failure")
+	}
+	return f.fakeStore.Set(key, value)
+}
+
+func TestSaveRollsBackPartialKeyringWrite(t *testing.T) {
+	base := newFakeStore()
+	base.data[keyAuthToken] = "old-auth"
+	base.data[keyCT0] = "old-ct0"
+	store := &failingStore{fakeStore: base, failKey: keyCT0, failValue: "new-ct0"}
+	cm := newConfigManagerAt(t.TempDir(), store)
+
+	err := cm.Save(&Config{AuthToken: "new-auth", CT0: "new-ct0", CreateTweetQID: "qid"})
+	if err == nil {
+		t.Fatal("expected injected keyring error")
+	}
+	if base.data[keyAuthToken] != "old-auth" || base.data[keyCT0] != "old-ct0" {
+		t.Fatalf("partial save was not rolled back: %+v", base.data)
+	}
+}
+
+func TestSaveRollsBackWhenConfigWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	store := newFakeStore()
+	store.data[keyAuthToken] = "old-auth"
+	store.data[keyCT0] = "old-ct0"
+	cm := newConfigManagerAt(dir, store)
+
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("safe"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, cm.configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cm.Save(&Config{AuthToken: "new-auth", CT0: "new-ct0", CreateTweetQID: "qid"})
+	if err == nil {
+		t.Fatal("expected config write error")
+	}
+	if store.data[keyAuthToken] != "old-auth" || store.data[keyCT0] != "old-ct0" {
+		t.Fatalf("keyring was not rolled back: %+v", store.data)
+	}
+}
+
+func TestIncompleteKeyringSessionIsRejected(t *testing.T) {
+	for key, value := range map[string]string{keyAuthToken: "auth-only", keyCT0: "ct0-only"} {
+		store := newFakeStore()
+		store.data[key] = value
+		cm := newConfigManagerAt(t.TempDir(), store)
+		_, err := cm.Load()
+		if !errors.Is(err, ErrSessionIncomplete) {
+			t.Errorf("key %s: got %v, want ErrSessionIncomplete", key, err)
+		}
+	}
+}
+
+func TestSaveRejectsIncompleteSession(t *testing.T) {
+	store := newFakeStore()
+	cm := newConfigManagerAt(t.TempDir(), store)
+	for _, cfg := range []*Config{{AuthToken: "auth"}, {CT0: "ct0"}, nil} {
+		if err := cm.Save(cfg); err == nil {
+			t.Fatalf("Save(%+v) succeeded", cfg)
+		}
+	}
+	if len(store.data) != 0 {
+		t.Fatalf("incomplete session touched keyring: %+v", store.data)
+	}
+}
+
+func TestLoadRepairsConfigPermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".xeet.yaml")
+	if err := os.WriteFile(path, []byte("create_tweet_qid: qid\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newConfigManagerAt(dir, newFakeStore()).Load(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("permissions = %o, want 0600", info.Mode().Perm())
+	}
 }
