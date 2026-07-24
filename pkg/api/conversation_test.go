@@ -87,6 +87,14 @@ func TestFetchTweetDetailUsesConfiguredQueryIDAndVariables(t *testing.T) {
 	}
 }
 
+func TestOperationHintKeepsTweetDetailOffTheComposeBundle(t *testing.T) {
+	// The generic "Tweet" hint maps to the Compose bundle, which does not
+	// contain the TweetDetail operation. Discovery must search its own chunk.
+	if got := operationHint("TweetDetail"); got != "TweetDetail" {
+		t.Fatalf("operationHint(TweetDetail) = %q", got)
+	}
+}
+
 func TestTweetDetailRefreshesRotatedQueryID(t *testing.T) {
 	attempts := 0
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {

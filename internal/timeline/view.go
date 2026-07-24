@@ -81,7 +81,7 @@ func (m Model) header(width int) string {
 		status = m.spinner.View() + " loading more"
 	}
 	face := "( o.o )"
-	if m.err != nil {
+	if m.err != nil || (m.mode == modeThread && m.threadErr != nil) {
 		face = "( >.< )"
 	}
 	cat := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
@@ -136,11 +136,14 @@ func (m Model) viewThread() string {
 			lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View()+" gathering replies…"))
 		return m.shell(center, footer)
 	}
-	if m.threadErr != nil && len(m.threadPosts) == 0 {
+	// The thread opens pre-seeded with the focal post, so a fetch failure
+	// almost never leaves the list empty. Show the error over the posts we
+	// have instead of hiding it behind a bare retry footer.
+	if m.threadErr != nil {
 		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
 			lipgloss.NewStyle().Foreground(red).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
 				Render("the cat lost the replies\n\n"+m.threadErr.Error()))
-		return m.shell(center, "R retry · esc back")
+		return m.shell(center, footer)
 	}
 	return m.shell(m.viewport.View(), footer)
 }
@@ -150,7 +153,12 @@ func (m Model) threadFooter() string {
 		return m.toast
 	}
 	if m.threadErr != nil {
-		return "R retry · esc back"
+		parts := []string{"R retry"}
+		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+			parts = append([]string{"a reconnect"}, parts...)
+		}
+		parts = append(parts, "esc back")
+		return strings.Join(parts, "  ·  ")
 	}
 	position := 0
 	if len(m.threadPosts) > 0 {
@@ -570,7 +578,7 @@ func (m Model) viewHelp() string {
 		keys = strings.Replace(keys, "enter       read full post", "enter       open replies\ne / space   read full post", 1)
 	}
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
 		keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\nenter read · i zoom · A alt text\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"

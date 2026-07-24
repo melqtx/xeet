@@ -453,6 +453,93 @@ func TestThreadIgnoresOlderRequestForSameRoot(t *testing.T) {
 	}
 }
 
+func TestThreadErrorIsVisibleWithSeededRoot(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadSeq = 1
+	m.threadLoading = true
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, err: errors.New("discovery failed badly")})
+	view := m.View()
+	if !strings.Contains(view, "discovery failed badly") || !strings.Contains(view, "R retry") {
+		t.Fatalf("thread error not shown despite seeded root:\n%s", view)
+	}
+}
+
+func TestThreadSessionExpiryOffersReconnect(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadSeq = 1
+	m.threadLoading = true
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, err: api.ErrSessionExpired})
+	if !strings.Contains(m.View(), "a reconnect") {
+		t.Fatalf("session-expired thread did not offer reconnect:\n%s", m.View())
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = next.(Model)
+	if m.action.Kind != ActionAuthenticate || cmd == nil {
+		t.Fatal("a did not start the reconnect flow from thread mode")
+	}
+}
+
+func TestThreadEscPromotesSessionExpiryToFeed(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadErr = api.ErrSessionExpired
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeFeed || !errors.Is(m.err, api.ErrSessionExpired) {
+		t.Fatalf("esc dropped the expired session: mode=%v err=%v", m.mode, m.err)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = next.(Model)
+	if m.action.Kind != ActionAuthenticate || cmd == nil {
+		t.Fatal("feed reconnect was unreachable after leaving the thread")
+	}
+}
+
+func TestThreadEscKeepsOrdinaryErrorsOutOfFeed(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadErr = errors.New("replies timed out")
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeFeed || m.err != nil {
+		t.Fatalf("thread-only error leaked into the feed: err=%v", m.err)
+	}
+}
+
+func TestThreadRefreshKeepsRootWhenPageOmitsIt(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadSeq = 1
+	m.threadLoading = true
+	m.threadPosts = []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Text: "the focal post"}},
+		{TimelinePost: api.TimelinePost{ID: "old", Text: "old reply", InReplyToID: "root"}, Depth: 1},
+	}
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, page: &api.ConversationPage{Posts: []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "reply", Text: "only reply", InReplyToID: "root"}, Depth: 1},
+	}}})
+	if len(m.threadPosts) != 2 || m.threadPosts[0].ID != "root" || m.threadPosts[0].Depth != 0 {
+		t.Fatalf("refresh dropped the focal post: %+v", m.threadPosts)
+	}
+	if m.threadPosts[1].ID != "reply" {
+		t.Fatalf("refresh lost the new reply: %+v", m.threadPosts)
+	}
+}
+
 func TestThreadReplyTargetsSelectedReplyAndReturnsToThread(t *testing.T) {
 	m := newModel("off", true)
 	m.loading = false

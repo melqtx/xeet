@@ -689,8 +689,13 @@ func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd)
 			seen[post.ID] = true
 		}
 	}
-	if len(merged) == 0 && len(m.threadPosts) > 0 {
-		merged = append(merged, m.threadPosts[0])
+	// X can omit the focal post from a refresh while still returning replies.
+	// The conversation must always keep its root: without it a refresh would
+	// silently turn the thread into a list of orphaned replies.
+	if !seen[m.threadRootID] {
+		if root, ok := m.threadRootPost(); ok {
+			merged = append([]api.ConversationPost{root}, merged...)
+		}
 	}
 	m.threadPosts = merged
 	m.normalizeThreadDepths()
@@ -705,6 +710,16 @@ func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd)
 		return m, m.imageRepaint(m.requestPreviews())
 	}
 	return m, nil
+}
+
+func (m Model) threadRootPost() (api.ConversationPost, bool) {
+	for _, post := range m.threadPosts {
+		if post.ID == m.threadRootID {
+			post.Depth = 0
+			return post, true
+		}
+	}
+	return api.ConversationPost{}, false
 }
 
 func (m Model) resolveConversationPosts(page *api.ConversationPage) []api.ConversationPost {
@@ -796,6 +811,7 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 			content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
 			columns: msg.columns, rows: msg.rows, err: msg.err,
 		}
+		m.evictDistantPreviews()
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		return m, m.imageRepaint()
@@ -821,10 +837,23 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.expanded = false
 		m.threadLoading = false
 		m.threadMore = false
+		// An expired session affects every request, not just this thread.
+		// Hand the error to the feed so its reconnect flow stays reachable.
+		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+			m.err = m.threadErr
+		}
 		m.threadErr = nil
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		return m, m.imageRepaint()
+	case "a":
+		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+			m.action = Action{Kind: ActionAuthenticate}
+			return m, tea.Quit
+		}
+	case "ctrl+l":
+		m.syncViewport()
+		return m, func() tea.Msg { return tea.ClearScreen() }
 	case "?", "f1":
 		m.help = true
 		return m, m.imageRepaint()
