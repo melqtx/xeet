@@ -21,6 +21,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
 		return m, nil
+	case saveDraftMsg:
+		if msg.seq != m.draftSeq {
+			return m, nil
+		}
+		if err := m.saveDraft(); err != nil {
+			m.toast = "Couldn't autosave draft: " + err.Error()
+		}
+		return m, nil
 	case clipboardMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err
@@ -33,7 +41,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editor.InsertString(msg.text)
 			m.toast = "Pasted text"
 		}
-		return m, nil
+		return m, m.scheduleDraftSave()
 	case attachmentMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err
@@ -41,7 +49,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastErr = nil
 		m.addAttachment(msg.attachment)
-		return m, nil
+		return m, m.scheduleDraftSave()
 	case postStartedMsg:
 		m.postEvents = msg.events
 		m.postCancel = msg.cancel
@@ -68,6 +76,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.postID = msg.id
 		m.postDiagnostic = ""
 		m.postEvents = nil
+		m.draftSeq++
+		if err := m.drafts.Clear(); err != nil {
+			m.toast = "Warning: couldn't clear the saved draft: " + err.Error()
+		} else {
+			m.toast = ""
+		}
 		return m, nil
 	case browserOpenedMsg:
 		if msg.err != nil {
@@ -107,21 +121,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if canOpenDraftInX(m.lastErr) && strings.TrimSpace(m.editor.Value()) != "" {
 				return m, openDraftInX(m.editor.Value())
 			}
-		case "ctrl+c":
+		case "ctrl+c", "esc":
 			if m.hasDraft() {
 				m.dialog = dialogQuit
 				return m, nil
 			}
-			return m, tea.Quit
-		case "esc":
-			if m.hasDraft() {
-				m.dialog = dialogQuit
+			m.draftSeq++
+			if err := m.drafts.Clear(); err != nil {
+				m.lastErr = fmt.Errorf("clear empty draft: %w", err)
 				return m, nil
 			}
 			return m, tea.Quit
 		case "enter":
 			if !m.hasDraft() {
 				m.toast = "Write something or attach an image first"
+				return m, nil
+			}
+			if err := m.saveDraft(); err != nil {
+				m.lastErr = fmt.Errorf("save draft before posting: %w", err)
 				return m, nil
 			}
 			m.lastErr = nil
@@ -136,6 +153,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "alt+enter", "ctrl+j":
 			if m.focus == focusEditor {
 				m.editor.InsertString("\n")
+				return m, m.scheduleDraftSave()
 			}
 			return m, nil
 		case "ctrl+v":
@@ -172,6 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "backspace", "delete", "ctrl+x":
 				m.removeSelected()
+				return m, m.scheduleDraftSave()
 			case "enter":
 				m.focus = focusEditor
 				return m, m.editor.Focus()
@@ -180,9 +199,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	before := m.editor.Value()
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
 	cmds = append(cmds, cmd)
+	if m.editor.Value() != before {
+		cmds = append(cmds, m.scheduleDraftSave())
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -208,6 +231,18 @@ func (m Model) updateDialog(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case dialogQuit:
 		switch strings.ToLower(key.String()) {
 		case "y", "enter", "ctrl+c":
+			if err := m.saveDraft(); err != nil {
+				m.dialog = dialogNone
+				m.lastErr = fmt.Errorf("save draft before quitting: %w", err)
+				return m, nil
+			}
+			return m, tea.Quit
+		case "d":
+			if err := m.drafts.Clear(); err != nil {
+				m.dialog = dialogNone
+				m.lastErr = fmt.Errorf("discard saved draft: %w", err)
+				return m, nil
+			}
 			return m, tea.Quit
 		case "n", "esc":
 			m.dialog = dialogNone

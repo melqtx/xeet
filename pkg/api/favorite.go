@@ -21,10 +21,11 @@ func (c *WebClient) SetTweetLiked(ctx context.Context, tweetID string, liked boo
 	if tweetID == "" {
 		return fmt.Errorf("tweet id is empty")
 	}
-	operation, qid := "FavoriteTweet", defaultFavoriteTweetQueryID
+	operation, fallback := "FavoriteTweet", defaultFavoriteTweetQueryID
 	if !liked {
-		operation, qid = "UnfavoriteTweet", defaultUnfavoriteTweetQueryID
+		operation, fallback = "UnfavoriteTweet", defaultUnfavoriteTweetQueryID
 	}
+	qid := c.operationQueryID(operation, fallback, "")
 	res, err := c.doTweetLike(ctx, operation, qid, tweetID)
 	if err != nil {
 		return err
@@ -41,6 +42,9 @@ func (c *WebClient) SetTweetLiked(ctx context.Context, tweetID string, liked boo
 	}
 	if err := statusToError(res.status, res.header); err != nil {
 		return err
+	}
+	if isTransientStatus(res.status) {
+		return &ServiceUnavailableError{Status: res.status}
 	}
 	if res.status != http.StatusOK {
 		return fmt.Errorf("like API error %d: %s", res.status, truncate(res.body))

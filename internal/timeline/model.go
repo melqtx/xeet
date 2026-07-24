@@ -34,6 +34,7 @@ type ActionKind int
 const (
 	ActionQuit ActionKind = iota
 	ActionCompose
+	ActionAuthenticate
 )
 
 type Action struct{ Kind ActionKind }
@@ -58,6 +59,7 @@ type Model struct {
 	loadingMore   bool
 	refreshing    bool
 	help          bool
+	altText       bool
 	expanded      bool
 	zoom          bool
 	action        Action
@@ -199,7 +201,11 @@ func fetchPage(cursor string, more bool) tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
-		page, err := api.NewWebClient(cfg).FetchHomeTimeline(ctx, cursor, 30)
+		client := api.NewWebClient(cfg)
+		page, err := client.FetchHomeTimeline(ctx, cursor, 30)
+		if client.ApplyRefreshedQueryIDs(cfg) {
+			_ = mgr.Save(cfg)
+		}
 		return pageMsg{page: page, err: err, more: more}
 	}
 }
@@ -216,7 +222,11 @@ func setLike(tweetID string, liked bool) tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		err = api.NewWebClient(cfg).SetTweetLiked(ctx, tweetID, liked)
+		client := api.NewWebClient(cfg)
+		err = client.SetTweetLiked(ctx, tweetID, liked)
+		if client.ApplyRefreshedQueryIDs(cfg) {
+			_ = mgr.Save(cfg)
+		}
 		return likeMsg{id: tweetID, liked: liked, err: err}
 	}
 }
@@ -235,8 +245,7 @@ func sendReply(tweetID, text string) tea.Cmd {
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		id, err := client.PostTweet(ctx, text, tweetID, nil, nil)
-		if err == nil && client.Refreshed() {
-			cfg.CreateTweetQID = client.QueryID()
+		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.Save(cfg)
 		}
 		return replyResultMsg{id: id, err: err}
@@ -269,6 +278,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "?", "esc", "enter":
 				m.help = false
+				return m, m.imageRepaint()
+			}
+		}
+		return m, nil
+	}
+	if m.altText {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "A", "esc", "enter":
+				m.altText = false
 				return m, m.imageRepaint()
 			}
 		}
@@ -439,6 +460,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 			return m, m.imageRepaint(m.replyEditor.Focus())
 		}
+	case "a":
+		if errors.Is(m.err, api.ErrSessionExpired) {
+			m.action = Action{Kind: ActionAuthenticate}
+			return m, tea.Quit
+		}
 	case "P", "c":
 		m.action = Action{Kind: ActionCompose}
 		return m, tea.Quit
@@ -452,6 +478,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "o":
 		if post, ok := m.currentPost(); ok {
 			return m, openURL(postURL(post))
+		}
+	case "A":
+		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
+			m.altText = true
+			return m, m.imageRepaint()
 		}
 	case "i":
 		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {

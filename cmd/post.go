@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -77,7 +76,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
 
 	if cfg.AuthToken == "" {
 		return fmt.Errorf("run 'xeet auth' first")
@@ -106,9 +105,8 @@ func runPost(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	// Cache a freshly discovered query id so we don't rediscover next time.
-	if client.Refreshed() {
-		cfg.CreateTweetQID = client.QueryID()
+	// Cache freshly discovered operation ids so later commands avoid discovery.
+	if client.ApplyRefreshedQueryIDs(cfg) {
 		_ = configMgr.Save(cfg)
 	}
 	if id != "" {

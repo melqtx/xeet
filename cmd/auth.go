@@ -61,10 +61,12 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	candidate.SessionImported = time.Now()
 	ctx, cancel := context.WithTimeout(cmd.Context(), 45*time.Second)
 	defer cancel()
-	handle, err := api.NewWebClient(&candidate).Verify(ctx)
+	client := api.NewWebClient(&candidate)
+	handle, err := client.Verify(ctx)
 	if err != nil {
 		return fmt.Errorf("session found in %s but X rejected verification: %w", browser, err)
 	}
+	client.ApplyRefreshedQueryIDs(&candidate)
 	if err := configMgr.Save(&candidate); err != nil {
 		return err
 	}

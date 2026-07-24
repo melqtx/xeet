@@ -191,6 +191,9 @@ func (m Model) viewSuccess() string {
 	if m.postID != "" {
 		body += "\n\n" + lipgloss.NewStyle().Width(w).Align(lipgloss.Center).Render("https://x.com/i/status/"+m.postID)
 	}
+	if m.toast != "" {
+		body += "\n\n" + lipgloss.NewStyle().Foreground(red).Width(w).Align(lipgloss.Center).Render(m.toast)
+	}
 	body += "\n\n" + lipgloss.NewStyle().Foreground(muted).Width(w).Align(lipgloss.Center).Render("enter for another  •  q bye")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
 }
@@ -211,9 +214,9 @@ func (m Model) viewDialog() string {
 			"\n\nenter       send your xeet\nalt+enter   new line\nctrl+v      paste clipboard\nctrl+o      add a pic\ntab         pick a pic\ndelete      remove a pic\nesc         head out" +
 			"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("f1 or esc to close")
 	case dialogQuit:
-		body = lipgloss.NewStyle().Foreground(pink).Bold(true).Render("leave this draft behind?") +
-			"\n\nYour words and pics will disappear." +
-			"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("y leave  •  n stay")
+		body = lipgloss.NewStyle().Foreground(pink).Bold(true).Render("save this draft for later?") +
+			"\n\nYour words and pics can be restored next time." +
+			"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("y save & leave  •  d discard  •  n stay")
 	}
 	box := dialogStyle.Width(w - 6).Render(body)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)

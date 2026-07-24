@@ -7,7 +7,6 @@ import (
 	"html"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -103,10 +102,7 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 	if count <= 0 || count > 100 {
 		count = 30
 	}
-	qid := defaultHomeTimelineQueryID
-	if value := os.Getenv("XEET_HOMETIMELINE_QID"); value != "" {
-		qid = value
-	}
+	qid := c.operationQueryID("HomeTimeline", defaultHomeTimelineQueryID, "XEET_HOMETIMELINE_QID")
 
 	res, err := c.doHomeTimeline(ctx, qid, cursor, count)
 	if err != nil {
@@ -124,6 +120,9 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 	}
 	if err := statusToError(res.status, res.header); err != nil {
 		return nil, err
+	}
+	if isTransientStatus(res.status) {
+		return nil, &ServiceUnavailableError{Status: res.status}
 	}
 	if res.status != http.StatusOK {
 		return nil, fmt.Errorf("timeline API error %d: %s", res.status, truncate(res.body))

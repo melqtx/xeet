@@ -72,19 +72,21 @@ type ProgressFunc func(PostEvent)
 // WebClient posts through x.com's internal GraphQL API using a logged-in
 // browser session (auth_token + ct0 cookies) instead of the developer API.
 type WebClient struct {
-	httpClient     *http.Client
-	authToken      string
-	ct0            string
-	queryID        string
-	refreshed      bool          // queryID was re-discovered this session and should be cached
-	retryDelay     time.Duration // base backoff between transient retries; tests shrink it
-	reconcileDelay time.Duration
-	lastDiagnostic string
-	userAgent      string
-	clientPlatform string
-	transactionIDs *transactionIDGenerator
-	transactionID  func(context.Context, string, string) (string, error)
-	discover       func(context.Context, string, string, string) (string, error)
+	httpClient          *http.Client
+	authToken           string
+	ct0                 string
+	queryID             string
+	refreshed           bool // CreateTweet was re-discovered; retained for API compatibility
+	operationQIDs       map[string]string
+	refreshedOperations map[string]string
+	retryDelay          time.Duration // base backoff between transient retries; tests shrink it
+	reconcileDelay      time.Duration
+	lastDiagnostic      string
+	userAgent           string
+	clientPlatform      string
+	transactionIDs      *transactionIDGenerator
+	transactionID       func(context.Context, string, string) (string, error)
+	discover            func(context.Context, string, string, string) (string, error)
 }
 
 // httpResult is one completed HTTP exchange: everything callers need to
@@ -127,7 +129,7 @@ func (c *WebClient) send(ctx context.Context, build func() (*http.Request, error
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			if !retryTransient {
-				return nil, fmt.Errorf("http: %w", err)
+				return nil, classifyTransportError(err)
 			}
 			lastErr = err
 			continue
@@ -141,7 +143,7 @@ func (c *WebClient) send(ctx context.Context, build func() (*http.Request, error
 		}
 		return &httpResult{status: resp.StatusCode, header: resp.Header, body: body}, nil
 	}
-	return nil, fmt.Errorf("request failed after %d attempts: %w", maxRequestAttempts, lastErr)
+	return nil, classifyTransportError(lastErr)
 }
 
 func isTransientStatus(status int) bool {
@@ -164,23 +166,30 @@ func needsQueryIDRefresh(res *httpResult) bool {
 }
 
 func NewWebClient(cfg *config.Config) *WebClient {
-	// Prefer an explicit override, then the cached id, then a built-in default
-	// (which may be stale; PostTweet re-discovers automatically on a 404).
-	qid := defaultCreateTweetQueryID
-	if cfg.CreateTweetQID != "" {
-		qid = cfg.CreateTweetQID
+	operationQIDs := map[string]string{
+		"CreateTweet":     cfg.CreateTweetQID,
+		"HomeTimeline":    cfg.HomeTimelineQID,
+		"FavoriteTweet":   cfg.FavoriteTweetQID,
+		"UnfavoriteTweet": cfg.UnfavoriteTweetQID,
+	}
+	qid := operationQIDs["CreateTweet"]
+	if qid == "" {
+		qid = defaultCreateTweetQueryID
 	}
 	if v := os.Getenv("XEET_CREATETWEET_QID"); v != "" {
 		qid = v
 	}
+	operationQIDs["CreateTweet"] = qid
 	client := &WebClient{
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
-		authToken:      cfg.AuthToken,
-		ct0:            cfg.CT0,
-		queryID:        qid,
-		reconcileDelay: 1500 * time.Millisecond,
-		userAgent:      chromiumUserAgent(runtime.GOOS),
-		clientPlatform: chromiumClientPlatform(runtime.GOOS),
+		httpClient:          &http.Client{Timeout: 30 * time.Second},
+		authToken:           cfg.AuthToken,
+		ct0:                 cfg.CT0,
+		queryID:             qid,
+		operationQIDs:       operationQIDs,
+		refreshedOperations: map[string]string{},
+		reconcileDelay:      1500 * time.Millisecond,
+		userAgent:           chromiumUserAgent(runtime.GOOS),
+		clientPlatform:      chromiumClientPlatform(runtime.GOOS),
 	}
 	client.transactionID = client.generateTransactionID
 	return client
@@ -191,15 +200,70 @@ func NewWebClient(cfg *config.Config) *WebClient {
 func (c *WebClient) QueryID() string { return c.queryID }
 
 func (c *WebClient) discoverOperation(ctx context.Context, operation string) (string, error) {
+	var (
+		qid string
+		err error
+	)
 	if c.discover != nil {
-		return c.discover(ctx, c.authToken, c.ct0, operation)
+		qid, err = c.discover(ctx, c.authToken, c.ct0, operation)
+	} else {
+		qid, err = DiscoverOperationQueryID(ctx, c.authToken, c.ct0, operation)
 	}
-	return DiscoverOperationQueryID(ctx, c.authToken, c.ct0, operation)
+	if err != nil {
+		return "", err
+	}
+	if c.operationQIDs == nil {
+		c.operationQIDs = map[string]string{}
+	}
+	if c.refreshedOperations == nil {
+		c.refreshedOperations = map[string]string{}
+	}
+	c.operationQIDs[operation] = qid
+	c.refreshedOperations[operation] = qid
+	if operation == "CreateTweet" {
+		c.queryID = qid
+		c.refreshed = true
+	}
+	return qid, nil
 }
 
 // Refreshed reports whether the query id was re-discovered this session, so the
 // caller knows to persist QueryID() back to the config.
 func (c *WebClient) Refreshed() bool { return c.refreshed }
+
+// ApplyRefreshedQueryIDs copies operation ids discovered by this client into
+// cfg. It reports whether there is anything for the caller to persist.
+func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
+	if cfg == nil || len(c.refreshedOperations) == 0 {
+		return false
+	}
+	for operation, qid := range c.refreshedOperations {
+		switch operation {
+		case "CreateTweet":
+			cfg.CreateTweetQID = qid
+		case "HomeTimeline":
+			cfg.HomeTimelineQID = qid
+		case "FavoriteTweet":
+			cfg.FavoriteTweetQID = qid
+		case "UnfavoriteTweet":
+			cfg.UnfavoriteTweetQID = qid
+		}
+	}
+	return true
+}
+
+func (c *WebClient) operationQueryID(operation, fallback, environment string) string {
+	qid := c.operationQIDs[operation]
+	if qid == "" {
+		qid = fallback
+	}
+	if environment != "" {
+		if override := os.Getenv(environment); override != "" {
+			qid = override
+		}
+	}
+	return qid
+}
 
 // LastDiagnostic returns sanitized response-shape metadata from the most recent
 // CreateTweet call. It never includes cookies, request bodies, or post text.
@@ -533,6 +597,9 @@ func (c *WebClient) uploadMedia(ctx context.Context, upload Upload) (string, err
 	}
 	if err := statusToError(res.status, res.header); err != nil {
 		return "", err
+	}
+	if isTransientStatus(res.status) {
+		return "", &ServiceUnavailableError{Status: res.status}
 	}
 	if res.status != http.StatusOK && res.status != http.StatusCreated {
 		return "", fmt.Errorf("upload HTTP %d: %s", res.status, truncate(res.body))

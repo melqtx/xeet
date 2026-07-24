@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"xeet/pkg/config"
 )
 
 func newTestClient(handler func(*http.Request) (*http.Response, error)) *WebClient {
@@ -18,6 +22,49 @@ func newTestClient(handler func(*http.Request) (*http.Response, error)) *WebClie
 		queryID:    "qid",
 		retryDelay: time.Millisecond,
 		httpClient: &http.Client{Transport: roundTripFunc(handler)},
+	}
+}
+
+func TestTransportErrorsAreActionableAndKeepTheirCause(t *testing.T) {
+	dns := &net.DNSError{Err: "no such host", Name: "x.com", IsNotFound: true}
+	offline := classifyTransportError(dns)
+	var connection *ConnectionError
+	if !errors.As(offline, &connection) || connection.Kind != "offline" || !errors.Is(offline, dns) {
+		t.Fatalf("offline classification = %#v", offline)
+	}
+	if !strings.Contains(offline.Error(), "internet connection") {
+		t.Fatalf("offline message is not actionable: %q", offline.Error())
+	}
+
+	timedOut := classifyTransportError(context.DeadlineExceeded)
+	if !errors.As(timedOut, &connection) || connection.Kind != "timeout" || !errors.Is(timedOut, context.DeadlineExceeded) {
+		t.Fatalf("timeout classification = %#v", timedOut)
+	}
+}
+
+func TestTimelineReturnsConnectionErrorAfterBoundedRetries(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return nil, &net.DNSError{Err: "no route", Name: "x.com"}
+	})
+	_, err := client.FetchHomeTimeline(context.Background(), "", 30)
+	var connection *ConnectionError
+	if !errors.As(err, &connection) || attempts != maxRequestAttempts {
+		t.Fatalf("err=%v attempts=%d", err, attempts)
+	}
+}
+
+func TestTimelineReturnsServiceUnavailableAfterRetries(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return response(http.StatusServiceUnavailable, `down`), nil
+	})
+	_, err := client.FetchHomeTimeline(context.Background(), "", 30)
+	var unavailable *ServiceUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.Status != http.StatusServiceUnavailable || attempts != maxRequestAttempts {
+		t.Fatalf("err=%v attempts=%d", err, attempts)
 	}
 }
 
@@ -126,8 +173,9 @@ func TestPostTweetNotRetriedOnTransientFailure(t *testing.T) {
 		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
 	})
 	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
-	if err == nil {
-		t.Fatal("expected error")
+	var ambiguous *AmbiguousPostError
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("got %v, want AmbiguousPostError", err)
 	}
 	if postAttempts != 1 {
 		t.Fatalf("CreateTweet fired %d times, want 1", postAttempts)
@@ -365,6 +413,37 @@ func TestPostTweetRejectsMissingCreatedID(t *testing.T) {
 	}
 }
 
+func TestConfiguredOperationQueryIDsAreUsed(t *testing.T) {
+	cfg := &config.Config{
+		AuthToken: "auth", CT0: "csrf", HomeTimelineQID: "cached-home",
+		FavoriteTweetQID: "cached-like", UnfavoriteTweetQID: "cached-unlike",
+	}
+	client := NewWebClient(cfg)
+	client.retryDelay = time.Millisecond
+	var paths []string
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		if strings.Contains(req.URL.Path, "HomeTimeline") {
+			return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
+		}
+		return response(http.StatusOK, `{"data":{}}`), nil
+	})}
+	if _, err := client.FetchHomeTimeline(context.Background(), "", 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetTweetLiked(context.Background(), "1", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetTweetLiked(context.Background(), "1", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"/cached-home/HomeTimeline", "/cached-like/FavoriteTweet", "/cached-unlike/UnfavoriteTweet"} {
+		if !slices.ContainsFunc(paths, func(path string) bool { return strings.Contains(path, want) }) {
+			t.Fatalf("paths %v missing %q", paths, want)
+		}
+	}
+}
+
 func TestTimelineRefreshesRotatedQueryID(t *testing.T) {
 	attempts := 0
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -384,6 +463,10 @@ func TestTimelineRefreshesRotatedQueryID(t *testing.T) {
 	}
 	if attempts != 2 || len(page.Posts) != 0 {
 		t.Fatalf("attempts=%d page=%+v", attempts, page)
+	}
+	cfg := &config.Config{}
+	if !client.ApplyRefreshedQueryIDs(cfg) || cfg.HomeTimelineQID != "fresh" {
+		t.Fatalf("refreshed timeline id was not applied: %+v", cfg)
 	}
 }
 

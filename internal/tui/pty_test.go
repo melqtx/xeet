@@ -98,7 +98,7 @@ func TestComposerPTYUnicodeResizeAndDraftDialog(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	output := captured.String()
-	for _, want := range []string{"hello", "café", "leave this draft behind?"} {
+	for _, want := range []string{"hello", "café", "save this draft for later?"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("composer PTY output missing %q; output:\n%s", want, output)
 		}

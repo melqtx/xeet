@@ -76,6 +76,54 @@ func TestPostAction(t *testing.T) {
 	}
 }
 
+func TestExpiredSessionOffersReconnectAction(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.err = api.ErrSessionExpired
+	if view := m.View(); !strings.Contains(view, "a reconnect") || !strings.Contains(view, "xeet auth") {
+		t.Fatalf("expired-session guidance missing: %s", view)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = next.(Model)
+	if m.action.Kind != ActionAuthenticate || cmd == nil {
+		t.Fatal("a did not start reconnect flow")
+	}
+}
+
+func TestReconnectKeyIgnoredForOtherErrors(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.err = &api.ConnectionError{Kind: "offline", Err: errors.New("offline")}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = next.(Model)
+	if m.action.Kind == ActionAuthenticate || cmd != nil {
+		t.Fatal("a unexpectedly started reconnect flow for a network error")
+	}
+}
+
+func TestAltTextPanelListsEveryImageWithoutRenderer(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.posts = []api.TimelinePost{{ID: "1", Text: "photos", AuthorName: "Alice", Handle: "alice", Media: []api.TimelineMedia{
+		{AltText: "a cat on a windowsill"}, {},
+	}}}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	m = next.(Model)
+	if !m.altText || cmd != nil {
+		t.Fatalf("alt panel did not open: altText=%v cmd=%v", m.altText, cmd)
+	}
+	view := m.View()
+	for _, want := range []string{"image 1 of 2", "a cat on a windowsill", "image 2 of 2", "No alt text was provided"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("alt panel missing %q: %s", want, view)
+		}
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.altText {
+		t.Fatal("alt panel did not close")
+	}
+}
+
 func TestRefreshKey(t *testing.T) {
 	m := New()
 	m.loading = false
