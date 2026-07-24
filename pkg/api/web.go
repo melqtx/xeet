@@ -171,6 +171,7 @@ func NewWebClient(cfg *config.Config) *WebClient {
 		"HomeTimeline":    cfg.HomeTimelineQID,
 		"FavoriteTweet":   cfg.FavoriteTweetQID,
 		"UnfavoriteTweet": cfg.UnfavoriteTweetQID,
+		"Viewer":          cfg.ViewerQID,
 	}
 	qid := operationQIDs["CreateTweet"]
 	if qid == "" {
@@ -247,6 +248,8 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.FavoriteTweetQID = qid
 		case "UnfavoriteTweet":
 			cfg.UnfavoriteTweetQID = qid
+		case "Viewer":
+			cfg.ViewerQID = qid
 		}
 	}
 	return true
@@ -618,9 +621,8 @@ func (c *WebClient) uploadMedia(ctx context.Context, upload Upload) (string, err
 }
 
 // Verify confirms the session cookies with a non-mutating authenticated
-// timeline read. X no longer exposes the old web-session account settings
-// endpoint, so the account handle is currently unavailable and the returned
-// string is empty on success.
+// timeline read. Account identity is handled separately by FetchViewer; the
+// returned string is retained for compatibility and is empty on success.
 func (c *WebClient) Verify(ctx context.Context) (string, error) {
 	if c.authToken == "" || c.ct0 == "" {
 		return "", fmt.Errorf("web session not configured")

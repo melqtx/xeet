@@ -58,6 +58,7 @@ If a saved session behaves differently from the browser, inspect it without
 posting:
 
 ```bash
+xeet whoami            # show the account connected to the saved session
 xeet doctor            # metadata plus one authenticated timeline read
 xeet doctor --offline  # local metadata only
 ```

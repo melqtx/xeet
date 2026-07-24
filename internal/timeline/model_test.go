@@ -158,6 +158,22 @@ func TestAltTextPanelProcessesBackgroundResults(t *testing.T) {
 	}
 }
 
+func TestHelpProcessesBackgroundResults(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.help = true
+	m.posts = []api.TimelinePost{{ID: "1", Liked: true, LikeCount: 1}}
+	m.liking["1"] = true
+	next, _ := m.Update(likeMsg{id: "1", liked: true, err: errors.New("rejected")})
+	m = next.(Model)
+	if !m.help {
+		t.Fatal("background result unexpectedly closed help")
+	}
+	if m.liking["1"] || m.posts[0].Liked || m.posts[0].LikeCount != 0 {
+		t.Fatalf("like result was dropped: liking=%v post=%+v", m.liking, m.posts[0])
+	}
+}
+
 func TestRefreshKey(t *testing.T) {
 	m := New()
 	m.loading = false
