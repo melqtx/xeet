@@ -101,6 +101,9 @@ func (c *WebClient) uploadMediaChunked(ctx context.Context, upload Upload, progr
 		return "", fmt.Errorf("initialize upload: %w", err)
 	}
 
+	// INIT already declared total_bytes; capping the reader keeps a file that
+	// grows mid-upload from appending more than the server expects.
+	reader = io.LimitReader(reader, total)
 	buffer := make([]byte, uploadChunkSize)
 	var sent int64
 	for segment := 0; sent < total; segment++ {

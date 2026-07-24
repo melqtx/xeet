@@ -32,6 +32,16 @@ func tmuxWrap(seq string) string {
 // with Unicode placeholders (kitty and ghostty do; wezterm's kitty support
 // lacks virtual placements). Returns ok plus a note explaining any refusal.
 func tmuxNativeSupport() (bool, string) {
+	// Previews transmit as a temp-file path (t=f), so the emulator process has
+	// to be able to open a file this process wrote. Over ssh it cannot: the
+	// PNG lands on this host while the terminal drawing it runs on another.
+	// Outside tmux the startup probe catches that by transmitting a real file
+	// and demanding an acknowledgement; here there is no probe, and previews
+	// run with errors suppressed (q=2), so an unchecked native mode would
+	// leave silent blank gaps where images belong.
+	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" || os.Getenv("SSH_CLIENT") != "" {
+		return false, "native images need a local terminal; using ansi"
+	}
 	tmuxBin, err := exec.LookPath("tmux")
 	if err != nil {
 		return false, "tmux blocks native graphics; using ansi"

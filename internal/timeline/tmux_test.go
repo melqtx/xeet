@@ -40,8 +40,28 @@ func TestTmuxOptionEnabled(t *testing.T) {
 	}
 }
 
+// A remote tmux reports the ssh client's terminal name, so the capability
+// check would otherwise green-light native mode for previews whose temp
+// files that terminal can never open.
+func TestTmuxNativeSupportRefusesOverSSH(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-0/default,1,0")
+	t.Setenv("SSH_CONNECTION", "10.0.0.2 51000 10.0.0.1 22")
+	ok, note := tmuxNativeSupport()
+	if ok || note == "" {
+		t.Fatalf("tmuxNativeSupport over ssh = (%v, %q), want refusal with a note", ok, note)
+	}
+	if got, _ := resolveImageMode("auto"); got != imageModeANSI {
+		t.Fatalf("auto over ssh+tmux = %v, want ansi", got)
+	}
+}
+
 func TestResolveImageModeInsideTmux(t *testing.T) {
 	t.Setenv("ZELLIJ", "")
+	// Cleared so the assertions below fail for the reason they claim even
+	// when the suite itself runs over ssh.
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("SSH_CLIENT", "")
 	// A bogus socket path makes every tmux server query fail, which must
 	// downgrade auto mode to ansi rather than error or claim native.
 	t.Setenv("TMUX", "/nonexistent/socket,999999,0")
