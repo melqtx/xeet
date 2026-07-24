@@ -1,13 +1,3 @@
-# Xeet v0.1.8
-
-A simple terminal interface for posting to and browsing X without developer
-API keys.
-
-> [!WARNING]
-> Xeet uses unsupported internal X web endpoints and browser-session cookies.
-> This may violate X's Terms of Service. Xeet is unofficial and is not
-> affiliated with, endorsed by, or supported by X Corp.
-
 ```
 ██╗  ██╗███████╗███████╗████████╗
 ╚██╗██╔╝██╔════╝██╔════╝╚══██╔══╝
@@ -16,37 +6,50 @@ API keys.
 ██╔╝ ██╗███████╗███████╗   ██║
 ╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝
              /\_/\
-            ( o.o )
-             > ^ <
-         ready when you are  ✦
+            ( o.o )   78 65 65 74
+             > ^ <    ready when you are ✦
+```
 
+post to x from your terminal. no api keys, no electron, no browser tab
+eating 2gb of ram. browse your timeline with actual inline images, reply,
+like, and go back to whatever you were doing.
+
+> [!WARNING]
+> real talk: xeet uses the same internal endpoints the x website uses, with
+> your browser's session cookies. that probably violates x's terms of
+> service. it's unofficial, not affiliated with x corp, and x could break it
+> any tuesday. treat it like a fun tool, not infrastructure.
+
+<!-- demo gif goes here -->
+
+```
 ╭────────────────────────────────────────╮
 │ what are you thinking?                 │
 ╰────────────────────────────────────────╯
 12/280  •  enter to xeet
 ```
 
-## Install
+## get it
 
-Xeet supports macOS and Linux. Windows is not supported — open an issue if
-you want it.
+works on macos and linux. windows isn't supported — open an issue if you
+want it.
 
-**Download a release** (recommended): grab the archive for your platform from
-[GitHub Releases](https://github.com/melqtx/xeet/releases), verify it against
-`checksums.txt`, and put the `xeet` binary somewhere on your `PATH`:
+**grab a release** (recommended): download the archive for your platform
+from [releases](https://github.com/melqtx/xeet/releases), check it against
+`checksums.txt`, drop the binary on your `PATH`:
 
 ```bash
 tar -xzf xeet_*_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/').tar.gz
 sudo install -m 0755 xeet /usr/local/bin/
 ```
 
-**With Go** (1.26+):
+**with go** (1.26+):
 
 ```bash
 go install github.com/melqtx/xeet@latest
 ```
 
-**From source:**
+**from source:**
 
 ```bash
 git clone https://github.com/melqtx/xeet.git
@@ -54,165 +57,163 @@ cd xeet
 make install   # builds and installs to /usr/local/bin/
 ```
 
-## Use it
+## use it
 
-**1. Connect your account:**
+log into x.com in your browser (chrome, helium, firefox, brave, or zen),
+then:
 
 ```bash
 xeet auth
 ```
 
-First, log into x.com in a supported browser:
+xeet borrows that browser session — it never asks for your password. macos
+may prompt for keychain access; linux may ask you to unlock gnome keyring /
+secret service / kde wallet. snap and flatpak browser installs are detected,
+and multiple profiles work.
 
-- macOS and Linux: Chrome, Helium, Firefox, Brave, or Zen
-- Linux installs from native packages, Snap, and common Flatpak locations are
-  detected. Multiple browser profiles are supported.
-
-`xeet auth` imports that browser session without asking for your X password.
-macOS may request Keychain access. Linux may request that you unlock GNOME
-Keyring, Secret Service, or KDE Wallet.
-
-If a saved session behaves differently from the browser, inspect it without
-posting:
+then just:
 
 ```bash
-xeet whoami            # show the account connected to the saved session
-xeet doctor            # metadata plus one authenticated timeline read
-xeet doctor --offline  # local metadata only
-```
-
-The diagnostic prints a short session fingerprint and the selected
-browser/profile, never the cookie values.
-
-To compare a successful browser post with Xeet without exposing the HAR's
-contents:
-
-```bash
-xeet inspect-har /path/to/x.com.har
-```
-
-Export the HAR from browser developer tools after one successful website post.
-Keep the HAR local because the file contains session cookies. The command
-prints names and structural keys only, never values, post text, or response
-bodies.
-
-**2. Post:**
-
-```bash
-xeet                                  # browse your home timeline with images
-xeet --barebones                      # browse a text-only timeline
-xeet --compose                        # open only the interactive composer
-xeet timeline                         # same timeline, with renderer controls
-xeet post "hello from my shell"       # one-shot from the terminal
+xeet                                  # browse your timeline, images and all
+xeet --barebones                      # text-only feed
+xeet --compose                        # skip the feed, open the composer
+xeet post "hello from my shell"       # one-shot post
 echo "piped in" | xeet post           # reads stdin
 xeet post "photos" -i one.png -i two.jpg
-xeet post --image meme.png             # image-only post
+xeet post --image meme.png             # image-only, no text
 xeet post "a reply" --reply 1234567890
 ```
 
-## How it works
-
-Xeet reuses the x.com session already in your browser and talks to unsupported
-internal endpoints used by the website. This is not the official developer API.
-X can rate-limit these requests, change the endpoints, or reject the session at
-any time.
-
-The imported `auth_token` and `ct0` cookies grant account-level access. Treat
-them like a password. Xeet stores them in macOS Keychain or Linux Secret
-Service. It does not store them in the YAML config file. Run `xeet logout` to
-delete the saved session. This removes Xeet's copy but does not log your browser
-out of X. Run `xeet auth` again whenever you want to reconnect.
-
-X rotates internal GraphQL operation ids periodically; xeet discovers and
-caches current ids for posting, timelines, likes, and unlikes. If CreateTweet
-discovery fails, Xeet explains how to set it manually from the `CreateTweet`
-request in browser developer tools.
-
-CreateTweet mutations are never retried after a transient or ambiguous outcome.
-(A request explicitly rejected as an unknown persisted-query id is refreshed
-and sent once with the current id.) If X returns an unclear result, Xeet
-performs one read-only timeline check. When it still cannot prove whether the
-post landed, it preserves the draft and asks you to check your profile before
-retrying. The accompanying `details` line contains only a response-shape
-fingerprint, status, type names, and rate-limit metadata; it never contains the
-draft or session cookies.
-
-Scheduling, bulk posting, scraping, automated engagement, and mass-posting
-features are intentionally out of scope and will not be added.
-
-## TUI keys
-
-- **Enter**: post
-- **Alt+Enter** / **Ctrl+J**: line break
-- **Ctrl+V**: read an image or text from the clipboard
-- **Ctrl+O**: attach an image path (you can drag a file into the prompt)
-- **Tab**: move between the editor and attached images
-- **Arrow keys**: select an attached image
-- **Delete** / **Ctrl+X**: remove the selected image
-- **B** after a restricted or unclear result: open the text in X
-- **F1**: help
-- **Ctrl+C** / **Esc**: quit (drafts require confirmation)
-
-Up to four PNG, JPEG, GIF, or WebP images can be attached. The composer shows
-the real format, dimensions, and size before anything is uploaded.
-
-Unfinished composer drafts are autosaved and offered again the next time the
-composer opens. File attachments are restored from their original paths;
-clipboard images are copied into a private local draft directory so they can be
-restored too. A successful post or an explicit discard removes the saved draft.
-
-On Wayland, install `wl-clipboard` for clipboard image paste and link copying.
-X11 and XWayland use the system X11 clipboard. In SSH or headless sessions,
-clipboard operations degrade gracefully and `Ctrl+O` file attachment remains
-available.
-
-## Timeline
+something feel off with your session? there's a toolbox:
 
 ```bash
-xeet                  # automatic image previews
-xeet --barebones      # simple text-only feed
-xeet --compose        # skip the feed and open the composer
-xeet timeline         # explicit timeline command
+xeet whoami            # which account is connected
+xeet doctor            # session metadata + one authenticated read
+xeet doctor --offline  # local metadata only, no network
+xeet logout            # delete xeet's copy of the session
 ```
 
-Use **j/k** or the arrow keys to move (**Ctrl+D/U** jumps five posts),
-**Enter** to open the selected post's replies, **e** or **Space** to read a
-truncated post in full, **i** to zoom the selected post's
-image to the whole terminal, **A** to read descriptions for all attached images
-(even when previews are off), **l** to like or unlike, **r** to reply in
-place, **o** to open the post in the browser, **y** to copy its link,
-and **P** to write a new post. **R** refreshes in place: new posts stack on
-top while you keep your position. More posts load automatically near the
-bottom. Press **?** for the in-app key guide.
+diagnostics print a short fingerprint and the browser/profile — never the
+cookie values.
 
-Inside a conversation, **j/k** moves through the replies, **r** replies to the
-selected item, **R** reloads the conversation, and **Esc** returns to the same
-place in the home timeline. Xeet reads conversations through the same
-unsupported web endpoints as the rest of the timeline; they are read-only
-requests and never retried as mutations.
+## the tui
 
-Images are prefetched around your position in the feed and rendered inline
-for nearby posts, so scrolling lands on already-loaded previews. Videos and
-GIFs show their poster frame with a `▶` chip. Press `?` to see which image
-renderer is active and why. Direct Ghostty and Kitty sessions use Kitty Unicode-placeholder
-images. iTerm2 and WezTerm use the iTerm2 inline-image protocol. Zellij and
-tmux use the portable ANSI renderer because they do not reliably pass these
-graphics protocols through.
+**composer**
 
-In auto mode xeet verifies Kitty graphics before committing to them: apps
-that merely embed libghostty (cmux, for one) inherit a ghostty `TERM` but
-don't reliably render placeholder graphics, so on macOS xeet checks the host
-app's bundle identifier and falls back to ANSI inside embedders. A startup
-probe additionally asks the terminal itself to confirm the protocol, so any
-terminal that advertises graphics it cannot load also falls back instead of
-leaving blank gaps where images should be. If a frame ever glitches, `ctrl+l`
-redraws the screen.
+| key | does |
+|---|---|
+| `enter` | post |
+| `alt+enter` / `ctrl+j` | line break |
+| `ctrl+v` | paste image or text from clipboard |
+| `ctrl+o` | attach an image path (drag a file in) |
+| `tab` | switch between editor and attachments |
+| `←` `→` | select an attached image |
+| `delete` / `ctrl+x` | remove selected image |
+| `B` | after a restricted/unclear result: open the text in x |
+| `F1` | help |
+| `ctrl+c` / `esc` | quit (drafts ask first) |
 
-Choose the renderer explicitly when needed:
+up to four png/jpeg/gif/webp images per post. the composer shows real
+format, dimensions, and size before anything uploads. unfinished drafts
+autosave — including clipboard images — and come back next time.
+
+**timeline**
+
+| key | does |
+|---|---|
+| `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
+| `enter` | open the post's replies |
+| `e` / `space` | read a truncated post in full |
+| `i` | zoom the post's image to the whole terminal |
+| `A` | read image descriptions (works with previews off) |
+| `l` | like / unlike |
+| `r` | reply in place |
+| `o` | open in browser |
+| `y` | copy link |
+| `P` | write a new post |
+| `R` | refresh in place — new posts stack on top, you keep your spot |
+| `?` | key guide + which image renderer is active and why |
+
+more posts load automatically near the bottom. inside a conversation,
+`j`/`k` moves through replies, `r` replies to the selected item, `R`
+reloads, and `esc` drops you back exactly where you were in the timeline.
+
+<details>
+<summary>nerd stuff: how images actually render</summary>
+
+images are prefetched around your position so scrolling lands on
+already-loaded previews. videos and gifs show their poster frame with a `▶`
+chip.
+
+- direct ghostty and kitty sessions use kitty unicode-placeholder graphics
+- iterm2 and wezterm use the iterm2 inline-image protocol
+- zellij and tmux get the portable ansi renderer, because they don't
+  reliably pass graphics protocols through
+
+in auto mode xeet verifies kitty graphics before trusting them: apps that
+merely embed libghostty (cmux, for one) inherit a ghostty `TERM` but don't
+actually render placeholder graphics, so on macos xeet checks the host
+app's bundle id and falls back to ansi inside embedders. a startup probe
+also asks the terminal itself to confirm the protocol, so anything that
+advertises graphics it can't load falls back instead of leaving blank gaps.
+if a frame ever glitches, `ctrl+l` redraws.
+
+pick a renderer explicitly when needed:
 
 ```bash
-xeet timeline --images auto    # native when confirmed by the terminal; otherwise ANSI
-xeet timeline --images native  # trust the terminal: skip the probe, use its native backend
+xeet timeline --images auto    # native when the terminal confirms it; else ansi
+xeet timeline --images native  # trust the terminal, skip the probe
 xeet timeline --images ansi    # portable block preview
-xeet timeline --images off     # disable previews
+xeet timeline --images off     # no previews
 ```
+
+on wayland, install `wl-clipboard` for clipboard paste and link copying.
+x11/xwayland use the x11 clipboard. over ssh, clipboard degrades gracefully
+and `ctrl+o` file attachment still works.
+
+</details>
+
+## how it works
+
+xeet reuses the x.com session already in your browser and speaks the same
+unsupported internal graphql endpoints the website does. the imported
+`auth_token` and `ct0` cookies grant account-level access — treat them like
+a password. they live in the macos keychain or linux secret service, never
+in the yaml config file. `xeet logout` deletes xeet's copy (your browser
+stays logged in).
+
+<details>
+<summary>nerd stuff: query ids and the no-double-post rule</summary>
+
+x rotates its internal graphql operation ids periodically; xeet discovers
+and caches current ids for posting, timelines, likes, and unlikes. if
+CreateTweet discovery fails, xeet explains how to set the id manually from
+browser devtools.
+
+CreateTweet mutations are never retried after a transient or ambiguous
+outcome. (a request explicitly rejected as an unknown persisted-query id is
+refreshed and sent once with the current id.) if x returns an unclear
+result, xeet performs one read-only timeline check; if it still can't prove
+the post landed, it preserves your draft and asks you to check your profile
+before retrying. the `details` line contains only a response-shape
+fingerprint, status, type names, and rate-limit metadata — never the draft
+or session cookies.
+
+to compare a successful browser post with xeet's request without exposing
+secrets, export a har from devtools and run `xeet inspect-har file.har`.
+it prints names and structural keys only — never values, post text, or
+response bodies. keep the har local; it contains session cookies.
+
+</details>
+
+## wontfix
+
+no scheduling, no bulk posting, no scraping, no automated engagement, no
+mass-posting. this is a client, not a growth hack. these are out of scope
+and will not be added.
+
+---
+
+made at 2am by [melqtx](https://github.com/melqtx) · [MIT](LICENSE) · not affiliated with x corp (obviously)
+
+`/ᐠ - ˕ -マ` found a bug? [open an issue](https://github.com/melqtx/xeet/issues) · security stuff → [SECURITY.md](SECURITY.md)
