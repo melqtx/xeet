@@ -32,7 +32,11 @@ const (
 // needsChunkedUpload picks the INIT/APPEND/FINALIZE flow for video (which the
 // simple endpoint rejects), file-backed uploads, and oversized buffers.
 func (u Upload) needsChunkedUpload() bool {
-	return u.Path != "" || strings.HasPrefix(u.ContentType, "video/") || len(u.Data) > chunkedUploadThreshold
+	return u.Path != "" || u.isVideo() || len(u.Data) > chunkedUploadThreshold
+}
+
+func (u Upload) isVideo() bool {
+	return strings.HasPrefix(u.ContentType, "video/")
 }
 
 // mediaCategory tells X's pipeline how to transcode and validate the upload;

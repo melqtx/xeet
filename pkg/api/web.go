@@ -458,15 +458,22 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 		return "", fmt.Errorf("no session; run 'xeet auth' first")
 	}
 	if len(uploads) > 4 {
-		return "", fmt.Errorf("a post can have at most 4 images")
+		return "", fmt.Errorf("a post can have at most 4 attachments")
 	}
 	if text == "" && len(uploads) == 0 {
-		return "", fmt.Errorf("post has no text or images")
+		return "", fmt.Errorf("post has no text or media")
 	}
+	videos := 0
 	for i, upload := range uploads {
 		if len(upload.Data) == 0 && upload.Path == "" {
 			return "", fmt.Errorf("attachment %d is empty", i+1)
 		}
+		if upload.isVideo() {
+			videos++
+		}
+	}
+	if videos > 0 && len(uploads) > 1 {
+		return "", fmt.Errorf("a video must be the only attachment")
 	}
 	vars := newCreateTweetVariables(text)
 	for i, upload := range uploads {
