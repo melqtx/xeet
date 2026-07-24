@@ -11,7 +11,12 @@ import (
 	"time"
 )
 
-const defaultHomeTimelineQueryID = "lqfNCpeO0wydVAAXAbAU5w"
+const (
+	defaultHomeTimelineQueryID = "lqfNCpeO0wydVAAXAbAU5w"
+	// HomeLatestTimeline backs the website's Following tab. The default is a
+	// best-effort snapshot; a stale id is rediscovered on first use.
+	defaultHomeLatestTimelineQueryID = "U0cdisy7QFIoTfu3-Okw0A"
+)
 
 type TimelineMedia struct {
 	URL     string
@@ -98,24 +103,33 @@ var timelineFieldToggles = map[string]bool{
 
 // FetchHomeTimeline retrieves one page of the authenticated For You feed.
 func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count int) (*TimelinePage, error) {
+	return c.fetchTimeline(ctx, "HomeTimeline", defaultHomeTimelineQueryID, "XEET_HOMETIMELINE_QID", cursor, count)
+}
+
+// FetchFollowingTimeline retrieves one page of the authenticated Following feed.
+func (c *WebClient) FetchFollowingTimeline(ctx context.Context, cursor string, count int) (*TimelinePage, error) {
+	return c.fetchTimeline(ctx, "HomeLatestTimeline", defaultHomeLatestTimelineQueryID, "XEET_HOMELATESTTIMELINE_QID", cursor, count)
+}
+
+func (c *WebClient) fetchTimeline(ctx context.Context, operation, fallback, environment, cursor string, count int) (*TimelinePage, error) {
 	if c.authToken == "" || c.ct0 == "" {
 		return nil, fmt.Errorf("no session; run 'xeet auth' first")
 	}
 	if count <= 0 || count > 100 {
 		count = 30
 	}
-	qid := c.operationQueryID("HomeTimeline", defaultHomeTimelineQueryID, "XEET_HOMETIMELINE_QID")
+	qid := c.operationQueryID(operation, fallback, environment)
 
-	res, err := c.doHomeTimeline(ctx, qid, cursor, count)
+	res, err := c.doTimeline(ctx, operation, qid, cursor, count)
 	if err != nil {
 		return nil, err
 	}
 	if needsQueryIDRefresh(res) {
-		fresh, discoverErr := c.discoverOperation(ctx, "HomeTimeline")
+		fresh, discoverErr := c.discoverOperation(ctx, operation)
 		if discoverErr != nil {
 			return nil, fmt.Errorf("home timeline endpoint changed and discovery failed: %w", discoverErr)
 		}
-		res, err = c.doHomeTimeline(ctx, fresh, cursor, count)
+		res, err = c.doTimeline(ctx, operation, fresh, cursor, count)
 		if err != nil {
 			return nil, err
 		}
@@ -145,8 +159,8 @@ func (c *WebClient) FetchHomeTimeline(ctx context.Context, cursor string, count 
 	return &page, nil
 }
 
-// doHomeTimeline is a read, so transient failures are retried.
-func (c *WebClient) doHomeTimeline(ctx context.Context, qid, cursor string, count int) (*httpResult, error) {
+// doTimeline is a read, so transient failures are retried.
+func (c *WebClient) doTimeline(ctx context.Context, operation, qid, cursor string, count int) (*httpResult, error) {
 	variables := map[string]any{
 		"count":                  count,
 		"includePromotedContent": true,
@@ -167,7 +181,7 @@ func (c *WebClient) doHomeTimeline(ctx context.Context, qid, cursor string, coun
 	params.Set("variables", string(variablesJSON))
 	params.Set("features", string(featuresJSON))
 	params.Set("fieldToggles", string(fieldTogglesJSON))
-	endpoint := fmt.Sprintf("https://x.com/i/api/graphql/%s/HomeTimeline?%s", qid, params.Encode())
+	endpoint := fmt.Sprintf("https://x.com/i/api/graphql/%s/%s?%s", qid, operation, params.Encode())
 	return c.send(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {

@@ -6,24 +6,34 @@ import (
 	"strings"
 
 	"github.com/melqtx/xeet/internal/media"
+	"github.com/melqtx/xeet/internal/theme"
 	"github.com/melqtx/xeet/pkg/api"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	blue     = lipgloss.Color("#7AA2F7")
-	lavender = lipgloss.Color("#BB9AF7")
-	pink     = lipgloss.Color("#F5C2E7")
-	muted    = lipgloss.Color("#7D8590")
-	green    = lipgloss.Color("#9ECE6A")
-	red      = lipgloss.Color("#FF757F")
+	blue     lipgloss.Color
+	lavender lipgloss.Color
+	pink     lipgloss.Color
+	muted    lipgloss.Color
+	green    lipgloss.Color
+	red      lipgloss.Color
 
-	dialogStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lavender).
-			Padding(1, 2)
+	dialogStyle lipgloss.Style
 )
+
+func init() { ApplyTheme(theme.Default()) }
+
+// ApplyTheme recolors the composer. Call it before Run; layout is unaffected.
+func ApplyTheme(p theme.Palette) {
+	blue, lavender, pink = p.Blue, p.Lavender, p.Pink
+	muted, green, red = p.Muted, p.Green, p.Red
+	dialogStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lavender).
+		Padding(1, 2)
+}
 
 const xeetLogo = `██╗  ██╗███████╗███████╗████████╗
 ╚██╗██╔╝██╔════╝██╔════╝╚══██╔══╝

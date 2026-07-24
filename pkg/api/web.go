@@ -167,12 +167,13 @@ func needsQueryIDRefresh(res *httpResult) bool {
 
 func NewWebClient(cfg *config.Config) *WebClient {
 	operationQIDs := map[string]string{
-		"CreateTweet":     cfg.CreateTweetQID,
-		"HomeTimeline":    cfg.HomeTimelineQID,
-		"FavoriteTweet":   cfg.FavoriteTweetQID,
-		"UnfavoriteTweet": cfg.UnfavoriteTweetQID,
-		"Viewer":          cfg.ViewerQID,
-		"TweetDetail":     cfg.TweetDetailQID,
+		"CreateTweet":        cfg.CreateTweetQID,
+		"HomeTimeline":       cfg.HomeTimelineQID,
+		"HomeLatestTimeline": cfg.HomeLatestTimelineQID,
+		"FavoriteTweet":      cfg.FavoriteTweetQID,
+		"UnfavoriteTweet":    cfg.UnfavoriteTweetQID,
+		"Viewer":             cfg.ViewerQID,
+		"TweetDetail":        cfg.TweetDetailQID,
 	}
 	qid := operationQIDs["CreateTweet"]
 	if qid == "" {
@@ -245,6 +246,8 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.CreateTweetQID = qid
 		case "HomeTimeline":
 			cfg.HomeTimelineQID = qid
+		case "HomeLatestTimeline":
+			cfg.HomeLatestTimelineQID = qid
 		case "FavoriteTweet":
 			cfg.FavoriteTweetQID = qid
 		case "UnfavoriteTweet":

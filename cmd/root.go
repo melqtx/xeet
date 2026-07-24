@@ -11,11 +11,13 @@ import (
 )
 
 var (
-	appVersion   string
-	appCommit    string
-	appBuildTime string
-	barebones    bool
-	composeOnly  bool
+	appVersion    string
+	appCommit     string
+	appBuildTime  string
+	barebones     bool
+	composeOnly   bool
+	rootFollowing bool
+	rootTheme     string
 )
 
 var rootCmd = &cobra.Command{
@@ -38,7 +40,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose output")
 	rootCmd.Flags().BoolVar(&barebones, "barebones", false, "open a text-only timeline without image previews")
 	rootCmd.Flags().BoolVar(&composeOnly, "compose", false, "open only the post composer")
+	rootCmd.Flags().BoolVar(&rootFollowing, "following", false, "start on the Following feed instead of For You")
+	rootCmd.Flags().StringVar(&rootTheme, "theme", "", "color theme for this run (see 'xeet theme')")
 	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
+	rootCmd.MarkFlagsMutuallyExclusive("compose", "following")
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
@@ -51,6 +56,9 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if err := applyConfiguredTheme(rootTheme); err != nil {
+		return err
+	}
 	if composeOnly {
 		return tui.Run()
 	}
@@ -58,5 +66,5 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if barebones {
 		imageMode = "off"
 	}
-	return runTimeline(cmd.Context(), imageMode)
+	return runTimeline(cmd.Context(), imageMode, rootFollowing)
 }

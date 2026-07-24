@@ -33,15 +33,6 @@ timeline with inline images, reply, like, done.
 works on macos and linux. windows isn't supported, open an issue if you
 want it.
 
-**grab a release** (recommended): download the archive for your platform
-from [releases](https://github.com/melqtx/xeet/releases), check it against
-`checksums.txt`, drop the binary on your `PATH`:
-
-```bash
-tar -xzf xeet_*_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/').tar.gz
-sudo install -m 0755 xeet /usr/local/bin/
-```
-
 **with go** (1.26+):
 
 ```bash
@@ -54,6 +45,15 @@ go install github.com/melqtx/xeet@latest
 git clone https://github.com/melqtx/xeet.git
 cd xeet
 make install   # builds and installs to /usr/local/bin/
+```
+
+**or grab a release**: download the archive for your platform from
+[releases](https://github.com/melqtx/xeet/releases), check it against
+`checksums.txt`, drop the binary on your `PATH`:
+
+```bash
+tar -xzf xeet_*_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/').tar.gz
+sudo install -m 0755 xeet /usr/local/bin/
 ```
 
 ## use it
@@ -74,6 +74,7 @@ then just:
 
 ```bash
 xeet                                  # browse your timeline, images and all
+xeet --following                      # start on the following feed
 xeet --barebones                      # text-only feed
 xeet --compose                        # skip the feed, open the composer
 xeet post "hello from my shell"       # one-shot post
@@ -121,6 +122,7 @@ autosave (including clipboard images) and come back next time.
 | key | does |
 |---|---|
 | `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
+| `f` | switch between the for you and following feeds |
 | `enter` | open the post's replies |
 | `e` / `space` | read a truncated post in full |
 | `i` | zoom the post's image to the whole terminal |
@@ -136,6 +138,17 @@ autosave (including clipboard images) and come back next time.
 more posts load automatically near the bottom. inside a conversation,
 `j`/`k` moves through replies, `r` replies to the selected item, `R`
 reloads, and `esc` drops you back exactly where you were in the timeline.
+
+**themes**
+
+colors are configurable; the layout never changes. pick from tokyonight
+(default), catppuccin, gruvbox, nord, rosepine, or mono:
+
+```bash
+xeet theme             # list themes, current one marked
+xeet theme nord        # save a default in ~/.xeet.yaml
+xeet --theme mono      # try one for a single run
+```
 
 <details>
 <summary>details: how images render</summary>

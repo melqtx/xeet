@@ -22,11 +22,11 @@
 - Persistent operation-ID caching for posting, timelines, likes, and unlikes
 - Keyboard-accessible image descriptions, including text-only mode
 - `xeet whoami` session/account display
+- Following timeline (`--following`, `f` key in the timeline)
+- Configurable color themes without layout changes (`xeet theme`, `--theme`)
 
 ## Next
 
-- Following timeline option
-- Configurable theme without changing layout
 - Chunked upload for video and large media
 - Animated GIF playback via the Kitty graphics animation protocol
 - tmux passthrough (DCS-wrapped Kitty graphics) for native images inside tmux 3.3+
