@@ -62,9 +62,21 @@ func resolveImageMode(requested string) (imageMode, string) {
 		return imageModeANSI, ""
 	}
 	// Zellij does not currently pass the Kitty graphics protocol through.
-	// tmux requires explicit passthrough configuration we cannot assume.
-	if os.Getenv("ZELLIJ") != "" || os.Getenv("TMUX") != "" {
-		return imageModeANSI, "tmux/zellij blocks native graphics; run xeet directly in the terminal for sharp images"
+	if os.Getenv("ZELLIJ") != "" {
+		return imageModeANSI, "zellij blocks native graphics; run xeet directly in the terminal for sharp images"
+	}
+	// tmux 3.3+ forwards DCS-wrapped kitty graphics to the outer terminal when
+	// allow-passthrough is on; every kitty escape below goes through tmuxWrap.
+	// The Unicode-placeholder cells are ordinary text tmux redraws itself, so
+	// images survive pane moves and window switches.
+	if insideTmux() {
+		if requested == "native" {
+			return imageModeNative, ""
+		}
+		if ok, note := tmuxNativeSupport(); !ok {
+			return imageModeANSI, note + " (--images native to force)"
+		}
+		return imageModeNative, ""
 	}
 	program := strings.ToLower(strings.TrimSpace(os.Getenv("TERM_PROGRAM")))
 	term := strings.ToLower(os.Getenv("TERM"))
@@ -407,11 +419,11 @@ func kittyImageColor(imageID uint32) (red, green, blue uint32) {
 
 func kittyTransmit(path string, imageID uint32) string {
 	payload := base64.StdEncoding.EncodeToString([]byte(path))
-	return fmt.Sprintf("\x1b_Ga=t,f=100,t=f,i=%d,q=2;%s\x1b\\", imageID, payload)
+	return tmuxWrap(fmt.Sprintf("\x1b_Ga=t,f=100,t=f,i=%d,q=2;%s\x1b\\", imageID, payload))
 }
 
 func kittyVirtualPlacement(imageID uint32, columns, rows int) string {
-	return fmt.Sprintf("\x1b_Ga=p,U=1,i=%d,c=%d,r=%d,q=2\x1b\\", imageID, columns, rows)
+	return tmuxWrap(fmt.Sprintf("\x1b_Ga=p,U=1,i=%d,c=%d,r=%d,q=2\x1b\\", imageID, columns, rows))
 }
 
 func wezTermDisplay(encoded string, columns, rows int) string {
