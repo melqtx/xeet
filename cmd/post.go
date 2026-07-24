@@ -27,13 +27,14 @@ var postCmd = &cobra.Command{
   echo "piped tweet" | xeet post
   xeet post "photo" --image ./photo.png
   xeet post --image one.png --image two.jpg
+  xeet post "clip" --image ./clip.mp4
   xeet post "a reply" --reply 1234567890`,
 	RunE: runPost,
 }
 
 func init() {
 	postCmd.Flags().StringVar(&replyTo, "reply", "", "tweet id to reply to")
-	postCmd.Flags().StringArrayVarP(&imagePaths, "image", "i", nil, "image path (repeat up to 4 times)")
+	postCmd.Flags().StringArrayVarP(&imagePaths, "image", "i", nil, "image or video path (up to 4 images, or 1 video)")
 	rootCmd.AddCommand(postCmd)
 }
 
@@ -54,14 +55,21 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("a post can have at most %d images", media.MaxAttachments)
 	}
 	uploads := make([]api.Upload, 0, len(imagePaths))
+	videos := 0
 	for _, path := range imagePaths {
 		attachment, err := media.FromPath(path)
 		if err != nil {
 			return fmt.Errorf("attach %q: %w", path, err)
 		}
-		uploads = append(uploads, api.Upload{
-			Filename: attachment.Name, ContentType: attachment.MIME, Data: attachment.Data,
-		})
+		upload := api.Upload{Filename: attachment.Name, ContentType: attachment.MIME, Data: attachment.Data}
+		if attachment.IsVideo() {
+			videos++
+			upload.Path = attachment.Path
+		}
+		uploads = append(uploads, upload)
+	}
+	if videos > 0 && len(uploads) > 1 {
+		return fmt.Errorf("a video must be the only attachment")
 	}
 	if strings.TrimSpace(text) == "" && len(uploads) == 0 {
 		return fmt.Errorf("nothing to post: pass text, pipe stdin, or add --image")
@@ -87,7 +95,13 @@ func runPost(cmd *cobra.Command, args []string) error {
 		if v, _ := cmd.Flags().GetBool("verbose"); v {
 			switch event.Stage {
 			case api.PostStageUploading:
-				fmt.Fprintf(os.Stderr, "uploading %d/%d: %s\n", event.Current, event.Total, event.Name)
+				if event.TotalBytes > 0 {
+					fmt.Fprintf(os.Stderr, "uploading %s: %d%%\n", event.Name, event.TransferredBytes*100/event.TotalBytes)
+				} else {
+					fmt.Fprintf(os.Stderr, "uploading %d/%d: %s\n", event.Current, event.Total, event.Name)
+				}
+			case api.PostStageProcessing:
+				fmt.Fprintln(os.Stderr, "waiting for X to process the media…")
 			case api.PostStageDiscovering:
 				fmt.Fprintln(os.Stderr, "refreshing X endpoint…")
 			case api.PostStagePublishing:

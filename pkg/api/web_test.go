@@ -103,6 +103,20 @@ func TestPostTweetValidatesContent(t *testing.T) {
 	}
 }
 
+// TestPostTweetRejectsMixedVideoAndImages enforces "one video per post,
+// never mixed with images" at the API boundary, not just in the callers
+// (TUI, cmd/post.go) that happen to check it today.
+func TestPostTweetRejectsMixedVideoAndImages(t *testing.T) {
+	client := &WebClient{authToken: "auth", ct0: "csrf"}
+	uploads := []Upload{
+		{ContentType: "video/mp4", Data: []byte("v")},
+		{ContentType: "image/png", Data: []byte("i")},
+	}
+	if _, err := client.PostTweet(context.Background(), "x", "", uploads, nil); err == nil {
+		t.Fatal("video mixed with an image should fail")
+	}
+}
+
 func TestCreateTweetReplyPayload(t *testing.T) {
 	vars := createTweetVariables{
 		TweetText:             "re",

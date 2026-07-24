@@ -201,7 +201,11 @@ func beginPost(text string, attachments []media.Attachment) tea.Cmd {
 			}
 			uploads := make([]api.Upload, 0, len(attachments))
 			for _, a := range attachments {
-				uploads = append(uploads, api.Upload{Filename: a.Name, ContentType: a.MIME, Data: a.Data})
+				upload := api.Upload{Filename: a.Name, ContentType: a.MIME, Data: a.Data}
+				if a.IsVideo() {
+					upload.Path = a.Path
+				}
+				uploads = append(uploads, upload)
 			}
 			client := api.NewWebClient(cfg)
 			id, err := client.PostTweet(ctx, text, "", uploads, func(event api.PostEvent) {
@@ -232,15 +236,28 @@ func (m *Model) addAttachment(a media.Attachment) {
 		m.toast = fmt.Sprintf("Maximum of %d images", media.MaxAttachments)
 		return
 	}
+	// X allows one video per post, never mixed with images.
+	if a.IsVideo() && len(m.attachments) > 0 {
+		m.toast = "A video must be the only attachment"
+		return
+	}
+	if !a.IsVideo() && len(m.attachments) > 0 && m.attachments[0].IsVideo() {
+		m.toast = "Images can't join a video post"
+		return
+	}
 	for _, existing := range m.attachments {
 		if existing.ID == a.ID {
-			m.toast = "That image is already attached"
+			m.toast = "That file is already attached"
 			return
 		}
 	}
 	m.attachments = append(m.attachments, a)
 	m.selected = len(m.attachments) - 1
 	m.resize()
+	if a.IsVideo() {
+		m.toast = fmt.Sprintf("Attached %s · %s · %s", a.Name, a.Format, media.HumanBytes(int(a.Size)))
+		return
+	}
 	m.toast = fmt.Sprintf("Attached %s · %s · %dx%d · %s", a.Name, a.Format, a.Width, a.Height, media.HumanBytes(int(a.Size)))
 }
 

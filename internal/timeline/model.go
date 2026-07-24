@@ -211,7 +211,9 @@ func Run(images string, following bool) (Action, error) {
 	// Auto-detected native mode is a claim, not a capability: multiplexers
 	// like cmux inherit ghostty's TERM without reliably rendering graphics.
 	// Confirm with the terminal itself; --images native skips the probe.
-	if m.imageMode == imageModeNative && images != "native" {
+	// Inside tmux the probe reply never reaches this pane, so native mode is
+	// vetted by tmuxNativeSupport during resolveImageMode instead.
+	if m.imageMode == imageModeNative && images != "native" && !insideTmux() {
 		if err := probeNativeGraphics(); err != nil {
 			m.imageMode = imageModeANSI
 			m.imageNote = "terminal didn't confirm kitty graphics; using ansi (--images native to force)"

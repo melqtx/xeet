@@ -159,7 +159,7 @@ func (m Model) viewAttachments(width int) string {
 		}
 		name := truncateRunes(a.Name, available)
 		meta := fmt.Sprintf("%s · %dx%d · %s", a.Format, a.Width, a.Height, media.HumanBytes(int(a.Size)))
-		if width < 52 {
+		if width < 52 || a.IsVideo() {
 			meta = fmt.Sprintf("%s · %s", a.Format, media.HumanBytes(int(a.Size)))
 		}
 		rows = append(rows, style.Render(prefix+name+"  "+meta))
@@ -178,6 +178,12 @@ func (m Model) viewPosting() string {
 		switch m.postStage.Stage {
 		case api.PostStageUploading:
 			stage = fmt.Sprintf("sending pic %d of %d…", m.postStage.Current, m.postStage.Total)
+			if m.postStage.TotalBytes > 0 {
+				percent := m.postStage.TransferredBytes * 100 / m.postStage.TotalBytes
+				stage = fmt.Sprintf("sending %s… %d%%", m.postStage.Name, percent)
+			}
+		case api.PostStageProcessing:
+			stage = "X is processing your video…"
 		case api.PostStageDiscovering:
 			stage = "finding the way to X…"
 		case api.PostStagePublishing:
