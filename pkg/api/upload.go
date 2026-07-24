@@ -145,9 +145,9 @@ func (c *WebClient) awaitProcessing(ctx context.Context, mediaID string, status 
 				message = info.Error.Name
 			}
 			if message == "" {
-				message = "media processing failed"
+				message = "no reason given"
 			}
-			return "", fmt.Errorf("X could not process this media: %s", message)
+			return "", fmt.Errorf("media processing failed: %s", message)
 		}
 		wait := time.Duration(info.CheckAfterSecs) * time.Second
 		if wait <= 0 {
