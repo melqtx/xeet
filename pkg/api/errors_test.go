@@ -17,11 +17,11 @@ import (
 
 func newTestClient(handler func(*http.Request) (*http.Response, error)) *WebClient {
 	return &WebClient{
-		authToken:  "auth",
-		ct0:        "csrf",
-		queryID:    "qid",
-		retryDelay: time.Millisecond,
-		httpClient: &http.Client{Transport: roundTripFunc(handler)},
+		authToken:     "auth",
+		ct0:           "csrf",
+		operationQIDs: map[string]string{"CreateTweet": "qid"},
+		retryDelay:    time.Millisecond,
+		httpClient:    &http.Client{Transport: roundTripFunc(handler)},
 	}
 }
 
@@ -348,7 +348,7 @@ func TestVerifySessionExpired(t *testing.T) {
 		attempts++
 		return response(http.StatusUnauthorized, `{}`), nil
 	})
-	_, err := client.Verify(context.Background())
+	err := client.Verify(context.Background())
 	if !errors.Is(err, ErrSessionExpired) {
 		t.Fatalf("got %v, want ErrSessionExpired", err)
 	}
@@ -366,12 +366,11 @@ func TestVerifyRetriesTransientFailure(t *testing.T) {
 		}
 		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
 	})
-	handle, err := client.Verify(context.Background())
-	if err != nil {
+	if err := client.Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if handle != "" || attempts != 2 {
-		t.Fatalf("handle=%q attempts=%d", handle, attempts)
+	if attempts != 2 {
+		t.Fatalf("attempts=%d, want 2", attempts)
 	}
 }
 
@@ -379,7 +378,7 @@ func TestVerifyRejectsMalformedTimeline(t *testing.T) {
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{}`), nil
 	})
-	if _, err := client.Verify(context.Background()); err == nil {
+	if err := client.Verify(context.Background()); err == nil {
 		t.Fatal("expected malformed verification response to fail")
 	}
 }
@@ -415,8 +414,12 @@ func TestPostTweetRefreshesRotatedQueryID(t *testing.T) {
 	if id != "99" || attempts != 2 || len(operations) != 1 || operations[0] != "CreateTweet" {
 		t.Fatalf("id=%q attempts=%d operations=%v", id, attempts, operations)
 	}
-	if !client.Refreshed() || client.QueryID() != "fresh" {
-		t.Fatalf("refreshed=%v qid=%q", client.Refreshed(), client.QueryID())
+	if client.createTweetQueryID() != "fresh" {
+		t.Fatalf("client kept qid %q after rotation", client.createTweetQueryID())
+	}
+	cfg := &config.Config{}
+	if !client.ApplyRefreshedQueryIDs(cfg) || cfg.CreateTweetQID != "fresh" {
+		t.Fatalf("refreshed id was not handed back for persistence: %q", cfg.CreateTweetQID)
 	}
 }
 
