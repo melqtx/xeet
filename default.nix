@@ -1,7 +1,7 @@
 { lib
 , buildGoModule
 , wl-clipboard
-, xorg
+, libx11
 , makeWrapper
 , stdenv
 }:
@@ -29,17 +29,20 @@ buildGoModule (finalAttrs: {
 
   nativeBuildInputs = [ makeWrapper ];
 
-  # golang.design/x/clipboard talks to X11 through cgo, so the linux build
-  # needs Xlib to compile at all. Without it the package built on darwin and
-  # failed on linux.
-  buildInputs = lib.optionals stdenv.isLinux [ xorg.libX11 ];
+  # golang.design/x/clipboard compiles X11 through cgo, so the linux build
+  # needs Xlib's headers. Without them the package built on darwin and failed
+  # on linux.
+  buildInputs = lib.optionals stdenv.isLinux [ libx11 ];
 
-  # On wayland the clipboard shells out to wl-paste/wl-copy, so keep those on
-  # PATH for an installed xeet. X11 goes through the linked Xlib above, and
-  # macOS uses the system pasteboard.
+  # The clipboard links only -ldl and dlopens "libX11.so" at runtime, so
+  # nothing records libx11 in the binary's rpath and the lookup would fail on
+  # a machine without X11 in the default loader paths. LD_LIBRARY_PATH points
+  # it at the unversioned symlink in libx11's lib directory. Wayland shells
+  # out to wl-paste/wl-copy instead; macOS uses the system pasteboard.
   postInstall = lib.optionalString stdenv.isLinux ''
     wrapProgram $out/bin/xeet \
-      --prefix PATH : ${lib.makeBinPath [ wl-clipboard ]}
+      --prefix PATH : ${lib.makeBinPath [ wl-clipboard ]} \
+      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libx11 ]}
   '';
 
   meta = {
