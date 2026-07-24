@@ -48,12 +48,20 @@ func init() {
 
 func runRoot(cmd *cobra.Command, args []string) error {
 	configMgr, err := config.NewConfigManager()
-	if err == nil {
-		if cfg, loadErr := configMgr.Load(); loadErr == nil && cfg.AuthToken == "" {
-			fmt.Println("Welcome to xeet! First, connect your X account:")
-			fmt.Println("  xeet auth")
-			return nil
-		}
+	if err != nil {
+		return err
+	}
+	// A load failure here (an incomplete keyring pair, an unreadable config)
+	// carries its own recovery advice. Falling through to the timeline would
+	// bury it under a generic fetch error.
+	cfg, err := configMgr.Load()
+	if err != nil {
+		return err
+	}
+	if cfg.AuthToken == "" {
+		fmt.Println("Welcome to xeet! First, connect your X account:")
+		fmt.Println("  xeet auth")
+		return nil
 	}
 
 	if err := applyConfiguredTheme(rootTheme); err != nil {
