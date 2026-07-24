@@ -195,6 +195,17 @@ func (cm *ConfigManager) Load() (*Config, error) {
 	return config, nil
 }
 
+// Theme reads the saved theme name from the config file, or "" when none is
+// saved. It deliberately skips the keyring: a command that only needs to know
+// what colors to draw in should never provoke a keychain unlock prompt.
+func (cm *ConfigManager) Theme() (string, error) {
+	fc, err := cm.readFile()
+	if err != nil {
+		return "", err
+	}
+	return fc.Theme, nil
+}
+
 // migrateLegacy moves tokens from the pre-keyring on-disk layout (AES-GCM
 // encrypted auth_token with the key sitting next to it in ~/.xeet.key, ct0 in
 // plaintext) into the OS keyring, rewrites the config file without them, and

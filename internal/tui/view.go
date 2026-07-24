@@ -7,6 +7,7 @@ import (
 
 	"github.com/melqtx/xeet/internal/media"
 	"github.com/melqtx/xeet/internal/theme"
+	"github.com/melqtx/xeet/internal/ui"
 	"github.com/melqtx/xeet/pkg/api"
 
 	"github.com/charmbracelet/lipgloss"
@@ -20,6 +21,7 @@ var (
 	green    lipgloss.Color
 	red      lipgloss.Color
 
+	styles      ui.Styles
 	dialogStyle lipgloss.Style
 )
 
@@ -29,18 +31,12 @@ func init() { ApplyTheme(theme.Default()) }
 func ApplyTheme(p theme.Palette) {
 	blue, lavender, pink = p.Blue, p.Lavender, p.Pink
 	muted, green, red = p.Muted, p.Green, p.Red
+	styles = ui.New(p)
 	dialogStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lavender).
 		Padding(1, 2)
 }
-
-const xeetLogo = `██╗  ██╗███████╗███████╗████████╗
-╚██╗██╔╝██╔════╝██╔════╝╚══██╔══╝
- ╚███╔╝ █████╗  █████╗     ██║
- ██╔██╗ ██╔══╝  ██╔══╝     ██║
-██╔╝ ██╗███████╗███████╗   ██║
-╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝`
 
 func (m Model) View() string {
 	if m.width <= 0 {
@@ -126,22 +122,10 @@ func (m Model) viewComposer() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
 }
 
-func (m Model) renderLogo(width int) string {
-	if width < 40 {
-		logo := lipgloss.NewStyle().Foreground(blue).Bold(true).Render("x e e t  ✦")
-		return lipgloss.PlaceHorizontal(width, lipgloss.Center, logo)
-	}
-	logo := lipgloss.NewStyle().Foreground(blue).Bold(true).Render(xeetLogo)
-	return lipgloss.PlaceHorizontal(width, lipgloss.Center, logo)
-}
+func (m Model) renderLogo(width int) string { return styles.RenderLogo(width) }
 
 func (m Model) renderMascot(width int, message string) string {
-	cat := lipgloss.NewStyle().Foreground(pink).Render(` /\_/\
-( o.o )
- > ^ <`)
-	caption := lipgloss.NewStyle().Foreground(muted).Render(message + "  ✦")
-	return lipgloss.PlaceHorizontal(width, lipgloss.Center, cat) + "\n" +
-		lipgloss.PlaceHorizontal(width, lipgloss.Center, caption)
+	return styles.RenderMascot(width, message)
 }
 
 func (m Model) viewAttachments(width int) string {

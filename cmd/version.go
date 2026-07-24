@@ -8,7 +8,7 @@ import (
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Show version information",
+	Short: "show which xeet this is",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("xeet %s\n", appVersion)
 		if cmd.Flag("verbose").Changed || len(args) > 0 {

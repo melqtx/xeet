@@ -20,13 +20,14 @@ var (
 
 var postCmd = &cobra.Command{
 	Use:   "post [text]",
-	Short: "Post a tweet non-interactively (reads stdin if no text given)",
-	Long: `Post a tweet straight from the command line.
-
-  xeet post "hello world"
+	Short: "post from the command line, or from a pipe",
+	Long: `Post straight from the command line, with no interface in the way. The text
+can be an argument or piped in on stdin; attachments are up to four images or
+a single video.`,
+	Example: `  xeet post "hello world"
   echo "piped tweet" | xeet post
   xeet post "photo" --image ./photo.png
-  xeet post --image one.png --image two.jpg
+  xeet post --image one.png --image two.jpg   # no text, images only
   xeet post "clip" --image ./clip.mp4
   xeet post "a reply" --reply 1234567890`,
 	RunE: runPost,

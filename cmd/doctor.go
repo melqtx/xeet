@@ -18,9 +18,11 @@ var doctorOffline bool
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Diagnose the saved browser session without posting",
-	Args:  cobra.NoArgs,
-	RunE:  runDoctor,
+	Short: "check the saved session without posting anything",
+	Example: `  xeet doctor             # metadata plus one authenticated read
+  xeet doctor --offline   # local metadata only, no network`,
+	Args: cobra.NoArgs,
+	RunE: runDoctor,
 }
 
 func init() {

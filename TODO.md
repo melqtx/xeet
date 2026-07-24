@@ -26,6 +26,8 @@
 - Configurable color themes without layout changes (`xeet theme`, `--theme`)
 - tmux passthrough (DCS-wrapped Kitty graphics) for native images inside tmux 3.3+
 - Chunked upload for video and large media
+- Interactive `xeet auth` that marks which browsers hold an x.com session
+- Live-preview theme picker (`xeet theme`) and a grouped, colorized help
 
 ## Next
 
