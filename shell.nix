@@ -10,11 +10,14 @@ pkgs.mkShell {
     gnumake
     git
   ] ++ lib.optionals stdenv.isLinux [
-    # Clipboard attachments shell out to these at runtime; macOS uses the
+    # The wayland clipboard shells out to these at runtime; macOS uses the
     # system pasteboard instead.
-    xclip
     wl-clipboard
   ];
+
+  # `go build` on linux compiles the cgo clipboard, which needs Xlib's
+  # headers. Without them the dev shell cannot build the project at all.
+  buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.libx11 ];
 
   shellHook = ''
     # An older nixpkgs channel may carry a go patch release behind go.mod's;

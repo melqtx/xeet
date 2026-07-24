@@ -83,8 +83,6 @@ type WebClient struct {
 	httpClient          *http.Client
 	authToken           string
 	ct0                 string
-	queryID             string
-	refreshed           bool // CreateTweet was re-discovered; retained for API compatibility
 	operationQIDs       map[string]string
 	refreshedOperations map[string]string
 	retryDelay          time.Duration // base backoff between transient retries; tests shrink it
@@ -195,7 +193,6 @@ func NewWebClient(cfg *config.Config) *WebClient {
 		httpClient:          &http.Client{Timeout: 30 * time.Second},
 		authToken:           cfg.AuthToken,
 		ct0:                 cfg.CT0,
-		queryID:             qid,
 		operationQIDs:       operationQIDs,
 		refreshedOperations: map[string]string{},
 		reconcileDelay:      1500 * time.Millisecond,
@@ -206,9 +203,11 @@ func NewWebClient(cfg *config.Config) *WebClient {
 	return client
 }
 
-// QueryID returns the CreateTweet query id currently in use (possibly one that
-// was auto-discovered this session).
-func (c *WebClient) QueryID() string { return c.queryID }
+// createTweetQueryID is the CreateTweet id currently in use: the cached or
+// default one, or a fresher id discovered after a rotation this session.
+func (c *WebClient) createTweetQueryID() string {
+	return c.operationQIDs["CreateTweet"]
+}
 
 func (c *WebClient) discoverOperation(ctx context.Context, operation string) (string, error) {
 	var (
@@ -231,16 +230,8 @@ func (c *WebClient) discoverOperation(ctx context.Context, operation string) (st
 	}
 	c.operationQIDs[operation] = qid
 	c.refreshedOperations[operation] = qid
-	if operation == "CreateTweet" {
-		c.queryID = qid
-		c.refreshed = true
-	}
 	return qid, nil
 }
-
-// Refreshed reports whether the query id was re-discovered this session, so the
-// caller knows to persist QueryID() back to the config.
-func (c *WebClient) Refreshed() bool { return c.refreshed }
 
 // ApplyRefreshedQueryIDs copies operation ids discovered by this client into
 // cfg. It reports whether there is anything for the caller to persist.
@@ -509,7 +500,7 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 		return "", err
 	}
 	attemptedAt := time.Now()
-	res, err := c.doCreateTweet(ctx, vars, c.queryID)
+	res, err := c.doCreateTweet(ctx, vars, c.createTweetQueryID())
 	if err != nil {
 		return c.finishAmbiguousCreate(
 			ctx, text, replyToID, len(uploads), attemptedAt,
@@ -527,8 +518,6 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 				"Grab it manually: open x.com, post a tweet, in DevTools > Network find the 'CreateTweet' request,\n"+
 				"copy the id in its URL, then run:  xeet setqid <id>", derr)
 		}
-		c.queryID = fresh
-		c.refreshed = true
 		attemptedAt = time.Now()
 		res, err = c.doCreateTweet(ctx, vars, fresh)
 		if err != nil {
@@ -658,16 +647,14 @@ func (c *WebClient) uploadMedia(ctx context.Context, upload Upload) (string, err
 }
 
 // Verify confirms the session cookies with a non-mutating authenticated
-// timeline read. Account identity is handled separately by FetchViewer; the
-// returned string is retained for compatibility and is empty on success.
-func (c *WebClient) Verify(ctx context.Context) (string, error) {
+// timeline read. Account identity is a separate question, answered by
+// FetchViewer.
+func (c *WebClient) Verify(ctx context.Context) error {
 	if c.authToken == "" || c.ct0 == "" {
-		return "", fmt.Errorf("web session not configured")
+		return fmt.Errorf("web session not configured")
 	}
-	if _, err := c.FetchHomeTimeline(ctx, "", 1); err != nil {
-		return "", err
-	}
-	return "", nil
+	_, err := c.FetchHomeTimeline(ctx, "", 1)
+	return err
 }
 
 func truncate(b []byte) string {

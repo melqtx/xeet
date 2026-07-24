@@ -62,8 +62,7 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), 45*time.Second)
 	defer cancel()
 	client := api.NewWebClient(&candidate)
-	handle, err := client.Verify(ctx)
-	if err != nil {
+	if err := client.Verify(ctx); err != nil {
 		return fmt.Errorf("session found in %s but X rejected verification: %w", browser, err)
 	}
 	client.ApplyRefreshedQueryIDs(&candidate)
@@ -75,10 +74,6 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	if result.Profile != "" {
 		source = fmt.Sprintf("%s profile %q", browser, result.Profile)
 	}
-	if handle != "" {
-		fmt.Printf("✓ Connected as @%s via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", handle, source)
-	} else {
-		fmt.Printf("✓ Connected via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", source)
-	}
+	fmt.Printf("✓ Connected via %s. Run `xeet` for your timeline or `xeet --compose` to post.\n", source)
 	return nil
 }

@@ -57,7 +57,7 @@ func TestPostTweetChunkedVideo(t *testing.T) {
 	var appended int
 	statusPolls := 0
 	var graphQLBody []byte
-	client := &WebClient{authToken: "auth", ct0: "csrf", queryID: "qid"}
+	client := &WebClient{authToken: "auth", ct0: "csrf", operationQIDs: map[string]string{"CreateTweet": "qid"}}
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		var body []byte
 		if req.Body != nil {

@@ -149,7 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelling = false
 			m.editor.Blur()
 			attachments := append([]media.Attachment(nil), m.attachments...)
-			return m, beginPost(m.editor.Value(), attachments)
+			return m, beginPost(m.requestContext(), m.editor.Value(), attachments)
 		case "alt+enter", "ctrl+j":
 			if m.focus == focusEditor {
 				m.editor.InsertString("\n")

@@ -41,20 +41,37 @@ func runTimeline(ctx context.Context, imageMode string, following bool) error {
 		return fmt.Errorf("invalid --images value %q (use auto, native, ansi, or off)", imageMode)
 	}
 	for {
-		action, err := timeline.Run(imageMode, following)
+		action, err := timeline.Run(ctx, imageMode, following)
 		if err != nil {
 			return err
 		}
+		// An interrupt has to stop the loop rather than reopen the alt screen
+		// or start an interactive browser prompt against a dead context.
+		if ctx.Err() != nil {
+			return nil
+		}
 		switch action.Kind {
 		case timeline.ActionCompose:
-			if err := tui.Run(); err != nil {
+			if err := tui.Run(ctx); err != nil {
 				return err
+			}
+			if ctx.Err() != nil {
+				return nil
 			}
 		case timeline.ActionAuthenticate:
 			authInvocation := &cobra.Command{}
 			authInvocation.SetContext(ctx)
+			// An interrupt surfaces here as an error: the browser picker
+			// reports its own cancellation and verification fails on the dead
+			// context. Neither is worth printing as a failure.
 			if err := runAuth(authInvocation, nil); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
+			}
+			if ctx.Err() != nil {
+				return nil
 			}
 		default:
 			return nil

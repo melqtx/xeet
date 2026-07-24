@@ -25,7 +25,7 @@ func TestVerifyLive(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	if _, err := NewWebClient(cfg).Verify(ctx); err != nil {
+	if err := NewWebClient(cfg).Verify(ctx); err != nil {
 		t.Fatal(err)
 	}
 	t.Log("session verification succeeded")

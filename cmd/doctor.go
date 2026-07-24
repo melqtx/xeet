@@ -72,7 +72,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), 45*time.Second)
 	defer cancel()
-	if _, err := api.NewWebClient(cfg).Verify(ctx); err != nil {
+	if err := api.NewWebClient(cfg).Verify(ctx); err != nil {
 		return fmt.Errorf("verification failed: %w", err)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "verification: authenticated timeline read succeeded")

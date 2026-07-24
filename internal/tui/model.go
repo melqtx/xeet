@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -61,6 +62,9 @@ func (c systemClipboard) ReadText() string {
 }
 
 type Model struct {
+	// ctx is the parent of the posting request, so an interrupt cancels an
+	// upload in flight rather than detaching it from the program.
+	ctx            context.Context
 	width, height  int
 	screen         screen
 	dialog         dialog
@@ -111,17 +115,30 @@ func newWithDraftStore(clip clipboardReader, drafts draftStore) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
-	return Model{width: 72, height: 22, editor: editor, pathInput: path, spinner: s, clipboard: clip, drafts: drafts}
+	return Model{
+		ctx: context.Background(), width: 72, height: 22,
+		editor: editor, pathInput: path, spinner: s, clipboard: clip, drafts: drafts,
+	}
 }
 
 func (m Model) Init() tea.Cmd { return textarea.Blink }
 
-func Run() error {
+// requestContext is the parent for the posting request. Models built directly
+// in tests may leave ctx nil.
+func (m Model) requestContext() context.Context {
+	if m.ctx == nil {
+		return context.Background()
+	}
+	return m.ctx
+}
+
+func Run(ctx context.Context) error {
 	store, err := newFileDraftStore()
 	if err != nil {
 		return fmt.Errorf("initialize draft recovery: %w", err)
 	}
 	m := newWithDraftStore(systemClipboard{initErr: clip.Init()}, store)
+	m.ctx = ctx
 	text, attachments, restoreErr := store.Load()
 	if text != "" || len(attachments) > 0 {
 		m.editor.SetValue(text)
@@ -132,7 +149,12 @@ func Run() error {
 	if restoreErr != nil {
 		m.toast = restoreErr.Error()
 	}
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	if errors.Is(err, tea.ErrProgramKilled) {
+		// An interrupt reached the program through ctx; the draft is already
+		// autosaved, so this is an ordinary exit.
+		return nil
+	}
 	return err
 }
 
@@ -176,10 +198,10 @@ func loadAttachment(path string) tea.Cmd {
 	return func() tea.Msg { a, err := media.FromPath(path); return attachmentMsg{attachment: a, err: err} }
 }
 
-func beginPost(text string, attachments []media.Attachment) tea.Cmd {
+func beginPost(parent context.Context, text string, attachments []media.Attachment) tea.Cmd {
 	return func() tea.Msg {
 		events := make(chan tea.Msg, 8)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(parent)
 		go func() {
 			defer cancel()
 			mgr, err := config.NewConfigManager()

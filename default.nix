@@ -1,18 +1,21 @@
 { lib
 , buildGoModule
-, installShellFiles
-, xclip
 , wl-clipboard
+, libx11
 , makeWrapper
 , stdenv
 }:
 
 buildGoModule (finalAttrs: {
   pname = "xeet";
+  # Keep in step with the latest release tag.
   version = "0.1.8";
 
   src = lib.cleanSource ./.;
 
+  # Regenerate whenever go.mod or go.sum changes (including on dependabot
+  # bumps): set this to lib.fakeHash, run `nix build .#default`, and copy the
+  # hash nix reports. CI's nix job fails when it goes stale.
   vendorHash = "sha256-/Qy+oPK4BzNMl2xqVwNKdEzZ9N3zTpSzzmLCTKNV8z0=";
 
   # main.go reads these through -X; without them the binary reports "dev".
@@ -26,12 +29,20 @@ buildGoModule (finalAttrs: {
 
   nativeBuildInputs = [ makeWrapper ];
 
-  # Clipboard attachments shell out to xclip/wl-clipboard on Linux; put them
-  # on PATH so a nix-installed xeet works outside a dev shell. macOS uses the
-  # system pasteboard and needs nothing.
+  # golang.design/x/clipboard compiles X11 through cgo, so the linux build
+  # needs Xlib's headers. Without them the package built on darwin and failed
+  # on linux.
+  buildInputs = lib.optionals stdenv.isLinux [ libx11 ];
+
+  # The clipboard links only -ldl and dlopens "libX11.so" at runtime, so
+  # nothing records libx11 in the binary's rpath and the lookup would fail on
+  # a machine without X11 in the default loader paths. LD_LIBRARY_PATH points
+  # it at the unversioned symlink in libx11's lib directory. Wayland shells
+  # out to wl-paste/wl-copy instead; macOS uses the system pasteboard.
   postInstall = lib.optionalString stdenv.isLinux ''
     wrapProgram $out/bin/xeet \
-      --prefix PATH : ${lib.makeBinPath [ xclip wl-clipboard ]}
+      --prefix PATH : ${lib.makeBinPath [ wl-clipboard ]} \
+      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libx11 ]}
   '';
 
   meta = {

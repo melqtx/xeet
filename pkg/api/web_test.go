@@ -56,7 +56,7 @@ func response(status int, body string) *http.Response {
 func TestPostTweetUploadsMultipleImages(t *testing.T) {
 	uploadCount := 0
 	var graphQLBody []byte
-	client := &WebClient{authToken: "auth", ct0: "csrf", queryID: "qid"}
+	client := &WebClient{authToken: "auth", ct0: "csrf", operationQIDs: map[string]string{"CreateTweet": "qid"}}
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		body, _ := io.ReadAll(req.Body)
 		if strings.Contains(req.URL.Path, "media/upload") {
