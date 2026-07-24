@@ -1,4 +1,4 @@
-# Xeet v0.1.8-alpha
+# Xeet v0.1.8
 
 A simple terminal interface for posting to and browsing X without developer
 API keys.

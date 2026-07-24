@@ -291,26 +291,56 @@ func fetchPreview(postID string, media api.TimelineMedia, width, maxRows int, mo
 			return previewMsg{postID: postID, err: fmt.Errorf("decode image: %w", err)}
 		}
 		if mode == imageModeNative {
-			path, err := writePreviewPNG(decoded)
+			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
+			path, err := writePreviewPNG(downscaleForCells(decoded, columns, rows))
 			if err != nil {
 				return previewMsg{postID: postID, err: err}
 			}
-			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
 			return previewMsg{
 				postID: postID, nativePath: path, imageID: previewImageID(postID),
 				columns: columns, rows: rows,
 			}
 		}
 		if mode == imageModeWezTerm {
-			encoded, err := encodePreviewPNG(decoded)
+			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
+			encoded, err := encodePreviewPNG(downscaleForCells(decoded, columns, rows))
 			if err != nil {
 				return previewMsg{postID: postID, err: err}
 			}
-			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
 			return previewMsg{postID: postID, nativeData: encoded, columns: columns, rows: rows}
 		}
 		return previewMsg{postID: postID, content: renderANSIImage(decoded, width, maxRows)}
 	}
+}
+
+// Pixel budget per terminal cell for native image payloads, generous enough
+// for 2x/retina displays. Full-resolution photos previously went to the
+// terminal untouched: a timeline of them exhausts the terminal's image
+// storage quota, at which point kitty-protocol terminals silently evict the
+// oldest transmissions and earlier previews disappear from the screen.
+const (
+	cellPixelWidth  = 20
+	cellPixelHeight = 40
+)
+
+// downscaleForCells bounds an image to the pixel area its terminal cells can
+// actually show. It never upscales.
+func downscaleForCells(source image.Image, columns, rows int) image.Image {
+	bounds := source.Bounds()
+	maxWidth := columns * cellPixelWidth
+	maxHeight := rows * cellPixelHeight
+	if maxWidth <= 0 || maxHeight <= 0 || (bounds.Dx() <= maxWidth && bounds.Dy() <= maxHeight) {
+		return source
+	}
+	width := maxWidth
+	height := max(1, bounds.Dy()*width/bounds.Dx())
+	if height > maxHeight {
+		height = maxHeight
+		width = max(1, bounds.Dx()*height/bounds.Dy())
+	}
+	target := image.NewNRGBA(image.Rect(0, 0, width, height))
+	draw.CatmullRom.Scale(target, target.Bounds(), source, bounds, draw.Over, nil)
+	return target
 }
 
 func encodePreviewPNG(source image.Image) (string, error) {
@@ -436,7 +466,13 @@ func (m Model) wezTermPreviewBlock(preview previewState) string {
 			if preview.rows > 1 {
 				fmt.Fprintf(&output, "\x1b[%dA", preview.rows-1)
 			}
+			// Wrap the image emit in DECSC/DECRC. WezTerm honors
+			// doNotMoveCursor=1, but iTerm2 moves the cursor after drawing an
+			// inline image; without the restore every later relative movement
+			// lands offset and the frame around the image corrupts.
+			output.WriteString("\x1b7")
 			output.WriteString(wezTermDisplay(preview.nativeData, preview.columns, preview.rows))
+			output.WriteString("\x1b8")
 			if preview.rows > 1 {
 				fmt.Fprintf(&output, "\x1b[%dB", preview.rows-1)
 			}
