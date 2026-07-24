@@ -10,7 +10,7 @@ import (
 
 var logoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Disconnect your X account and erase the saved session",
+	Short: "disconnect and erase the saved session",
 	Long: `Removes the x.com session tokens from your OS keyring and deletes xeet's
 config file. Your browser session is untouched; run 'xeet auth' to reconnect.`,
 	RunE: func(cmd *cobra.Command, args []string) error {

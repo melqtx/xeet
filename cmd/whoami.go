@@ -14,7 +14,7 @@ import (
 
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
-	Short: "Show the X account connected to the saved session",
+	Short: "show which account is connected",
 	Args:  cobra.NoArgs,
 	RunE:  runWhoami,
 }

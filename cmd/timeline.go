@@ -18,7 +18,10 @@ var (
 
 var timelineCmd = &cobra.Command{
 	Use:   "timeline",
-	Short: "Browse your X home timeline",
+	Short: "browse your home timeline",
+	Example: `  xeet timeline                # same as plain 'xeet'
+  xeet timeline --following    # the Following feed
+  xeet timeline --images off   # text only, no previews`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := applyConfiguredTheme(timelineTheme); err != nil {
 			return err

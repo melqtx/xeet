@@ -13,7 +13,7 @@ const maxHARBytes = 64 << 20
 
 var inspectHARCmd = &cobra.Command{
 	Use:   "inspect-har <file>",
-	Short: "Compare a browser CreateTweet request with Xeet without printing secrets",
+	Short: "compare a browser request with xeet's, secrets redacted",
 	Long: `Inspect a HAR exported from browser developer tools and compare the last
 CreateTweet POST with the request Xeet currently builds.
 
@@ -21,8 +21,9 @@ The report contains only header names, cookie names, JSON key names, and a
 coarse browser family and major version. It never prints header values, cookie
 values, post text, query ids, or response bodies. The HAR itself is sensitive,
 so keep it local.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runInspectHAR,
+	Example: "  xeet inspect-har ~/Downloads/x.com.har",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runInspectHAR,
 }
 
 func init() {

@@ -346,3 +346,46 @@ func TestLoadRepairsConfigPermissions(t *testing.T) {
 		t.Fatalf("permissions = %o, want 0600", info.Mode().Perm())
 	}
 }
+
+// countingStore records whether anything reached the keyring at all.
+type countingStore struct {
+	*fakeStore
+	gets int
+}
+
+func (c *countingStore) Get(key string) (string, error) {
+	c.gets++
+	return c.fakeStore.Get(key)
+}
+
+func TestThemeReadsTheFileWithoutTouchingTheKeyring(t *testing.T) {
+	dir := t.TempDir()
+	store := &countingStore{fakeStore: newFakeStore()}
+	cm := newConfigManagerAt(dir, store)
+
+	if err := cm.Save(&Config{Theme: "nord"}); err != nil {
+		t.Fatal(err)
+	}
+	store.gets = 0
+
+	name, err := cm.Theme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "nord" {
+		t.Fatalf("Theme() = %q, want nord", name)
+	}
+	if store.gets != 0 {
+		t.Fatalf("Theme() made %d keyring reads; drawing in the right colors must not prompt for secrets", store.gets)
+	}
+}
+
+func TestThemeIsEmptyWithoutAConfigFile(t *testing.T) {
+	name, err := newConfigManagerAt(t.TempDir(), newFakeStore()).Theme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "" {
+		t.Fatalf("Theme() = %q, want empty", name)
+	}
+}

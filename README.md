@@ -75,10 +75,25 @@ then:
 xeet auth
 ```
 
+the picker marks which browsers it can already see an x.com session in, so
+you don't have to guess:
+
+```
+where are you signed in to x.com?
+
+  › Chrome    session found
+    Helium    not detected
+    Firefox   session found
+```
+
 xeet borrows that browser session. it never asks for your password. macos
 may prompt for keychain access; linux may ask you to unlock gnome keyring /
 secret service / kde wallet. snap and flatpak browser installs are detected,
-and multiple profiles work.
+and multiple profiles work. whatever you pick is verified with x before it
+replaces a session that already works, and a failure lets you try another
+browser without starting over.
+
+scripting it? `xeet auth --browser firefox` skips the picker entirely.
 
 then just:
 
@@ -105,6 +120,9 @@ xeet logout            # delete xeet's copy of the session
 
 diagnostics print a short fingerprint and the browser/profile, never the
 cookie values.
+
+`xeet --help` groups the commands by when you need them and shows a worked
+example for each; `xeet <command> --help` goes deeper on any one of them.
 
 ## the tui
 
@@ -157,10 +175,15 @@ colors are configurable; the layout never changes. pick from tokyonight
 (default), catppuccin, gruvbox, nord, rosepine, or mono:
 
 ```bash
-xeet theme             # list themes, current one marked
+xeet theme             # browse the palettes with a live preview
 xeet theme nord        # save a default in ~/.xeet.yaml
+xeet theme --list      # just the names, current one marked
 xeet --theme mono      # try one for a single run
 ```
+
+`xeet theme` on its own opens a picker that recolors itself as you move:
+swatches, a couple of sample posts, and the composer footer, all in the
+palette under the cursor. `enter` saves it, `esc` keeps what you had.
 
 <details>
 <summary>details: how images render</summary>

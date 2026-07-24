@@ -10,7 +10,7 @@ import (
 
 var setqidCmd = &cobra.Command{
 	Use:   "setqid <query-id>",
-	Short: "Manually set the CreateTweet GraphQL query id (if auto-discovery fails)",
+	Short: "set the CreateTweet query id by hand, if discovery fails",
 	Long: `xeet normally discovers the CreateTweet query id on its own. If that fails,
 grab it yourself: open x.com, post a tweet, and in DevTools > Network find the
 'CreateTweet' request. The id is the segment in its URL:
