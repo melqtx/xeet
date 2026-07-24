@@ -68,7 +68,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if composeOnly {
-		return tui.Run()
+		return tui.Run(cmd.Context())
 	}
 	imageMode := "auto"
 	if barebones {

@@ -58,6 +58,10 @@ const (
 )
 
 type Model struct {
+	// ctx bounds every request this model starts. It carries the process's
+	// interrupt signal, so a SIGINT or SIGTERM cancels in-flight fetches
+	// instead of leaving them to run out their own timeouts.
+	ctx           context.Context
 	width, height int
 	imageMode     imageMode
 	imageNote     string
@@ -195,18 +199,29 @@ func NewWithImageMode(requested string) Model {
 	editor.SetHeight(6)
 	mode, note := resolveImageMode(requested)
 	return Model{
+		ctx:   context.Background(),
 		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
 		liking: map[string]bool{}, previews: map[string]previewState{},
 		spinner: s, viewport: vp, replyEditor: editor,
 	}
 }
 
-func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, "", false, m.feedSeq), clockTick())
+// requestContext is the parent for every fetch. Models built directly in
+// tests may leave ctx nil.
+func (m Model) requestContext() context.Context {
+	if m.ctx == nil {
+		return context.Background()
+	}
+	return m.ctx
 }
 
-func Run(images string, following bool) (Action, error) {
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, "", false, m.feedSeq), clockTick())
+}
+
+func Run(ctx context.Context, images string, following bool) (Action, error) {
 	m := NewWithImageMode(images)
+	m.ctx = ctx
 	m.following = following
 	// Auto-detected native mode is a claim, not a capability: multiplexers
 	// like cmux inherit ghostty's TERM without reliably rendering graphics.
@@ -220,7 +235,12 @@ func Run(images string, following bool) (Action, error) {
 		}
 	}
 	m.clipboardOK = clip.Init() == nil
-	result, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	result, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	if errors.Is(err, tea.ErrProgramKilled) {
+		// An interrupt reached the program through ctx. That is an ordinary
+		// exit, not a failure worth reporting.
+		return Action{}, nil
+	}
 	if err != nil {
 		return Action{}, err
 	}
@@ -229,7 +249,7 @@ func Run(images string, following bool) (Action, error) {
 	return final.action, nil
 }
 
-func fetchPageSeq(following bool, cursor string, more bool, seq int) tea.Cmd {
+func fetchPageSeq(parent context.Context, following bool, cursor string, more bool, seq int) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
@@ -239,7 +259,7 @@ func fetchPageSeq(following bool, cursor string, more bool, seq int) tea.Cmd {
 		if err != nil {
 			return pageMsg{err: err, more: more, seq: seq}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		fetch := client.FetchHomeTimeline
@@ -254,7 +274,7 @@ func fetchPageSeq(following bool, cursor string, more bool, seq int) tea.Cmd {
 	}
 }
 
-func fetchThread(tweetID, cursor string, more bool, seq int) tea.Cmd {
+func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq int) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
@@ -264,7 +284,7 @@ func fetchThread(tweetID, cursor string, more bool, seq int) tea.Cmd {
 		if err != nil {
 			return threadMsg{rootID: tweetID, seq: seq, err: err, more: more}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		page, err := client.FetchTweetDetail(ctx, tweetID, cursor, 40)
@@ -277,10 +297,10 @@ func fetchThread(tweetID, cursor string, more bool, seq int) tea.Cmd {
 
 func (m *Model) requestThread(cursor string, more bool) tea.Cmd {
 	m.threadSeq++
-	return fetchThread(m.threadRootID, cursor, more, m.threadSeq)
+	return fetchThread(m.requestContext(), m.threadRootID, cursor, more, m.threadSeq)
 }
 
-func setLike(tweetID string, liked bool) tea.Cmd {
+func setLike(parent context.Context, tweetID string, liked bool) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
@@ -290,7 +310,7 @@ func setLike(tweetID string, liked bool) tea.Cmd {
 		if err != nil {
 			return likeMsg{id: tweetID, liked: liked, err: err}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		err = client.SetTweetLiked(ctx, tweetID, liked)
@@ -301,7 +321,7 @@ func setLike(tweetID string, liked bool) tea.Cmd {
 	}
 }
 
-func sendReply(tweetID, text string) tea.Cmd {
+func sendReply(parent context.Context, tweetID, text string) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
@@ -311,7 +331,7 @@ func sendReply(tweetID, text string) tea.Cmd {
 		if err != nil {
 			return replyResultMsg{err: err}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		id, err := client.PostTweet(ctx, text, tweetID, nil, nil)
@@ -503,7 +523,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshing = true
 		}
 		m.err = nil
-		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, "", false, m.feedSeq)))
+		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, "", false, m.feedSeq)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
@@ -566,7 +586,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyLike(post.ID, liked)
 			m.syncViewport()
 			m.ensureSelectedVisible()
-			return m, setLike(post.ID, liked)
+			return m, setLike(m.requestContext(), post.ID, liked)
 		}
 	case "y":
 		if post, ok := m.currentPost(); ok {
@@ -614,13 +634,13 @@ func (m Model) switchFeed() (tea.Model, tea.Cmd) {
 	m.err = nil
 	m.viewport.YOffset = 0
 	m.syncViewport()
-	return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, "", false, m.feedSeq)))
+	return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, "", false, m.feedSeq)))
 }
 
 func (m *Model) maybeLoadMore() tea.Cmd {
 	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
 		m.loadingMore = true
-		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, m.cursor, true, m.feedSeq))
+		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, m.cursor, true, m.feedSeq))
 	}
 	return nil
 }
@@ -965,7 +985,7 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.liking[post.ID] = true
 			m.applyLike(post.ID, liked)
 			m.syncViewport()
-			return m, setLike(post.ID, liked)
+			return m, setLike(m.requestContext(), post.ID, liked)
 		}
 	case "y":
 		if post, ok := m.currentPost(); ok {
@@ -1082,7 +1102,7 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replyErr = nil
 			m.replyNotice = ""
 			m.replyEditor.Blur()
-			return m, tea.Batch(m.spinner.Tick, sendReply(m.replyPost.ID, m.replyEditor.Value()))
+			return m, tea.Batch(m.spinner.Tick, sendReply(m.requestContext(), m.replyPost.ID, m.replyEditor.Value()))
 		case "alt+enter", "ctrl+j":
 			m.replyEditor.InsertString("\n")
 			return m, nil

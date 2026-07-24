@@ -41,13 +41,16 @@ func runTimeline(ctx context.Context, imageMode string, following bool) error {
 		return fmt.Errorf("invalid --images value %q (use auto, native, ansi, or off)", imageMode)
 	}
 	for {
-		action, err := timeline.Run(imageMode, following)
+		action, err := timeline.Run(ctx, imageMode, following)
 		if err != nil {
 			return err
 		}
+		if ctx.Err() != nil {
+			return nil
+		}
 		switch action.Kind {
 		case timeline.ActionCompose:
-			if err := tui.Run(); err != nil {
+			if err := tui.Run(ctx); err != nil {
 				return err
 			}
 		case timeline.ActionAuthenticate:

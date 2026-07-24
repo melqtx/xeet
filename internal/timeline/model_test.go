@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -651,5 +652,23 @@ func TestViewIsFixedHeightAndDoesNotDuplicateRows(t *testing.T) {
 		if lines := strings.Count(view, "\n") + 1; lines != size.height {
 			t.Fatalf("%dx%d: view has %d lines", size.width, size.height, lines)
 		}
+	}
+}
+
+func TestRequestContextCarriesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := New()
+	m.ctx = ctx
+	if m.requestContext().Err() != nil {
+		t.Fatal("live context reported as cancelled")
+	}
+	cancel()
+	if !errors.Is(m.requestContext().Err(), context.Canceled) {
+		t.Fatal("cancelling the parent did not reach the model's request context")
+	}
+
+	// A zero-value Model (built directly by a test) must still be usable.
+	if (Model{}).requestContext() == nil {
+		t.Fatal("zero-value model has no request context")
 	}
 }
