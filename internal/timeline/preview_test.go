@@ -324,6 +324,20 @@ func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 	}
 }
 
+func TestThreadSelectionRequestsInlinePreview(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{
+		ID: "root", Text: "photo", Media: []api.TimelineMedia{{URL: "https://example.com/photo.jpg"}},
+	}}}
+	m.syncViewport()
+	if cmd := m.requestPreviews(); cmd == nil || !m.previews["root"].loading {
+		t.Fatalf("thread preview was not requested: cmd=%v state=%+v", cmd, m.previews["root"])
+	}
+}
+
 func TestNativePrefetchIncludesVisiblePosts(t *testing.T) {
 	m := NewWithImageMode("native")
 	m.imageMode = imageModeNative

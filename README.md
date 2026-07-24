@@ -85,6 +85,7 @@ xeet                                  # browse your home timeline with images
 xeet --barebones                      # browse a text-only timeline
 xeet --compose                        # open only the interactive composer
 xeet timeline                         # same timeline, with renderer controls
+xeet timeline --threads               # experimental: Enter opens replies
 xeet post "hello from my shell"       # one-shot from the terminal
 echo "piped in" | xeet post           # reads stdin
 xeet post "photos" -i one.png -i two.jpg
@@ -162,6 +163,11 @@ place, **o** to open the post in the browser, **y** to copy its link,
 and **P** to write a new post. **R** refreshes in place: new posts stack on
 top while you keep your position. More posts load automatically near the
 bottom. Press **?** for the in-app key guide.
+
+Try conversation browsing with `xeet timeline --threads`. In this experimental
+mode, **Enter** opens the selected post and its replies, **j/k** moves through
+them, **r** replies to the selected item, and **Esc** returns to the same place
+in the home timeline. Use **e** or **Space** to expand long text.
 
 Images are prefetched around your position in the feed and rendered inline
 for nearby posts, so scrolling lands on already-loaded previews. Videos and

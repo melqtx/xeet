@@ -325,6 +325,156 @@ func TestToastExpiresOnlyForLatestSequence(t *testing.T) {
 	}
 }
 
+func TestExperimentalEnterOpensRepliesAndEscRestoresFeed(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.posts = []api.TimelinePost{
+		{ID: "first", Handle: "one", Text: "first"},
+		{ID: "root", Handle: "alice", Text: "root"},
+	}
+	m.selected = 1
+	m.syncViewport()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil || m.mode != modeThread || m.threadRootID != "root" || m.feedSelected != 1 {
+		t.Fatalf("thread did not open: mode=%v root=%q feedSelected=%d", m.mode, m.threadRootID, m.feedSelected)
+	}
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, page: &api.ConversationPage{Posts: []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Handle: "alice", Text: "root"}},
+		{TimelinePost: api.TimelinePost{ID: "reply", Handle: "bob", Text: "hello", InReplyToID: "root"}, Depth: 1},
+	}}})
+	if m.threadLoading || len(m.threadPosts) != 2 || !strings.Contains(m.View(), "↳ reply") {
+		t.Fatalf("thread did not render: loading=%v posts=%+v", m.threadLoading, m.threadPosts)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeFeed || m.selected != 1 || m.posts[m.selected].ID != "root" {
+		t.Fatalf("feed position was not restored: mode=%v selected=%d", m.mode, m.selected)
+	}
+}
+
+func TestThreadIgnoresStaleConversationAndKeepsFeedUpdatesAlive(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.posts = []api.TimelinePost{{ID: "root", Text: "root"}}
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadPosts = []api.ConversationPost{{TimelinePost: m.posts[0]}}
+	m.threadLoading = true
+	m = update(t, m, threadMsg{rootID: "old", page: &api.ConversationPage{Posts: []api.ConversationPost{{
+		TimelinePost: api.TimelinePost{ID: "wrong", Text: "wrong"},
+	}}}})
+	if len(m.threadPosts) != 1 || m.threadPosts[0].ID != "root" || !m.threadLoading {
+		t.Fatalf("stale thread result was applied: %+v", m.threadPosts)
+	}
+	m.loadingMore = true
+	m = update(t, m, pageMsg{more: true, page: &api.TimelinePage{Posts: []api.TimelinePost{{ID: "next", Text: "next"}}}})
+	if m.loadingMore || len(m.posts) != 2 || m.mode != modeThread || m.selected != 0 {
+		t.Fatalf("feed update was dropped in thread mode: loadingMore=%v posts=%d selected=%d", m.loadingMore, len(m.posts), m.selected)
+	}
+}
+
+func TestThreadContinuationResolvesParentFromEarlierPage(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadSeq = 1
+	m.threadMore = true
+	m.threadPosts = []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}},
+		{TimelinePost: api.TimelinePost{ID: "parent", Text: "parent", InReplyToID: "root"}, Depth: 1},
+	}
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, more: true, page: &api.ConversationPage{
+		Unresolved: []api.TimelinePost{{ID: "nested", Text: "nested", InReplyToID: "parent"}},
+	}})
+	if len(m.threadPosts) != 3 || m.threadPosts[2].ID != "nested" || m.threadPosts[2].Depth != 2 {
+		t.Fatalf("continuation was not resolved: %+v", m.threadPosts)
+	}
+}
+
+func TestThreadResultCompletesWhileReplyEditorIsOpen(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadSeq = 1
+	m.threadLoading = true
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, page: &api.ConversationPage{Posts: []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}},
+		{TimelinePost: api.TimelinePost{ID: "reply", Text: "reply"}, Depth: 1},
+	}}})
+	if m.mode != modeReply || m.threadLoading || len(m.threadPosts) != 2 {
+		t.Fatalf("background thread result was dropped: mode=%v loading=%v posts=%d", m.mode, m.threadLoading, len(m.threadPosts))
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeThread || len(m.threadPosts) != 2 {
+		t.Fatalf("cancel did not reveal loaded thread: mode=%v posts=%d", m.mode, len(m.threadPosts))
+	}
+}
+
+func TestFeedResultDuringThreadReplyPreservesBothSelections(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.posts = []api.TimelinePost{{ID: "a", Text: "a"}, {ID: "root", Text: "root"}}
+	m.feedSelected = 1
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadPosts = []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}},
+		{TimelinePost: api.TimelinePost{ID: "reply", Text: "reply"}, Depth: 1},
+	}
+	m.selected = 1
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: []api.TimelinePost{{ID: "new", Text: "new"}}}})
+	if m.mode != modeReply || m.selected != 1 || m.feedSelected != 2 {
+		t.Fatalf("background feed result corrupted selections: mode=%v thread=%d feed=%d", m.mode, m.selected, m.feedSelected)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeThread || m.selected != 1 || m.threadPosts[m.selected].ID != "reply" {
+		t.Fatalf("thread selection was not restored: mode=%v selected=%d", m.mode, m.selected)
+	}
+}
+
+func TestThreadIgnoresOlderRequestForSameRoot(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadSeq = 2
+	m.threadLoading = true
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "new root"}}}
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, page: &api.ConversationPage{Posts: []api.ConversationPost{{
+		TimelinePost: api.TimelinePost{ID: "root", Text: "stale root"},
+	}}}})
+	if !m.threadLoading || m.threadPosts[0].Text != "new root" {
+		t.Fatalf("older same-root request was applied: loading=%v post=%+v", m.threadLoading, m.threadPosts[0])
+	}
+}
+
+func TestThreadReplyTargetsSelectedReplyAndReturnsToThread(t *testing.T) {
+	m := newModel("off", true)
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadPosts = []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Handle: "alice", Text: "root"}},
+		{TimelinePost: api.TimelinePost{ID: "reply", Handle: "bob", Text: "hello"}, Depth: 1},
+	}
+	m.selected = 1
+	m.syncViewport()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if m.mode != modeReply || m.replyReturn != modeThread || m.replyPost.ID != "reply" {
+		t.Fatalf("reply target=%q mode=%v return=%v", m.replyPost.ID, m.mode, m.replyReturn)
+	}
+	m.replyEditor.SetValue("nested answer")
+	m = update(t, m, replyResultMsg{id: "new"})
+	if m.mode != modeThread || !m.threadLoading || m.toast != "reply sent ♥" {
+		t.Fatalf("reply did not return and refresh thread: mode=%v loading=%v toast=%q", m.mode, m.threadLoading, m.toast)
+	}
+}
+
 func TestEnterExpandsTruncatedPost(t *testing.T) {
 	m := New()
 	m.loading = false

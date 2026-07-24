@@ -22,18 +22,20 @@ type TimelineMedia struct {
 }
 
 type TimelinePost struct {
-	ID          string
-	Text        string
-	AuthorName  string
-	Handle      string
-	CreatedAt   time.Time
-	ReplyCount  int
-	RepostCount int
-	LikeCount   int
-	ViewCount   string
-	MediaCount  int
-	Media       []TimelineMedia
-	Liked       bool
+	ID             string
+	Text           string
+	AuthorName     string
+	Handle         string
+	CreatedAt      time.Time
+	ReplyCount     int
+	RepostCount    int
+	LikeCount      int
+	ViewCount      string
+	MediaCount     int
+	Media          []TimelineMedia
+	Liked          bool
+	InReplyToID    string
+	ConversationID string
 }
 
 type TimelinePage struct {
@@ -239,6 +241,8 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 	post.RepostCount = intValue(legacy["retweet_count"])
 	post.LikeCount = intValue(legacy["favorite_count"])
 	post.Liked, _ = legacy["favorited"].(bool)
+	post.InReplyToID, _ = legacy["in_reply_to_status_id_str"].(string)
+	post.ConversationID, _ = legacy["conversation_id_str"].(string)
 	if created, _ := legacy["created_at"].(string); created != "" {
 		post.CreatedAt, _ = time.Parse("Mon Jan 02 15:04:05 -0700 2006", created)
 	}

@@ -103,6 +103,9 @@ func webpackChunkURLs(runtime, operation string) []string {
 }
 
 func operationHint(operation string) string {
+	if operation == "TweetDetail" {
+		return "TweetDetail"
+	}
 	if strings.Contains(operation, "Home") {
 		return "HomeTimeline"
 	}
