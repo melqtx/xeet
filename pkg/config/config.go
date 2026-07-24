@@ -27,6 +27,7 @@ type Config struct {
 	HomeTimelineQID    string    `yaml:"home_timeline_qid,omitempty"`
 	FavoriteTweetQID   string    `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID string    `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID          string    `yaml:"viewer_qid,omitempty"`
 	SessionBrowser     string    `yaml:"session_browser,omitempty"`
 	SessionProfile     string    `yaml:"session_profile,omitempty"`
 	SessionDomain      string    `yaml:"session_domain,omitempty"`
@@ -95,6 +96,7 @@ type fileConfig struct {
 	HomeTimelineQID    string `yaml:"home_timeline_qid,omitempty"`
 	FavoriteTweetQID   string `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID string `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID          string `yaml:"viewer_qid,omitempty"`
 	SessionBrowser     string `yaml:"session_browser,omitempty"`
 	SessionProfile     string `yaml:"session_profile,omitempty"`
 	SessionDomain      string `yaml:"session_domain,omitempty"`
@@ -135,6 +137,7 @@ func (cm *ConfigManager) Load() (*Config, error) {
 		HomeTimelineQID:    fc.HomeTimelineQID,
 		FavoriteTweetQID:   fc.FavoriteTweetQID,
 		UnfavoriteTweetQID: fc.UnfavoriteTweetQID,
+		ViewerQID:          fc.ViewerQID,
 		SessionBrowser:     fc.SessionBrowser,
 		SessionProfile:     fc.SessionProfile,
 		SessionDomain:      fc.SessionDomain,
@@ -220,6 +223,7 @@ func (cm *ConfigManager) Save(config *Config) error {
 		return cm.writeFile(&fileConfig{
 			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
 			FavoriteTweetQID: config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
+			ViewerQID: config.ViewerQID,
 		})
 	}
 
@@ -256,6 +260,7 @@ func fileConfigFor(config *Config) *fileConfig {
 		HomeTimelineQID:    config.HomeTimelineQID,
 		FavoriteTweetQID:   config.FavoriteTweetQID,
 		UnfavoriteTweetQID: config.UnfavoriteTweetQID,
+		ViewerQID:          config.ViewerQID,
 		SessionBrowser:     config.SessionBrowser,
 		SessionProfile:     config.SessionProfile,
 		SessionDomain:      config.SessionDomain,

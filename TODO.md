@@ -21,10 +21,10 @@
 - Actionable offline, timeout, service outage, rate-limit, and expired-session recovery
 - Persistent operation-ID caching for posting, timelines, likes, and unlikes
 - Keyboard-accessible image descriptions, including text-only mode
+- `xeet whoami` session/account display
 
 ## Next
 
-- `xeet whoami` session/account display
 - Following timeline option
 - Configurable theme without changing layout
 - Chunked upload for video and large media
