@@ -216,7 +216,7 @@ func (m Model) viewDialog() string {
 	case dialogQuit:
 		body = lipgloss.NewStyle().Foreground(pink).Bold(true).Render("save this draft for later?") +
 			"\n\nYour words and pics can be restored next time." +
-			"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("y save & leave  •  d discard  •  n stay")
+			"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("enter/y save & leave  •  d discard  •  esc/n stay")
 	}
 	box := dialogStyle.Width(w - 6).Render(body)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
