@@ -21,19 +21,21 @@ import (
 // state: X's rotating GraphQL query ids and browser-session source metadata used
 // by `xeet doctor`.
 type Config struct {
-	AuthToken          string    `yaml:"-"`
-	CT0                string    `yaml:"-"`
-	CreateTweetQID     string    `yaml:"create_tweet_qid"`
-	HomeTimelineQID    string    `yaml:"home_timeline_qid,omitempty"`
-	FavoriteTweetQID   string    `yaml:"favorite_tweet_qid,omitempty"`
-	UnfavoriteTweetQID string    `yaml:"unfavorite_tweet_qid,omitempty"`
-	ViewerQID          string    `yaml:"viewer_qid,omitempty"`
-	TweetDetailQID     string    `yaml:"tweet_detail_qid,omitempty"`
-	SessionBrowser     string    `yaml:"session_browser,omitempty"`
-	SessionProfile     string    `yaml:"session_profile,omitempty"`
-	SessionDomain      string    `yaml:"session_domain,omitempty"`
-	SessionExpires     time.Time `yaml:"session_expires,omitempty"`
-	SessionImported    time.Time `yaml:"session_imported,omitempty"`
+	AuthToken             string    `yaml:"-"`
+	CT0                   string    `yaml:"-"`
+	CreateTweetQID        string    `yaml:"create_tweet_qid"`
+	HomeTimelineQID       string    `yaml:"home_timeline_qid,omitempty"`
+	HomeLatestTimelineQID string    `yaml:"home_latest_timeline_qid,omitempty"`
+	FavoriteTweetQID      string    `yaml:"favorite_tweet_qid,omitempty"`
+	UnfavoriteTweetQID    string    `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID             string    `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID        string    `yaml:"tweet_detail_qid,omitempty"`
+	Theme                 string    `yaml:"theme,omitempty"`
+	SessionBrowser        string    `yaml:"session_browser,omitempty"`
+	SessionProfile        string    `yaml:"session_profile,omitempty"`
+	SessionDomain         string    `yaml:"session_domain,omitempty"`
+	SessionExpires        time.Time `yaml:"session_expires,omitempty"`
+	SessionImported       time.Time `yaml:"session_imported,omitempty"`
 }
 
 // keyringService is the service name xeet registers its secrets under.
@@ -91,19 +93,21 @@ func (systemKeyring) Delete(key string) error {
 // fileConfig is the on-disk shape. auth_token and ct0 are only read for
 // migration from the pre-keyring layout and are never written back.
 type fileConfig struct {
-	AuthToken          string `yaml:"auth_token,omitempty"`
-	CT0                string `yaml:"ct0,omitempty"`
-	CreateTweetQID     string `yaml:"create_tweet_qid,omitempty"`
-	HomeTimelineQID    string `yaml:"home_timeline_qid,omitempty"`
-	FavoriteTweetQID   string `yaml:"favorite_tweet_qid,omitempty"`
-	UnfavoriteTweetQID string `yaml:"unfavorite_tweet_qid,omitempty"`
-	ViewerQID          string `yaml:"viewer_qid,omitempty"`
-	TweetDetailQID     string `yaml:"tweet_detail_qid,omitempty"`
-	SessionBrowser     string `yaml:"session_browser,omitempty"`
-	SessionProfile     string `yaml:"session_profile,omitempty"`
-	SessionDomain      string `yaml:"session_domain,omitempty"`
-	SessionExpires     string `yaml:"session_expires,omitempty"`
-	SessionImported    string `yaml:"session_imported,omitempty"`
+	AuthToken             string `yaml:"auth_token,omitempty"`
+	CT0                   string `yaml:"ct0,omitempty"`
+	CreateTweetQID        string `yaml:"create_tweet_qid,omitempty"`
+	HomeTimelineQID       string `yaml:"home_timeline_qid,omitempty"`
+	HomeLatestTimelineQID string `yaml:"home_latest_timeline_qid,omitempty"`
+	FavoriteTweetQID      string `yaml:"favorite_tweet_qid,omitempty"`
+	UnfavoriteTweetQID    string `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID             string `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID        string `yaml:"tweet_detail_qid,omitempty"`
+	Theme                 string `yaml:"theme,omitempty"`
+	SessionBrowser        string `yaml:"session_browser,omitempty"`
+	SessionProfile        string `yaml:"session_profile,omitempty"`
+	SessionDomain         string `yaml:"session_domain,omitempty"`
+	SessionExpires        string `yaml:"session_expires,omitempty"`
+	SessionImported       string `yaml:"session_imported,omitempty"`
 }
 
 type ConfigManager struct {
@@ -135,15 +139,17 @@ func (cm *ConfigManager) Load() (*Config, error) {
 	}
 
 	config := &Config{
-		CreateTweetQID:     fc.CreateTweetQID,
-		HomeTimelineQID:    fc.HomeTimelineQID,
-		FavoriteTweetQID:   fc.FavoriteTweetQID,
-		UnfavoriteTweetQID: fc.UnfavoriteTweetQID,
-		ViewerQID:          fc.ViewerQID,
-		TweetDetailQID:     fc.TweetDetailQID,
-		SessionBrowser:     fc.SessionBrowser,
-		SessionProfile:     fc.SessionProfile,
-		SessionDomain:      fc.SessionDomain,
+		CreateTweetQID:        fc.CreateTweetQID,
+		HomeTimelineQID:       fc.HomeTimelineQID,
+		HomeLatestTimelineQID: fc.HomeLatestTimelineQID,
+		FavoriteTweetQID:      fc.FavoriteTweetQID,
+		UnfavoriteTweetQID:    fc.UnfavoriteTweetQID,
+		ViewerQID:             fc.ViewerQID,
+		TweetDetailQID:        fc.TweetDetailQID,
+		Theme:                 fc.Theme,
+		SessionBrowser:        fc.SessionBrowser,
+		SessionProfile:        fc.SessionProfile,
+		SessionDomain:         fc.SessionDomain,
 	}
 	if fc.SessionExpires != "" {
 		if parsed, parseErr := time.Parse(time.RFC3339, fc.SessionExpires); parseErr == nil {
@@ -225,8 +231,10 @@ func (cm *ConfigManager) Save(config *Config) error {
 	if config.AuthToken == "" {
 		return cm.writeFile(&fileConfig{
 			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
-			FavoriteTweetQID: config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
+			HomeLatestTimelineQID: config.HomeLatestTimelineQID,
+			FavoriteTweetQID:      config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
 			ViewerQID: config.ViewerQID, TweetDetailQID: config.TweetDetailQID,
+			Theme: config.Theme,
 		})
 	}
 
@@ -259,15 +267,17 @@ func (cm *ConfigManager) Save(config *Config) error {
 
 func fileConfigFor(config *Config) *fileConfig {
 	result := &fileConfig{
-		CreateTweetQID:     config.CreateTweetQID,
-		HomeTimelineQID:    config.HomeTimelineQID,
-		FavoriteTweetQID:   config.FavoriteTweetQID,
-		UnfavoriteTweetQID: config.UnfavoriteTweetQID,
-		ViewerQID:          config.ViewerQID,
-		TweetDetailQID:     config.TweetDetailQID,
-		SessionBrowser:     config.SessionBrowser,
-		SessionProfile:     config.SessionProfile,
-		SessionDomain:      config.SessionDomain,
+		CreateTweetQID:        config.CreateTweetQID,
+		HomeTimelineQID:       config.HomeTimelineQID,
+		HomeLatestTimelineQID: config.HomeLatestTimelineQID,
+		FavoriteTweetQID:      config.FavoriteTweetQID,
+		UnfavoriteTweetQID:    config.UnfavoriteTweetQID,
+		ViewerQID:             config.ViewerQID,
+		TweetDetailQID:        config.TweetDetailQID,
+		Theme:                 config.Theme,
+		SessionBrowser:        config.SessionBrowser,
+		SessionProfile:        config.SessionProfile,
+		SessionDomain:         config.SessionDomain,
 	}
 	if !config.SessionExpires.IsZero() {
 		result.SessionExpires = config.SessionExpires.UTC().Format(time.RFC3339)

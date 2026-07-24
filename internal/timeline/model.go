@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/melqtx/xeet/internal/clip"
+	"github.com/melqtx/xeet/internal/theme"
 	"github.com/melqtx/xeet/pkg/api"
 	"github.com/melqtx/xeet/pkg/config"
 
@@ -20,15 +21,23 @@ import (
 )
 
 var (
-	blue     = lipgloss.Color("#7AA2F7")
-	lavender = lipgloss.Color("#BB9AF7")
-	pink     = lipgloss.Color("#F5C2E7")
-	muted    = lipgloss.Color("#7D8590")
-	red      = lipgloss.Color("#FF757F")
-	yellow   = lipgloss.Color("#E0AF68")
-	bright   = lipgloss.Color("#C0CAF5")
-	dim      = lipgloss.Color("#A9B1D6")
+	blue     lipgloss.Color
+	lavender lipgloss.Color
+	pink     lipgloss.Color
+	muted    lipgloss.Color
+	red      lipgloss.Color
+	yellow   lipgloss.Color
+	bright   lipgloss.Color
+	dim      lipgloss.Color
 )
+
+func init() { ApplyTheme(theme.Default()) }
+
+// ApplyTheme recolors the timeline. Call it before Run; layout is unaffected.
+func ApplyTheme(p theme.Palette) {
+	blue, lavender, pink, muted = p.Blue, p.Lavender, p.Pink, p.Muted
+	red, yellow, bright, dim = p.Red, p.Yellow, p.Bright, p.Dim
+}
 
 type ActionKind int
 
@@ -52,6 +61,8 @@ type Model struct {
 	width, height int
 	imageMode     imageMode
 	imageNote     string
+	following     bool
+	feedSeq       int
 	posts         []api.TimelinePost
 	cursor        string
 	selected      int
@@ -97,6 +108,7 @@ type pageMsg struct {
 	page *api.TimelinePage
 	err  error
 	more bool
+	seq  int
 }
 
 type actionMsg struct {
@@ -190,11 +202,12 @@ func NewWithImageMode(requested string) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchPage("", false), clockTick())
+	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, "", false, m.feedSeq), clockTick())
 }
 
-func Run(images string) (Action, error) {
+func Run(images string, following bool) (Action, error) {
 	m := NewWithImageMode(images)
+	m.following = following
 	// Auto-detected native mode is a claim, not a capability: multiplexers
 	// like cmux inherit ghostty's TERM without reliably rendering graphics.
 	// Confirm with the terminal itself; --images native skips the probe.
@@ -214,24 +227,28 @@ func Run(images string) (Action, error) {
 	return final.action, nil
 }
 
-func fetchPage(cursor string, more bool) tea.Cmd {
+func fetchPageSeq(following bool, cursor string, more bool, seq int) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
-			return pageMsg{err: err, more: more}
+			return pageMsg{err: err, more: more, seq: seq}
 		}
 		cfg, err := mgr.Load()
 		if err != nil {
-			return pageMsg{err: err, more: more}
+			return pageMsg{err: err, more: more, seq: seq}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
 		client := api.NewWebClient(cfg)
-		page, err := client.FetchHomeTimeline(ctx, cursor, 30)
+		fetch := client.FetchHomeTimeline
+		if following {
+			fetch = client.FetchFollowingTimeline
+		}
+		page, err := fetch(ctx, cursor, 30)
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.Save(cfg)
 		}
-		return pageMsg{page: page, err: err, more: more}
+		return pageMsg{page: page, err: err, more: more, seq: seq}
 	}
 }
 
@@ -475,6 +492,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		m.syncViewport()
 		return m, func() tea.Msg { return tea.ClearScreen() }
+	case "f":
+		return m.switchFeed()
 	case "R", "ctrl+r":
 		if len(m.posts) == 0 {
 			m.loading = true
@@ -482,7 +501,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshing = true
 		}
 		m.err = nil
-		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPage("", false)))
+		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, "", false, m.feedSeq)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
@@ -579,15 +598,37 @@ func (m *Model) moveSelection(target int) {
 	m.ensureSelectedVisible()
 }
 
+// switchFeed flips between the For You and Following feeds in place.
+func (m Model) switchFeed() (tea.Model, tea.Cmd) {
+	m.following = !m.following
+	m.feedSeq++
+	m.posts = nil
+	m.cursor = ""
+	m.selected = 0
+	m.expanded = false
+	m.loading = true
+	m.loadingMore = false
+	m.refreshing = false
+	m.err = nil
+	m.viewport.YOffset = 0
+	m.syncViewport()
+	return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, "", false, m.feedSeq)))
+}
+
 func (m *Model) maybeLoadMore() tea.Cmd {
 	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
 		m.loadingMore = true
-		return tea.Batch(m.spinner.Tick, fetchPage(m.cursor, true))
+		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.following, m.cursor, true, m.feedSeq))
 	}
 	return nil
 }
 
 func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
+	if msg.seq != m.feedSeq {
+		// A page from before the last feed switch; the wrong feed's posts
+		// must not leak into the current one.
+		return m, nil
+	}
 	m.loading = false
 	m.loadingMore = false
 	m.refreshing = false
