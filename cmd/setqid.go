@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 
 	"github.com/spf13/cobra"
 )

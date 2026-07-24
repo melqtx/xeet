@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/api"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/image/draw"
@@ -251,7 +251,7 @@ func fetchPreview(postID string, media api.TimelineMedia, width, maxRows int, mo
 		if err != nil {
 			return previewMsg{postID: postID, err: err}
 		}
-		req.Header.Set("User-Agent", "xeet/terminal-image-preview")
+		req.Header.Set("User-Agent", "github.com/melqtx/xeet/terminal-image-preview")
 		client := &http.Client{
 			Timeout: 20 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {

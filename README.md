@@ -28,13 +28,31 @@ API keys.
 
 ## Install
 
+Xeet supports macOS and Linux. Windows is not supported — open an issue if
+you want it.
+
+**Download a release** (recommended): grab the archive for your platform from
+[GitHub Releases](https://github.com/melqtx/xeet/releases), verify it against
+`checksums.txt`, and put the `xeet` binary somewhere on your `PATH`:
+
+```bash
+tar -xzf xeet_*_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/').tar.gz
+sudo install -m 0755 xeet /usr/local/bin/
+```
+
+**With Go** (1.26+):
+
+```bash
+go install github.com/melqtx/xeet@latest
+```
+
+**From source:**
+
 ```bash
 git clone https://github.com/melqtx/xeet.git
 cd xeet
-make install
+make install   # builds and installs to /usr/local/bin/
 ```
-
-Installs `xeet` to `/usr/local/bin/`, so you can run it from anywhere.
 
 ## Use it
 
@@ -118,6 +136,9 @@ post landed, it preserves the draft and asks you to check your profile before
 retrying. The accompanying `details` line contains only a response-shape
 fingerprint, status, type names, and rate-limit metadata; it never contains the
 draft or session cookies.
+
+Scheduling, bulk posting, scraping, automated engagement, and mass-posting
+features are intentionally out of scope and will not be added.
 
 ## TUI keys
 

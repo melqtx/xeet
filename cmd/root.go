@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"xeet/internal/tui"
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/internal/tui"
+	"github.com/melqtx/xeet/pkg/config"
 
 	"github.com/spf13/cobra"
 )

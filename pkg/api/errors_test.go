@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 func newTestClient(handler func(*http.Request) (*http.Response, error)) *WebClient {

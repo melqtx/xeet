@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/api"
 )
 
 func TestFormatCount(t *testing.T) {

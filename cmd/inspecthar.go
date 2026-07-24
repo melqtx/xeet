@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/api"
 
 	"github.com/spf13/cobra"
 )

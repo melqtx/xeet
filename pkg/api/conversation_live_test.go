@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 // Read-only smoke test for X's unsupported TweetDetail endpoint.

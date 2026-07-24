@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"xeet/internal/media"
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/internal/media"
+	"github.com/melqtx/xeet/pkg/api"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"

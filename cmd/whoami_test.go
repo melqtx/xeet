@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/api"
 )
 
 func TestPrintAccount(t *testing.T) {
