@@ -16,7 +16,7 @@ buildGoModule (finalAttrs: {
   # Regenerate whenever go.mod or go.sum changes (including on dependabot
   # bumps): set this to lib.fakeHash, run `nix build .#default`, and copy the
   # hash nix reports. CI's nix job fails when it goes stale.
-  vendorHash = "sha256-/Qy+oPK4BzNMl2xqVwNKdEzZ9N3zTpSzzmLCTKNV8z0=";
+  vendorHash = "sha256-gwprri6z2If6rEqdY179WvfEE/az+JsaAaFLihIlqCM=";
 
   # main.go reads these through -X; without them the binary reports "dev".
   ldflags = [
