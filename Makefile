@@ -15,6 +15,9 @@ GOTEST := $(GOCMD) test
 GOGET := $(GOCMD) get
 GOMOD := $(GOCMD) mod
 
+# Keep in step with .github/workflows/ci.yml
+STATICCHECK_VERSION := v0.7.0
+
 # Directories
 DIST_DIR := dist
 BUILD_DIR := build
@@ -97,15 +100,11 @@ vet:
 	@echo "Vetting code..."
 	$(GOCMD) vet ./...
 
-# Lint code (requires golangci-lint)
+# Lint code with the same staticcheck version CI runs
 .PHONY: lint
 lint:
 	@echo "Linting code..."
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run; \
-	else \
-		echo "golangci-lint not found. Install with: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b \$$(go env GOPATH)/bin v1.54.2"; \
-	fi
+	$(GOCMD) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
 
 # Tidy dependencies
 .PHONY: tidy
@@ -133,11 +132,7 @@ dev-setup:
 	@echo "Setting up development environment..."
 	$(GOMOD) download
 	$(GOMOD) tidy
-	@if ! command -v golangci-lint >/dev/null 2>&1; then \
-		echo "Installing golangci-lint..."; \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.54.2; \
-	fi
-	@echo "Development environment ready!"
+	@echo "Development environment ready! (nix-shell also provides go, gopls, and staticcheck)"
 
 # Create release (for GitHub Actions)
 .PHONY: release
