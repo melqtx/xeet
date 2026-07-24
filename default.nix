@@ -1,7 +1,7 @@
 { lib
 , buildGoModule
-, xclip
 , wl-clipboard
+, xorg
 , makeWrapper
 , stdenv
 }:
@@ -29,12 +29,17 @@ buildGoModule (finalAttrs: {
 
   nativeBuildInputs = [ makeWrapper ];
 
-  # Clipboard attachments shell out to xclip/wl-clipboard on Linux; put them
-  # on PATH so a nix-installed xeet works outside a dev shell. macOS uses the
-  # system pasteboard and needs nothing.
+  # golang.design/x/clipboard talks to X11 through cgo, so the linux build
+  # needs Xlib to compile at all. Without it the package built on darwin and
+  # failed on linux.
+  buildInputs = lib.optionals stdenv.isLinux [ xorg.libX11 ];
+
+  # On wayland the clipboard shells out to wl-paste/wl-copy, so keep those on
+  # PATH for an installed xeet. X11 goes through the linked Xlib above, and
+  # macOS uses the system pasteboard.
   postInstall = lib.optionalString stdenv.isLinux ''
     wrapProgram $out/bin/xeet \
-      --prefix PATH : ${lib.makeBinPath [ xclip wl-clipboard ]}
+      --prefix PATH : ${lib.makeBinPath [ wl-clipboard ]}
   '';
 
   meta = {
