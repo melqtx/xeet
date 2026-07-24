@@ -421,32 +421,70 @@ func (m Model) viewZoom() string {
 		lipgloss.JoinVertical(lipgloss.Center, parts...))
 }
 
-func (m Model) viewAltText() string {
+func (m Model) altTextPanelWidth() int {
+	return min(64, max(28, m.width-8))
+}
+
+func (m Model) altTextVisibleRows() int {
+	// Border, padding, title, account, spacer, and footer consume eight rows.
+	return max(1, m.height-8)
+}
+
+func (m Model) altTextRows() []string {
 	post, ok := m.currentPost()
-	if !ok || len(post.Media) == 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(muted).Render("this post has no images"))
+	if !ok {
+		return nil
 	}
-	w := min(64, max(28, m.width-8))
-	name := post.AuthorName
-	if name == "" {
-		name = "someone"
-	}
-	rows := []string{lipgloss.NewStyle().Foreground(pink).Bold(true).Render("image descriptions"),
-		lipgloss.NewStyle().Foreground(muted).Render(name + "  @" + post.Handle), ""}
+	width := m.altTextPanelWidth() - 6
+	var rows []string
 	for index, item := range post.Media {
 		description := strings.TrimSpace(item.AltText)
 		if description == "" {
 			description = "No alt text was provided."
 		}
 		label := fmt.Sprintf("image %d of %d", index+1, len(post.Media))
-		rows = append(rows,
-			lipgloss.NewStyle().Foreground(blue).Bold(true).Render(label),
-			lipgloss.NewStyle().Foreground(bright).Width(w-6).Render(description), "")
+		rows = append(rows, lipgloss.NewStyle().Foreground(blue).Bold(true).Render(label))
+		wrapped := lipgloss.NewStyle().Foreground(bright).Width(width).Render(description)
+		rows = append(rows, strings.Split(wrapped, "\n")...)
+		if index < len(post.Media)-1 {
+			rows = append(rows, "")
+		}
 	}
-	rows = append(rows, lipgloss.NewStyle().Foreground(muted).Render("A, enter, or esc close"))
+	return rows
+}
+
+func (m Model) altTextMaxScroll() int {
+	return max(0, len(m.altTextRows())-m.altTextVisibleRows())
+}
+
+func (m Model) viewAltText() string {
+	post, ok := m.currentPost()
+	if !ok || len(post.Media) == 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(muted).Render("this post has no images"))
+	}
+	w := m.altTextPanelWidth()
+	name := post.AuthorName
+	if name == "" {
+		name = "someone"
+	}
+	rows := m.altTextRows()
+	start := max(0, min(m.altTextMaxScroll(), m.altTextScroll))
+	end := min(len(rows), start+m.altTextVisibleRows())
+	visible := rows[start:end]
+
+	footer := "A/enter/esc close"
+	if len(rows) > m.altTextVisibleRows() {
+		footer = fmt.Sprintf("↑/↓ scroll  ·  %d-%d/%d  ·  %s", start+1, end, len(rows), footer)
+	}
+	content := []string{
+		lipgloss.NewStyle().Foreground(pink).Bold(true).Render("image descriptions"),
+		lipgloss.NewStyle().Foreground(muted).Render(name + "  @" + post.Handle), "",
+	}
+	content = append(content, visible...)
+	content = append(content, lipgloss.NewStyle().Foreground(muted).Render(footer))
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
-		Padding(1, 2).Width(w).Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+		Padding(1, 2).Width(w).Render(lipgloss.JoinVertical(lipgloss.Left, content...))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

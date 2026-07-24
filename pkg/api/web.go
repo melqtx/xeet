@@ -116,7 +116,7 @@ func (c *WebClient) send(ctx context.Context, build func() (*http.Request, error
 		if attempt > 1 {
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, classifyTransportError(ctx.Err())
 			case <-time.After(delay):
 			}
 			delay *= 2

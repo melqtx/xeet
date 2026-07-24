@@ -55,6 +55,22 @@ func TestTimelineReturnsConnectionErrorAfterBoundedRetries(t *testing.T) {
 	}
 }
 
+func TestTimelineClassifiesDeadlineWhileWaitingToRetry(t *testing.T) {
+	attempts := 0
+	client := newTestClient(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := client.FetchHomeTimeline(ctx, "", 30)
+	var connection *ConnectionError
+	if !errors.As(err, &connection) || connection.Kind != "timeout" || attempts != 1 {
+		t.Fatalf("err=%v connection=%+v attempts=%d", err, connection, attempts)
+	}
+}
+
 func TestTimelineReturnsServiceUnavailableAfterRetries(t *testing.T) {
 	attempts := 0
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {

@@ -124,6 +124,40 @@ func TestAltTextPanelListsEveryImageWithoutRenderer(t *testing.T) {
 	}
 }
 
+func TestAltTextPanelScrollsLongDescriptions(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.height = 12
+	m.posts = []api.TimelinePost{{ID: "1", Media: []api.TimelineMedia{{
+		AltText: strings.Repeat("a long accessible description ", 30),
+	}}}}
+	m.altText = true
+	before := m.View()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.altTextScroll != 1 {
+		t.Fatalf("scroll=%d, want 1", m.altTextScroll)
+	}
+	if after := m.View(); after == before || !strings.Contains(after, "↑/↓ scroll") {
+		t.Fatalf("long alt text did not scroll:\n%s", after)
+	}
+}
+
+func TestAltTextPanelProcessesBackgroundResults(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.altText = true
+	m.posts = []api.TimelinePost{{ID: "1", Liked: true, LikeCount: 1, Media: []api.TimelineMedia{{}}}}
+	m.liking["1"] = true
+	next, _ := m.Update(likeMsg{id: "1", liked: true, err: errors.New("rejected")})
+	m = next.(Model)
+	if !m.altText {
+		t.Fatal("background result unexpectedly closed alt text")
+	}
+	if m.liking["1"] || m.posts[0].Liked || m.posts[0].LikeCount != 0 {
+		t.Fatalf("like result was dropped: liking=%v post=%+v", m.liking, m.posts[0])
+	}
+}
+
 func TestRefreshKey(t *testing.T) {
 	m := New()
 	m.loading = false
