@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -73,6 +74,7 @@ type Model struct {
 	previews      map[string]previewState
 	spinner       spinner.Model
 	viewport      viewport.Model
+	wezFrameKey   string
 
 	mode          mode
 	feedSelected  int
@@ -124,6 +126,10 @@ type threadMsg struct {
 type replyBrowserMsg struct{ err error }
 
 type toastClearMsg struct{ seq int }
+
+// wezRepaintMsg asks the model to decide whether the iTerm2-protocol frame
+// moved and therefore needs a full clear before Bubble Tea repaints.
+type wezRepaintMsg struct{}
 
 type clockTickMsg time.Time
 
@@ -308,6 +314,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 		}
 		return m, clockTick()
+	}
+	if _, ok := msg.(wezRepaintMsg); ok {
+		if m.imageMode != imageModeWezTerm {
+			return m, nil
+		}
+		// iTerm2-protocol images are painted pixels, not cells: when content
+		// scrolls, Bubble Tea's line diff can leave stale pixels behind on
+		// rows whose text did not change. Clearing forces a full repaint, but
+		// doing it on every keystroke made iTerm2 flicker constantly, so it
+		// only happens when the frame's layout actually moved.
+		if key := m.imageFrameKey(); key != m.wezFrameKey {
+			m.wezFrameKey = key
+			return m, func() tea.Msg { return tea.ClearScreen() }
+		}
+		return m, nil
 	}
 	if clear, ok := msg.(toastClearMsg); ok {
 		if clear.seq == m.toastSeq {
@@ -1054,12 +1075,30 @@ func (m Model) imageRepaint(cmds ...tea.Cmd) tea.Cmd {
 		}
 	}
 	if m.imageMode == imageModeWezTerm {
-		filtered = append(filtered, func() tea.Msg { return tea.ClearScreen() })
+		filtered = append(filtered, func() tea.Msg { return wezRepaintMsg{} })
 	}
 	if len(filtered) == 0 {
 		return nil
 	}
 	return tea.Batch(filtered...)
+}
+
+// imageFrameKey fingerprints everything that determines where images sit on
+// screen: scroll offset, viewport geometry, overlay state, and the layout of
+// every rendered block. Selection-only changes keep the same key because
+// block heights do not move.
+func (m Model) imageFrameKey() string {
+	hash := fnv.New64a()
+	fmt.Fprintf(hash, "%d|%d|%d|%d|%v|%v|%v|%v|%v|",
+		m.viewport.YOffset, m.viewport.Width, m.viewport.Height,
+		m.mode, m.help, m.altText, m.zoom, m.expanded, m.loading)
+	for _, start := range m.starts {
+		fmt.Fprintf(hash, "%d,", start)
+	}
+	if len(m.ends) > 0 {
+		fmt.Fprintf(hash, "|%d", m.ends[len(m.ends)-1])
+	}
+	return fmt.Sprintf("%x", hash.Sum64())
 }
 
 func (m *Model) resize() {

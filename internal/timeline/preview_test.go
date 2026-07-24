@@ -205,9 +205,70 @@ func TestWezTermBlockReservesAndRestoresCells(t *testing.T) {
 	if !strings.Contains(block, "\x1b]1337;File=width=20") || !strings.Contains(block, "doNotMoveCursor=1") {
 		t.Fatal("wezterm image command missing")
 	}
+	// iTerm2 ignores doNotMoveCursor and moves the cursor after drawing, so
+	// the emit must be bracketed by DECSC/DECRC to keep the frame aligned.
+	if !strings.Contains(block, "\x1b7\x1b]1337;") || !strings.Contains(block, "\x1b\\\x1b8") {
+		t.Fatal("wezterm image emit is not cursor-save/restore protected")
+	}
 	lastLine := strings.Split(block, "\n")[3]
 	if truncated := ansi.Truncate(lastLine, 80, ""); !strings.Contains(truncated, "\x1b]1337;File=") {
 		t.Fatal("renderer truncation removed wezterm image command")
+	}
+}
+
+func TestDownscaleForCellsBoundsLargeImages(t *testing.T) {
+	large := image.NewNRGBA(image.Rect(0, 0, 4096, 2304))
+	scaled := downscaleForCells(large, 40, 10)
+	bounds := scaled.Bounds()
+	if bounds.Dx() > 40*cellPixelWidth || bounds.Dy() > 10*cellPixelHeight {
+		t.Fatalf("downscale left %dx%d for 40x10 cells", bounds.Dx(), bounds.Dy())
+	}
+	if ratio := float64(bounds.Dx()) / float64(bounds.Dy()); ratio < 1.6 || ratio > 2.0 {
+		t.Fatalf("downscale distorted aspect ratio: %dx%d", bounds.Dx(), bounds.Dy())
+	}
+}
+
+func TestDownscaleForCellsKeepsSmallImages(t *testing.T) {
+	small := image.NewNRGBA(image.Rect(0, 0, 200, 100))
+	if scaled := downscaleForCells(small, 40, 10); scaled != image.Image(small) {
+		t.Fatal("small image was rescaled needlessly")
+	}
+}
+
+func TestWezRepaintClearsOnlyWhenFrameMoves(t *testing.T) {
+	m := New()
+	m.imageMode = imageModeWezTerm
+	m.loading = false
+	m.posts = mediaPosts(6)
+	m.width, m.height = 80, 24
+	m.resize()
+
+	next, cmd := m.Update(wezRepaintMsg{})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("first repaint did not clear the screen")
+	}
+	next, cmd = m.Update(wezRepaintMsg{})
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatal("unmoved frame still cleared the screen (iTerm2 flicker)")
+	}
+
+	m.viewport.YOffset += 3
+	next, cmd = m.Update(wezRepaintMsg{})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("scrolled frame did not clear stale image pixels")
+	}
+	if _, cmd = m.Update(wezRepaintMsg{}); cmd != nil {
+		t.Fatal("repeat repaint after scroll cleared again")
+	}
+}
+
+func TestWezRepaintIgnoredOutsideWezTermMode(t *testing.T) {
+	m := NewWithImageMode("off")
+	if _, cmd := m.Update(wezRepaintMsg{}); cmd != nil {
+		t.Fatal("non-iterm2 mode reacted to a wezterm repaint message")
 	}
 }
 
