@@ -274,32 +274,6 @@ func fetchPageSeq(parent context.Context, following bool, cursor string, more bo
 	}
 }
 
-func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq int) tea.Cmd {
-	return func() tea.Msg {
-		mgr, err := config.NewConfigManager()
-		if err != nil {
-			return threadMsg{rootID: tweetID, seq: seq, err: err, more: more}
-		}
-		cfg, err := mgr.Load()
-		if err != nil {
-			return threadMsg{rootID: tweetID, seq: seq, err: err, more: more}
-		}
-		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
-		defer cancel()
-		client := api.NewWebClient(cfg)
-		page, err := client.FetchTweetDetail(ctx, tweetID, cursor, 40)
-		if client.ApplyRefreshedQueryIDs(cfg) {
-			_ = mgr.Save(cfg)
-		}
-		return threadMsg{rootID: tweetID, seq: seq, page: page, err: err, more: more}
-	}
-}
-
-func (m *Model) requestThread(cursor string, more bool) tea.Cmd {
-	m.threadSeq++
-	return fetchThread(m.requestContext(), m.threadRootID, cursor, more, m.threadSeq)
-}
-
 func setLike(parent context.Context, tweetID string, liked bool) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
@@ -318,27 +292,6 @@ func setLike(parent context.Context, tweetID string, liked bool) tea.Cmd {
 			_ = mgr.Save(cfg)
 		}
 		return likeMsg{id: tweetID, liked: liked, err: err}
-	}
-}
-
-func sendReply(parent context.Context, tweetID, text string) tea.Cmd {
-	return func() tea.Msg {
-		mgr, err := config.NewConfigManager()
-		if err != nil {
-			return replyResultMsg{err: err}
-		}
-		cfg, err := mgr.Load()
-		if err != nil {
-			return replyResultMsg{err: err}
-		}
-		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
-		defer cancel()
-		client := api.NewWebClient(cfg)
-		id, err := client.PostTweet(ctx, text, tweetID, nil, nil)
-		if client.ApplyRefreshedQueryIDs(cfg) {
-			_ = mgr.Save(cfg)
-		}
-		return replyResultMsg{id: id, err: err}
 	}
 }
 
@@ -451,28 +404,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.showToast(msg.message)
 	case previewMsg:
-		m.previews[msg.postID] = previewState{
-			content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
-			columns: msg.columns, rows: msg.rows, err: msg.err,
-		}
-		m.evictDistantPreviews()
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, m.imageRepaint()
+		return m, m.applyPreview(msg)
 	case likeMsg:
-		delete(m.liking, msg.id)
-		var toast tea.Cmd
-		if msg.err != nil {
-			m.applyLike(msg.id, !msg.liked)
-			toast = m.showToast("couldn't update like")
-		} else if msg.liked {
-			toast = m.showToast("liked ♥")
-		} else {
-			toast = m.showToast("like removed")
-		}
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, toast
+		return m, m.applyLikeResult(msg)
 	}
 
 	key, ok := msg.(tea.KeyMsg)
@@ -559,47 +493,118 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.imageRepaint()
 		}
 	case "o":
-		if post, ok := m.currentPost(); ok {
-			return m, openURL(postURL(post))
-		}
+		return m, m.openSelected()
 	case "A":
-		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
-			m.altText = true
-			m.altTextScroll = 0
-			return m, m.imageRepaint()
-		}
+		return m, m.showAltText()
 	case "i":
-		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
-			if m.imageMode == imageModeOff {
-				return m, m.showToast("image previews are off (--images)")
-			}
-			m.zoom = true
-			if zoom := m.requestZoom(); zoom != nil {
-				return m, m.imageRepaint(tea.Batch(m.spinner.Tick, zoom))
-			}
-			return m, m.imageRepaint()
-		}
+		return m, m.zoomSelected()
 	case "l":
-		if post, ok := m.currentPost(); ok && !m.liking[post.ID] {
-			liked := !post.Liked
-			m.liking[post.ID] = true
-			m.applyLike(post.ID, liked)
-			m.syncViewport()
-			m.ensureSelectedVisible()
-			return m, setLike(m.requestContext(), post.ID, liked)
-		}
+		return m, m.toggleSelectedLike()
 	case "y":
-		if post, ok := m.currentPost(); ok {
-			if !m.clipboardOK {
-				return m, m.showToast("clipboard unavailable")
-			}
-			if err := clip.WriteText(postURL(post)); err != nil {
-				return m, m.showToast("clipboard unavailable; open the post with o")
-			}
-			return m, m.showToast("link copied")
-		}
+		return m, m.copySelectedLink()
 	}
 	return m, nil
+}
+
+// The handlers below back both the feed and a thread. Both lists render the
+// same post blocks and react to results the same way, so keeping one copy
+// stops the two modes from drifting apart.
+
+// settleLike clears the in-flight marker and rolls an optimistic like back if
+// the request failed.
+func (m *Model) settleLike(msg likeMsg) {
+	delete(m.liking, msg.id)
+	if msg.err != nil {
+		m.applyLike(msg.id, !msg.liked)
+	}
+}
+
+func (m *Model) applyLikeResult(msg likeMsg) tea.Cmd {
+	m.settleLike(msg)
+	toast := "like removed"
+	switch {
+	case msg.err != nil:
+		toast = "couldn't update like"
+	case msg.liked:
+		toast = "liked ♥"
+	}
+	cmd := m.showToast(toast)
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return cmd
+}
+
+func (m *Model) storePreview(msg previewMsg) {
+	m.previews[msg.postID] = previewState{
+		content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
+		columns: msg.columns, rows: msg.rows, err: msg.err,
+	}
+}
+
+func (m *Model) applyPreview(msg previewMsg) tea.Cmd {
+	m.storePreview(msg)
+	m.evictDistantPreviews()
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return m.imageRepaint()
+}
+
+func (m *Model) openSelected() tea.Cmd {
+	post, ok := m.currentPost()
+	if !ok {
+		return nil
+	}
+	return openURL(postURL(post))
+}
+
+func (m *Model) showAltText() tea.Cmd {
+	if post, ok := m.currentPost(); !ok || len(post.Media) == 0 {
+		return nil
+	}
+	m.altText = true
+	m.altTextScroll = 0
+	return m.imageRepaint()
+}
+
+func (m *Model) zoomSelected() tea.Cmd {
+	if post, ok := m.currentPost(); !ok || len(post.Media) == 0 {
+		return nil
+	}
+	if m.imageMode == imageModeOff {
+		return m.showToast("image previews are off (--images)")
+	}
+	m.zoom = true
+	if zoom := m.requestZoom(); zoom != nil {
+		return m.imageRepaint(tea.Batch(m.spinner.Tick, zoom))
+	}
+	return m.imageRepaint()
+}
+
+func (m *Model) toggleSelectedLike() tea.Cmd {
+	post, ok := m.currentPost()
+	if !ok || m.liking[post.ID] {
+		return nil
+	}
+	liked := !post.Liked
+	m.liking[post.ID] = true
+	m.applyLike(post.ID, liked)
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return setLike(m.requestContext(), post.ID, liked)
+}
+
+func (m *Model) copySelectedLink() tea.Cmd {
+	post, ok := m.currentPost()
+	if !ok {
+		return nil
+	}
+	if !m.clipboardOK {
+		return m.showToast("clipboard unavailable")
+	}
+	if err := clip.WriteText(postURL(post)); err != nil {
+		return m.showToast("clipboard unavailable; open the post with o")
+	}
+	return m.showToast("link copied")
 }
 
 func (m *Model) moveAltText(delta int) {
@@ -719,415 +724,6 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 		return m, m.imageRepaint(m.requestPreviews(), toast)
 	}
 	return m, toast
-}
-
-func (m Model) beginReply(post api.TimelinePost) (tea.Model, tea.Cmd) {
-	m.replyReturn = m.mode
-	m.mode = modeReply
-	m.replyPost = post
-	m.replyErr = nil
-	m.replyNotice = ""
-	m.replyEditor.Reset()
-	m.resize()
-	return m, m.imageRepaint(m.replyEditor.Focus())
-}
-
-func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd) {
-	if msg.rootID != m.threadRootID || msg.seq != m.threadSeq {
-		return m, nil
-	}
-	m.threadLoading = false
-	m.threadMore = false
-	if msg.err != nil {
-		m.threadErr = msg.err
-		return m, nil
-	}
-	m.threadErr = nil
-	selectedID := ""
-	if m.selected >= 0 && m.selected < len(m.threadPosts) {
-		selectedID = m.threadPosts[m.selected].ID
-	}
-	seen := map[string]bool{}
-	var merged []api.ConversationPost
-	if msg.more {
-		merged = append(merged, m.threadPosts...)
-		for _, post := range merged {
-			seen[post.ID] = true
-		}
-	}
-	for _, post := range m.resolveConversationPosts(msg.page) {
-		if !seen[post.ID] {
-			merged = append(merged, post)
-			seen[post.ID] = true
-		}
-	}
-	// X can omit the focal post from a refresh while still returning replies.
-	// The conversation must always keep its root: without it a refresh would
-	// silently turn the thread into a list of orphaned replies.
-	if !seen[m.threadRootID] {
-		if root, ok := m.threadRootPost(); ok {
-			merged = append([]api.ConversationPost{root}, merged...)
-		}
-	}
-	m.threadPosts = merged
-	m.normalizeThreadDepths()
-	m.threadCursor = msg.page.Cursor
-	m.selected = indexOfConversationPost(m.threadPosts, selectedID)
-	if m.selected < 0 {
-		m.selected = 0
-	}
-	if repaint {
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, m.imageRepaint(m.requestPreviews())
-	}
-	return m, nil
-}
-
-func (m Model) threadRootPost() (api.ConversationPost, bool) {
-	for _, post := range m.threadPosts {
-		if post.ID == m.threadRootID {
-			post.Depth = 0
-			return post, true
-		}
-	}
-	return api.ConversationPost{}, false
-}
-
-func (m Model) resolveConversationPosts(page *api.ConversationPage) []api.ConversationPost {
-	resolved := append([]api.ConversationPost(nil), page.Posts...)
-	depths := make(map[string]int, len(m.threadPosts)+len(resolved))
-	for _, post := range m.threadPosts {
-		depths[post.ID] = post.Depth
-	}
-	for _, post := range resolved {
-		depths[post.ID] = post.Depth
-	}
-	pending := append([]api.TimelinePost(nil), page.Unresolved...)
-	for len(pending) > 0 {
-		progress := false
-		next := pending[:0]
-		for _, post := range pending {
-			parentDepth, ok := depths[post.InReplyToID]
-			if !ok {
-				next = append(next, post)
-				continue
-			}
-			depth := parentDepth + 1
-			resolved = append(resolved, api.ConversationPost{TimelinePost: post, Depth: depth})
-			depths[post.ID] = depth
-			progress = true
-		}
-		if !progress {
-			break
-		}
-		pending = next
-	}
-	return resolved
-}
-
-func (m *Model) normalizeThreadDepths() {
-	byID := make(map[string]api.ConversationPost, len(m.threadPosts))
-	for _, post := range m.threadPosts {
-		byID[post.ID] = post
-	}
-	for i := range m.threadPosts {
-		if m.threadPosts[i].ID == m.threadRootID {
-			m.threadPosts[i].Depth = 0
-			continue
-		}
-		depth := 1
-		parent := m.threadPosts[i].InReplyToID
-		visited := map[string]bool{m.threadPosts[i].ID: true}
-		for parent != "" && parent != m.threadRootID && !visited[parent] {
-			visited[parent] = true
-			ancestor, ok := byID[parent]
-			if !ok {
-				break
-			}
-			parent = ancestor.InReplyToID
-			depth++
-		}
-		m.threadPosts[i].Depth = depth
-	}
-}
-
-func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case spinner.TickMsg:
-		if m.threadLoading || m.threadMore || m.zoomLoading() {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
-		}
-	case pageMsg:
-		return m.applyFeedPage(msg)
-	case threadMsg:
-		return m.applyThreadPage(msg, true)
-	case likeMsg:
-		delete(m.liking, msg.id)
-		var toast tea.Cmd
-		if msg.err != nil {
-			m.applyLike(msg.id, !msg.liked)
-			toast = m.showToast("couldn't update like")
-		} else if msg.liked {
-			toast = m.showToast("liked ♥")
-		} else {
-			toast = m.showToast("like removed")
-		}
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, toast
-	case previewMsg:
-		m.previews[msg.postID] = previewState{
-			content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
-			columns: msg.columns, rows: msg.rows, err: msg.err,
-		}
-		m.evictDistantPreviews()
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, m.imageRepaint()
-	case actionMsg:
-		if msg.err != nil {
-			return m, m.showToast(msg.err.Error())
-		}
-		return m, m.showToast(msg.message)
-	}
-
-	key, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	switch key.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		m.mode = modeFeed
-		m.selected = m.feedSelected
-		m.threadSeq++
-		m.threadRootID = ""
-		m.expanded = false
-		m.threadLoading = false
-		m.threadMore = false
-		// An expired session affects every request, not just this thread.
-		// Hand the error to the feed so its reconnect flow stays reachable.
-		if errors.Is(m.threadErr, api.ErrSessionExpired) {
-			m.err = m.threadErr
-		}
-		m.threadErr = nil
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, m.imageRepaint()
-	case "a":
-		if errors.Is(m.threadErr, api.ErrSessionExpired) {
-			m.action = Action{Kind: ActionAuthenticate}
-			return m, tea.Quit
-		}
-	case "ctrl+l":
-		m.syncViewport()
-		return m, func() tea.Msg { return tea.ClearScreen() }
-	case "?", "f1":
-		m.help = true
-		return m, m.imageRepaint()
-	case "j", "down":
-		m.moveThreadSelection(m.selected + 1)
-		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMoreThread())
-	case "k", "up":
-		m.moveThreadSelection(m.selected - 1)
-		return m, m.imageRepaint(m.requestPreviews())
-	case "ctrl+d":
-		m.moveThreadSelection(m.selected + 5)
-		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMoreThread())
-	case "ctrl+u":
-		m.moveThreadSelection(m.selected - 5)
-		return m, m.imageRepaint(m.requestPreviews())
-	case "g", "home":
-		m.moveThreadSelection(0)
-		return m, m.imageRepaint(m.requestPreviews())
-	case "G", "end":
-		m.moveThreadSelection(len(m.threadPosts) - 1)
-		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMoreThread())
-	case "R", "ctrl+r":
-		m.threadLoading = true
-		m.threadMore = false
-		m.threadErr = nil
-		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, m.requestThread("", false)))
-	case "r":
-		if post, ok := m.currentPost(); ok {
-			return m.beginReply(post)
-		}
-	case "enter", " ", "e":
-		m.expanded = !m.expanded
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, m.imageRepaint()
-	case "o":
-		if post, ok := m.currentPost(); ok {
-			return m, openURL(postURL(post))
-		}
-	case "A":
-		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
-			m.altText = true
-			m.altTextScroll = 0
-			return m, m.imageRepaint()
-		}
-	case "i":
-		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
-			if m.imageMode == imageModeOff {
-				return m, m.showToast("image previews are off (--images)")
-			}
-			m.zoom = true
-			return m, m.imageRepaint(tea.Batch(m.spinner.Tick, m.requestZoom()))
-		}
-	case "l":
-		if post, ok := m.currentPost(); ok && !m.liking[post.ID] {
-			liked := !post.Liked
-			m.liking[post.ID] = true
-			m.applyLike(post.ID, liked)
-			m.syncViewport()
-			return m, setLike(m.requestContext(), post.ID, liked)
-		}
-	case "y":
-		if post, ok := m.currentPost(); ok {
-			if !m.clipboardOK {
-				return m, m.showToast("clipboard unavailable")
-			}
-			if err := clip.WriteText(postURL(post)); err != nil {
-				return m, m.showToast("clipboard unavailable; open the post with o")
-			}
-			return m, m.showToast("link copied")
-		}
-	}
-	return m, nil
-}
-
-func (m *Model) moveThreadSelection(target int) {
-	if len(m.threadPosts) == 0 {
-		return
-	}
-	m.selected = max(0, min(len(m.threadPosts)-1, target))
-	m.expanded = false
-	m.toast = ""
-	m.syncViewport()
-	m.ensureSelectedVisible()
-}
-
-func (m *Model) maybeLoadMoreThread() tea.Cmd {
-	if len(m.threadPosts) > 0 && m.selected >= len(m.threadPosts)-5 && m.threadCursor != "" && !m.threadLoading && !m.threadMore {
-		m.threadMore = true
-		return tea.Batch(m.spinner.Tick, m.requestThread(m.threadCursor, true))
-	}
-	return nil
-}
-
-func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case threadMsg:
-		if m.replyReturn != modeThread {
-			return m, nil
-		}
-		return m.applyThreadPage(msg, false)
-	case pageMsg:
-		return m.applyFeedPage(msg)
-	case likeMsg:
-		delete(m.liking, msg.id)
-		if msg.err != nil {
-			m.applyLike(msg.id, !msg.liked)
-		}
-		return m, nil
-	case previewMsg:
-		m.previews[msg.postID] = previewState{
-			content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
-			columns: msg.columns, rows: msg.rows, err: msg.err,
-		}
-		return m, nil
-	case spinner.TickMsg:
-		if m.replyPosting {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
-		}
-	case replyResultMsg:
-		m.replyPosting = false
-		if msg.err != nil {
-			m.replyErr = msg.err
-			m.replyNotice = ""
-			return m, m.replyEditor.Focus()
-		}
-		m.mode = m.replyReturn
-		m.replyEditor.Blur()
-		m.replyEditor.Reset()
-		toast := m.showToast("reply sent ♥")
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		if m.mode == modeThread {
-			m.threadLoading = true
-			m.threadMore = false
-			return m, m.imageRepaint(tea.Batch(toast, m.spinner.Tick, m.requestThread("", false)))
-		}
-		return m, m.imageRepaint(toast)
-	case replyBrowserMsg:
-		if msg.err != nil {
-			m.replyErr = fmt.Errorf("couldn't open X: %w", msg.err)
-			m.replyNotice = ""
-			return m, nil
-		}
-		m.replyErr = nil
-		m.replyNotice = "opened reply in X"
-		return m, nil
-	}
-	key, ok := msg.(tea.KeyMsg)
-	if ok {
-		if m.replyPosting {
-			return m, nil
-		}
-		switch key.String() {
-		case "b":
-			if canOpenReplyInX(m.replyErr) {
-				return m, openReplyInX(m.replyPost.ID, m.replyEditor.Value())
-			}
-		case "esc", "ctrl+c":
-			m.mode = m.replyReturn
-			m.replyEditor.Blur()
-			m.replyErr = nil
-			m.replyNotice = ""
-			m.syncViewport()
-			return m, m.imageRepaint(m.requestPreviews())
-		case "enter":
-			if strings.TrimSpace(m.replyEditor.Value()) == "" {
-				m.replyErr = fmt.Errorf("write a reply first")
-				return m, nil
-			}
-			m.replyPosting = true
-			m.replyErr = nil
-			m.replyNotice = ""
-			m.replyEditor.Blur()
-			return m, tea.Batch(m.spinner.Tick, sendReply(m.requestContext(), m.replyPost.ID, m.replyEditor.Value()))
-		case "alt+enter", "ctrl+j":
-			m.replyEditor.InsertString("\n")
-			return m, nil
-		}
-	}
-	var cmd tea.Cmd
-	m.replyEditor, cmd = m.replyEditor.Update(msg)
-	return m, cmd
-}
-
-func canOpenReplyInX(err error) bool {
-	var automated *api.AutomationBlockedError
-	if errors.As(err, &automated) {
-		return true
-	}
-	var restricted *api.PostingRestrictedError
-	if errors.As(err, &restricted) {
-		return true
-	}
-	var recent *api.RecentlyPostedError
-	if errors.As(err, &recent) {
-		return true
-	}
-	var ambiguous *api.AmbiguousPostError
-	return errors.As(err, &ambiguous)
 }
 
 func (m Model) imageRepaint(cmds ...tea.Cmd) tea.Cmd {
@@ -1256,18 +852,6 @@ func (m *Model) applyLike(id string, liked bool) {
 	for i := range m.threadPosts {
 		apply(&m.threadPosts[i].TimelinePost)
 	}
-}
-
-func indexOfConversationPost(posts []api.ConversationPost, id string) int {
-	if id == "" {
-		return 0
-	}
-	for i := range posts {
-		if posts[i].ID == id {
-			return i
-		}
-	}
-	return -1
 }
 
 func indexOfPost(posts []api.TimelinePost, id string) int {
