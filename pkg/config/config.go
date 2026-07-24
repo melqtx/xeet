@@ -15,10 +15,10 @@ import (
 )
 
 // Config is the whole of xeet's saved state: your x.com browser session plus
-// one cached, non-secret value. AuthToken is the session cookie and CT0 is the
-// matching CSRF token; both live in the OS keyring (macOS Keychain, Linux
+// cached, non-secret operation ids and session metadata. AuthToken is the
+// session cookie and CT0 is the matching CSRF token; both live in the OS keyring (macOS Keychain, Linux
 // Secret Service), never on disk. The config file contains only non-secret
-// state: X's rotating GraphQL query id and browser-session source metadata used
+// state: X's rotating GraphQL query ids and browser-session source metadata used
 // by `xeet doctor`.
 type Config struct {
 	AuthToken          string    `yaml:"-"`
@@ -28,6 +28,7 @@ type Config struct {
 	FavoriteTweetQID   string    `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID string    `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID          string    `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID     string    `yaml:"tweet_detail_qid,omitempty"`
 	SessionBrowser     string    `yaml:"session_browser,omitempty"`
 	SessionProfile     string    `yaml:"session_profile,omitempty"`
 	SessionDomain      string    `yaml:"session_domain,omitempty"`
@@ -97,6 +98,7 @@ type fileConfig struct {
 	FavoriteTweetQID   string `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID string `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID          string `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID     string `yaml:"tweet_detail_qid,omitempty"`
 	SessionBrowser     string `yaml:"session_browser,omitempty"`
 	SessionProfile     string `yaml:"session_profile,omitempty"`
 	SessionDomain      string `yaml:"session_domain,omitempty"`
@@ -138,6 +140,7 @@ func (cm *ConfigManager) Load() (*Config, error) {
 		FavoriteTweetQID:   fc.FavoriteTweetQID,
 		UnfavoriteTweetQID: fc.UnfavoriteTweetQID,
 		ViewerQID:          fc.ViewerQID,
+		TweetDetailQID:     fc.TweetDetailQID,
 		SessionBrowser:     fc.SessionBrowser,
 		SessionProfile:     fc.SessionProfile,
 		SessionDomain:      fc.SessionDomain,
@@ -223,7 +226,7 @@ func (cm *ConfigManager) Save(config *Config) error {
 		return cm.writeFile(&fileConfig{
 			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
 			FavoriteTweetQID: config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
-			ViewerQID: config.ViewerQID,
+			ViewerQID: config.ViewerQID, TweetDetailQID: config.TweetDetailQID,
 		})
 	}
 
@@ -261,6 +264,7 @@ func fileConfigFor(config *Config) *fileConfig {
 		FavoriteTweetQID:   config.FavoriteTweetQID,
 		UnfavoriteTweetQID: config.UnfavoriteTweetQID,
 		ViewerQID:          config.ViewerQID,
+		TweetDetailQID:     config.TweetDetailQID,
 		SessionBrowser:     config.SessionBrowser,
 		SessionProfile:     config.SessionProfile,
 		SessionDomain:      config.SessionDomain,

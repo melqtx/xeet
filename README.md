@@ -155,13 +155,20 @@ xeet timeline         # explicit timeline command
 ```
 
 Use **j/k** or the arrow keys to move (**Ctrl+D/U** jumps five posts),
-**Enter** to read a truncated post in full, **i** to zoom the selected post's
+**Enter** to open the selected post's replies, **e** or **Space** to read a
+truncated post in full, **i** to zoom the selected post's
 image to the whole terminal, **A** to read descriptions for all attached images
 (even when previews are off), **l** to like or unlike, **r** to reply in
 place, **o** to open the post in the browser, **y** to copy its link,
 and **P** to write a new post. **R** refreshes in place: new posts stack on
 top while you keep your position. More posts load automatically near the
 bottom. Press **?** for the in-app key guide.
+
+Inside a conversation, **j/k** moves through the replies, **r** replies to the
+selected item, **R** reloads the conversation, and **Esc** returns to the same
+place in the home timeline. Xeet reads conversations through the same
+unsupported web endpoints as the rest of the timeline; they are read-only
+requests and never retried as mutations.
 
 Images are prefetched around your position in the feed and rendered inline
 for nearby posts, so scrolling lands on already-loaded previews. Videos and

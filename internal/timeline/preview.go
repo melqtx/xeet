@@ -93,7 +93,8 @@ func resolveImageMode(requested string) (imageMode, string) {
 }
 
 func (m *Model) requestPreviews() tea.Cmd {
-	if m.imageMode == imageModeOff || len(m.posts) == 0 || m.selected < 0 || m.selected >= len(m.posts) {
+	posts := m.activePosts()
+	if m.imageMode == imageModeOff || len(posts) == 0 || m.selected < 0 || m.selected >= len(posts) {
 		return nil
 	}
 	width := max(12, m.contentWidth()-4)
@@ -107,23 +108,23 @@ func (m *Model) requestPreviews() tea.Cmd {
 	var cmds []tea.Cmd
 	selectedChanged := false
 	from := max(0, m.selected-prefetchBehind)
-	to := min(len(m.posts)-1, m.selected+prefetchAhead)
+	to := min(len(posts)-1, m.selected+prefetchAhead)
 	if m.imageMode == imageModeNative || m.imageMode == imageModeWezTerm {
 		// Native terminals can render every image currently visible without the
 		// large text payload of ANSI previews. Include the viewport so images in
 		// tall windows load before the cursor lands directly on their post.
-		for i := range m.posts {
+		for i := range posts {
 			if i >= len(m.starts) || i >= len(m.ends) {
 				break
 			}
 			if m.ends[i] >= m.viewport.YOffset && m.starts[i] < m.viewport.YOffset+m.viewport.Height {
 				from = min(from, max(0, i-1))
-				to = max(to, min(len(m.posts)-1, i+1))
+				to = max(to, min(len(posts)-1, i+1))
 			}
 		}
 	}
 	for i := from; i <= to; i++ {
-		post := m.posts[i]
+		post := posts[i]
 		if len(post.Media) == 0 {
 			continue
 		}
@@ -187,9 +188,10 @@ func (m *Model) evictDistantPreviews() {
 	if len(m.previews) <= maxCachedPreviews {
 		return
 	}
-	index := make(map[string]int, len(m.posts))
-	for i := range m.posts {
-		index[m.posts[i].ID] = i
+	posts := m.activePosts()
+	index := make(map[string]int, len(posts))
+	for i := range posts {
+		index[posts[i].ID] = i
 	}
 	activeZoom := ""
 	if post, ok := m.currentPost(); ok && m.zoom {

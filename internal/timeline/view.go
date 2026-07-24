@@ -28,6 +28,9 @@ func (m Model) View() string {
 	if m.mode == modeReply {
 		return m.viewReply()
 	}
+	if m.mode == modeThread {
+		return m.viewThread()
+	}
 
 	footer := m.footer()
 	if m.loading && len(m.posts) == 0 {
@@ -67,13 +70,18 @@ func (m Model) contentWidth() int {
 
 func (m Model) header(width int) string {
 	status := "home"
-	if m.refreshing {
+	if m.mode == modeThread {
+		status = "replies"
+	}
+	if m.mode == modeThread && (m.threadLoading || m.threadMore) {
+		status = m.spinner.View() + " loading replies"
+	} else if m.refreshing {
 		status = m.spinner.View() + " refreshing"
 	} else if m.loadingMore {
 		status = m.spinner.View() + " loading more"
 	}
 	face := "( o.o )"
-	if m.err != nil {
+	if m.err != nil || (m.mode == modeThread && m.threadErr != nil) {
 		face = "( >.< )"
 	}
 	cat := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
@@ -98,9 +106,9 @@ func (m Model) footer() string {
 		return fmt.Sprintf("%d/%d  ·  ? help", position, len(m.posts))
 	}
 	if m.expanded {
-		return fmt.Sprintf("%d/%d · enter collapse · o browser · ? help", position, len(m.posts))
+		return fmt.Sprintf("%d/%d · e collapse · o browser · ? help", position, len(m.posts))
 	}
-	return fmt.Sprintf("%d/%d · enter read · l like · r reply · ? help", position, len(m.posts))
+	return fmt.Sprintf("%d/%d · enter replies · e read · r reply · ? help", position, len(m.posts))
 }
 
 func (m Model) errorFooter(includeQuit bool) string {
@@ -112,6 +120,71 @@ func (m Model) errorFooter(includeQuit bool) string {
 		parts = append(parts, "q quit")
 	}
 	return strings.Join(parts, "  ·  ")
+}
+
+func (m Model) viewThread() string {
+	footer := m.threadFooter()
+	if m.threadLoading && len(m.threadPosts) <= 1 {
+		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View()+" gathering replies…"))
+		return m.shell(center, footer)
+	}
+	// The thread opens pre-seeded with the focal post, so a fetch failure
+	// almost never leaves the list empty. Show the error over the posts we
+	// have instead of hiding it behind a bare retry footer.
+	if m.threadErr != nil {
+		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(red).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
+				Render("the cat lost the replies\n\n"+m.threadErr.Error()))
+		return m.shell(center, footer)
+	}
+	return m.shell(m.viewport.View(), footer)
+}
+
+func (m Model) threadFooter() string {
+	if m.toast != "" {
+		return m.toast
+	}
+	if m.threadErr != nil {
+		parts := []string{"R retry"}
+		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+			parts = append([]string{"a reconnect"}, parts...)
+		}
+		parts = append(parts, "esc back")
+		return strings.Join(parts, "  ·  ")
+	}
+	position := 0
+	if len(m.threadPosts) > 0 {
+		position = m.selected + 1
+	}
+	return fmt.Sprintf("%d/%d · r reply · e read · esc back · ? help", position, len(m.threadPosts))
+}
+
+func (m Model) renderThreadContent() (string, []int, []int) {
+	if len(m.threadPosts) == 0 {
+		return lipgloss.NewStyle().Foreground(muted).Width(m.contentWidth()).Align(lipgloss.Center).Render("no replies yet · press r to start one"), nil, nil
+	}
+	blocks := make([]string, 0, len(m.threadPosts))
+	starts := make([]int, 0, len(m.threadPosts))
+	ends := make([]int, 0, len(m.threadPosts))
+	line := 0
+	for i, item := range m.threadPosts {
+		block := m.renderPost(item.TimelinePost, i == m.selected, true)
+		if item.Depth > 0 {
+			depth := min(item.Depth, 3)
+			branch := strings.Repeat("  ", depth-1) + "↳ reply"
+			block = lipgloss.NewStyle().Foreground(muted).Render(branch) + "\n" + block
+		}
+		height := lipgloss.Height(block)
+		starts = append(starts, line)
+		ends = append(ends, line+height-1)
+		blocks = append(blocks, block)
+		line += height
+		if i < len(m.threadPosts)-1 {
+			line++
+		}
+	}
+	return strings.Join(blocks, "\n\n"), starts, ends
 }
 
 func (m Model) renderFeedContent() (string, []int, []int) {
@@ -493,9 +566,15 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply\nR           refresh\nenter       read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	if m.mode == modeThread {
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\nenter read · i zoom · A alt text\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"
+		keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"
+		if m.mode == modeThread {
+			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser\nesc back · q quit"
+		}
 	}
 	images := "images: " + string(m.imageMode)
 	if m.imageNote != "" && m.height >= 28 {
