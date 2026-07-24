@@ -236,17 +236,20 @@ func Run(ctx context.Context, images string, following bool) (Action, error) {
 	}
 	m.clipboardOK = clip.Init() == nil
 	result, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	// Native previews leave PNGs in the temp directory, so they get cleaned up
+	// on every exit path, including an interrupt.
+	if final, ok := result.(Model); ok {
+		final.cleanupPreviews()
+		if err == nil {
+			return final.action, nil
+		}
+	}
 	if errors.Is(err, tea.ErrProgramKilled) {
 		// An interrupt reached the program through ctx. That is an ordinary
 		// exit, not a failure worth reporting.
 		return Action{}, nil
 	}
-	if err != nil {
-		return Action{}, err
-	}
-	final := result.(Model)
-	final.cleanupPreviews()
-	return final.action, nil
+	return Action{}, err
 }
 
 func fetchPageSeq(parent context.Context, following bool, cursor string, more bool, seq int) tea.Cmd {

@@ -45,6 +45,8 @@ func runTimeline(ctx context.Context, imageMode string, following bool) error {
 		if err != nil {
 			return err
 		}
+		// An interrupt has to stop the loop rather than reopen the alt screen
+		// or start an interactive browser prompt against a dead context.
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -52,6 +54,9 @@ func runTimeline(ctx context.Context, imageMode string, following bool) error {
 		case timeline.ActionCompose:
 			if err := tui.Run(ctx); err != nil {
 				return err
+			}
+			if ctx.Err() != nil {
+				return nil
 			}
 		case timeline.ActionAuthenticate:
 			authInvocation := &cobra.Command{}
