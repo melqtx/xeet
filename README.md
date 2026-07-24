@@ -33,6 +33,13 @@ timeline with inline images, reply, like, done.
 works on macos and linux. windows isn't supported, open an issue if you
 want it.
 
+**with nix**:
+
+```bash
+nix profile install github:melqtx/xeet   # install
+nix run github:melqtx/xeet               # or just try it
+```
+
 **with go** (1.26+):
 
 ```bash
@@ -46,6 +53,9 @@ git clone https://github.com/melqtx/xeet.git
 cd xeet
 make install   # builds and installs to /usr/local/bin/
 ```
+
+hacking on it? `nix-shell` (or `nix develop`) gets you go, gopls, and
+staticcheck; `make dev` runs fmt, vet, build, and tests.
 
 **or grab a release**: download the archive for your platform from
 [releases](https://github.com/melqtx/xeet/releases), check it against
