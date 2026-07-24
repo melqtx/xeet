@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"xeet/internal/media"
+	"github.com/melqtx/xeet/internal/media"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

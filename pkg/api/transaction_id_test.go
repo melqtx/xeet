@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 func TestEncodeTransactionIDShape(t *testing.T) {

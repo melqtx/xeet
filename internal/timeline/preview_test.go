@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/api"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

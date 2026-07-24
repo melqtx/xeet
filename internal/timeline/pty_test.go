@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/api"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/creack/pty"

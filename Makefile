@@ -47,12 +47,6 @@ build-all: clean
 	# Linux ARM64
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-linux-arm64 .
 
-	# Windows AMD64
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe .
-
-	# Windows ARM64
-	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-windows-arm64.exe .
-
 	@echo "Built binaries for all platforms in $(DIST_DIR)/"
 
 # Install locally

@@ -1,4 +1,4 @@
-module xeet
+module github.com/melqtx/xeet
 
 go 1.26.5
 

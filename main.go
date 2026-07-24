@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"xeet/cmd"
+	"github.com/melqtx/xeet/cmd"
 )
 
 // Build information (set by ldflags)

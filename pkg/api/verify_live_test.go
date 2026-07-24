@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 // TestVerifyLive confirms the saved browser session against X without making

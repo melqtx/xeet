@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"xeet/internal/media"
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/internal/media"
+	"github.com/melqtx/xeet/pkg/api"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

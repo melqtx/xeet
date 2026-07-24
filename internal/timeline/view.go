@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/api"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"xeet/internal/clip"
-	"xeet/internal/media"
-	"xeet/pkg/api"
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/internal/clip"
+	"github.com/melqtx/xeet/internal/media"
+	"github.com/melqtx/xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/config"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"

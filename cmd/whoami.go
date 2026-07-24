@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
-	"xeet/pkg/api"
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/api"
+	"github.com/melqtx/xeet/pkg/config"
 
 	"github.com/spf13/cobra"
 )

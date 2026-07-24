@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 func TestSessionFingerprintIsStableAndDoesNotExposeSecrets(t *testing.T) {

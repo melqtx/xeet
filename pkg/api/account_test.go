@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 func TestFetchViewerParsesCurrentAccount(t *testing.T) {

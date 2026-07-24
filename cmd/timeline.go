@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"xeet/internal/timeline"
-	"xeet/internal/tui"
+	"github.com/melqtx/xeet/internal/timeline"
+	"github.com/melqtx/xeet/internal/tui"
 
 	"github.com/spf13/cobra"
 )

@@ -14,7 +14,7 @@ import (
 	"runtime"
 	"time"
 
-	"xeet/pkg/config"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 // webBearer is the public bearer token the x.com web app ships to every
