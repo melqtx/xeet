@@ -1,6 +1,5 @@
 { lib
 , buildGoModule
-, installShellFiles
 , xclip
 , wl-clipboard
 , makeWrapper
@@ -9,10 +8,14 @@
 
 buildGoModule (finalAttrs: {
   pname = "xeet";
+  # Keep in step with the latest release tag.
   version = "0.1.8";
 
   src = lib.cleanSource ./.;
 
+  # Regenerate whenever go.mod or go.sum changes (including on dependabot
+  # bumps): set this to lib.fakeHash, run `nix build .#default`, and copy the
+  # hash nix reports. CI's nix job fails when it goes stale.
   vendorHash = "sha256-/Qy+oPK4BzNMl2xqVwNKdEzZ9N3zTpSzzmLCTKNV8z0=";
 
   # main.go reads these through -X; without them the binary reports "dev".
