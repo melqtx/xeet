@@ -24,12 +24,12 @@
 - `xeet whoami` session/account display
 - Following timeline (`--following`, `f` key in the timeline)
 - Configurable color themes without layout changes (`xeet theme`, `--theme`)
+- tmux passthrough (DCS-wrapped Kitty graphics) for native images inside tmux 3.3+
+- Chunked upload for video and large media
 
 ## Next
 
-- Chunked upload for video and large media
 - Animated GIF playback via the Kitty graphics animation protocol
-- tmux passthrough (DCS-wrapped Kitty graphics) for native images inside tmux 3.3+
 - Windows browser-cookie import using DPAPI
 
 Scheduling, bulk posting, scraping, automated engagement, and mass-posting

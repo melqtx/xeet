@@ -113,9 +113,11 @@ cookie values.
 | `F1` | help |
 | `ctrl+c` / `esc` | quit (drafts ask first) |
 
-up to four png/jpeg/gif/webp images per post. the composer shows real
-format, dimensions, and size before anything uploads. unfinished drafts
-autosave (including clipboard images) and come back next time.
+up to four png/jpeg/gif/webp images per post, or one mp4/mov video (up
+to 512 MiB, uploaded in chunks straight from disk with live progress).
+the composer shows real format, dimensions, and size before anything
+uploads. unfinished drafts autosave (including clipboard images) and
+come back next time.
 
 **timeline**
 
@@ -159,8 +161,9 @@ chip.
 
 - direct ghostty and kitty sessions use kitty unicode-placeholder graphics
 - iterm2 and wezterm use the iterm2 inline-image protocol
-- zellij and tmux get the portable ansi renderer, because they don't
-  reliably pass graphics protocols through
+- tmux 3.3+ gets native kitty graphics too when `allow-passthrough` is on
+  and the terminal running tmux is kitty or ghostty; otherwise (and in
+  zellij) the portable ansi renderer takes over
 
 in auto mode xeet verifies kitty graphics before trusting them: apps that
 merely embed libghostty (cmux, for one) inherit a ghostty `TERM` but don't
