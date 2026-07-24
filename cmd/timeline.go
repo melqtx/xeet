@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"xeet/internal/timeline"
@@ -15,7 +16,7 @@ var timelineCmd = &cobra.Command{
 	Use:   "timeline",
 	Short: "Browse your X home timeline",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runTimeline(timelineImageMode)
+		return runTimeline(cmd.Context(), timelineImageMode)
 	},
 }
 
@@ -24,7 +25,7 @@ func init() {
 	rootCmd.AddCommand(timelineCmd)
 }
 
-func runTimeline(imageMode string) error {
+func runTimeline(ctx context.Context, imageMode string) error {
 	switch imageMode {
 	case "auto", "native", "ansi", "off":
 	default:
@@ -35,11 +36,19 @@ func runTimeline(imageMode string) error {
 		if err != nil {
 			return err
 		}
-		if action.Kind != timeline.ActionCompose {
+		switch action.Kind {
+		case timeline.ActionCompose:
+			if err := tui.Run(); err != nil {
+				return err
+			}
+		case timeline.ActionAuthenticate:
+			authInvocation := &cobra.Command{}
+			authInvocation.SetContext(ctx)
+			if err := runAuth(authInvocation, nil); err != nil {
+				return err
+			}
+		default:
 			return nil
-		}
-		if err := tui.Run(); err != nil {
-			return err
 		}
 	}
 }

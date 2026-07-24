@@ -1,17 +1,65 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // ErrSessionExpired means X rejected the saved cookies. Callers should tell
 // the user to re-run 'xeet auth'; wrapping sites add HTTP detail with %w.
 var ErrSessionExpired = errors.New("session expired or invalid; run 'xeet auth' to reconnect")
+
+// ConnectionError gives network failures a stable, actionable message while
+// retaining the original error for errors.Is/errors.As checks and diagnostics.
+type ConnectionError struct {
+	Kind string
+	Err  error
+}
+
+func (e *ConnectionError) Error() string {
+	switch e.Kind {
+	case "timeout":
+		return "x did not respond in time; check your connection and try again"
+	case "offline":
+		return "can't reach x; check your internet connection and try again"
+	default:
+		return "network request to x failed; try again"
+	}
+}
+
+func (e *ConnectionError) Unwrap() error { return e.Err }
+
+// ServiceUnavailableError means X's servers failed after bounded retries.
+type ServiceUnavailableError struct{ Status int }
+
+func (e *ServiceUnavailableError) Error() string {
+	return fmt.Sprintf("x is temporarily unavailable (HTTP %d); try again shortly", e.Status)
+}
+
+func classifyTransportError(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return err
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &ConnectionError{Kind: "timeout", Err: err}
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return &ConnectionError{Kind: "timeout", Err: err}
+	}
+	var dnsError *net.DNSError
+	if errors.As(err, &dnsError) || errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) {
+		return &ConnectionError{Kind: "offline", Err: err}
+	}
+	return &ConnectionError{Kind: "network", Err: err}
+}
 
 // AutomationBlockedError means X accepted the HTTP request but rejected this
 // post as suspected automation or spam. The decision can be content-sensitive,

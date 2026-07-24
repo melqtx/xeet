@@ -104,9 +104,10 @@ Service. It does not store them in the YAML config file. Run `xeet logout` to
 delete the saved session. This removes Xeet's copy but does not log your browser
 out of X. Run `xeet auth` again whenever you want to reconnect.
 
-X rotates the internal `CreateTweet` id periodically; xeet discovers the current
-one automatically and caches it. If discovery fails, Xeet explains how to set
-it manually from the `CreateTweet` request in browser developer tools.
+X rotates internal GraphQL operation ids periodically; xeet discovers and
+caches current ids for posting, timelines, likes, and unlikes. If CreateTweet
+discovery fails, Xeet explains how to set it manually from the `CreateTweet`
+request in browser developer tools.
 
 CreateTweet mutations are never retried after a transient or ambiguous outcome.
 (A request explicitly rejected as an unknown persisted-query id is refreshed
@@ -133,6 +134,11 @@ draft or session cookies.
 Up to four PNG, JPEG, GIF, or WebP images can be attached. The composer shows
 the real format, dimensions, and size before anything is uploaded.
 
+Unfinished composer drafts are autosaved and offered again the next time the
+composer opens. File attachments are restored from their original paths;
+clipboard images are copied into a private local draft directory so they can be
+restored too. A successful post or an explicit discard removes the saved draft.
+
 On Wayland, install `wl-clipboard` for clipboard image paste and link copying.
 X11 and XWayland use the system X11 clipboard. In SSH or headless sessions,
 clipboard operations degrade gracefully and `Ctrl+O` file attachment remains
@@ -149,7 +155,8 @@ xeet timeline         # explicit timeline command
 
 Use **j/k** or the arrow keys to move (**Ctrl+D/U** jumps five posts),
 **Enter** to read a truncated post in full, **i** to zoom the selected post's
-image to the whole terminal, **l** to like or unlike, **r** to reply in
+image to the whole terminal, **A** to read descriptions for all attached images
+(even when previews are off), **l** to like or unlike, **r** to reply in
 place, **o** to open the post in the browser, **y** to copy its link,
 and **P** to write a new post. **R** refreshes in place: new posts stack on
 top while you keep your position. More posts load automatically near the

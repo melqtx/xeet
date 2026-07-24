@@ -19,6 +19,9 @@ func (m Model) View() string {
 	if m.help {
 		return m.viewHelp()
 	}
+	if m.altText {
+		return m.viewAltText()
+	}
 	if m.zoom {
 		return m.viewZoom()
 	}
@@ -36,7 +39,7 @@ func (m Model) View() string {
 		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
 			lipgloss.NewStyle().Foreground(red).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
 				Render("the cat lost the timeline\n\n"+m.err.Error()))
-		return m.shell(center, "R retry  ·  q quit")
+		return m.shell(center, m.errorFooter(true))
 	}
 	return m.shell(m.viewport.View(), footer)
 }
@@ -85,7 +88,7 @@ func (m Model) footer() string {
 		return m.toast
 	}
 	if m.err != nil {
-		return "refresh failed  ·  R retry"
+		return m.errorFooter(false)
 	}
 	position := 0
 	if len(m.posts) > 0 {
@@ -98,6 +101,17 @@ func (m Model) footer() string {
 		return fmt.Sprintf("%d/%d · enter collapse · o browser · ? help", position, len(m.posts))
 	}
 	return fmt.Sprintf("%d/%d · enter read · l like · r reply · ? help", position, len(m.posts))
+}
+
+func (m Model) errorFooter(includeQuit bool) string {
+	parts := []string{"R retry"}
+	if errors.Is(m.err, api.ErrSessionExpired) {
+		parts = append([]string{"a reconnect"}, parts...)
+	}
+	if includeQuit {
+		parts = append(parts, "q quit")
+	}
+	return strings.Join(parts, "  ·  ")
 }
 
 func (m Model) renderFeedContent() (string, []int, []int) {
@@ -407,14 +421,81 @@ func (m Model) viewZoom() string {
 		lipgloss.JoinVertical(lipgloss.Center, parts...))
 }
 
+func (m Model) altTextPanelWidth() int {
+	return min(64, max(28, m.width-8))
+}
+
+func (m Model) altTextVisibleRows() int {
+	// Border, padding, title, account, spacer, and footer consume eight rows.
+	return max(1, m.height-8)
+}
+
+func (m Model) altTextRows() []string {
+	post, ok := m.currentPost()
+	if !ok {
+		return nil
+	}
+	width := m.altTextPanelWidth() - 6
+	var rows []string
+	for index, item := range post.Media {
+		description := strings.TrimSpace(item.AltText)
+		if description == "" {
+			description = "No alt text was provided."
+		}
+		label := fmt.Sprintf("image %d of %d", index+1, len(post.Media))
+		rows = append(rows, lipgloss.NewStyle().Foreground(blue).Bold(true).Render(label))
+		wrapped := lipgloss.NewStyle().Foreground(bright).Width(width).Render(description)
+		rows = append(rows, strings.Split(wrapped, "\n")...)
+		if index < len(post.Media)-1 {
+			rows = append(rows, "")
+		}
+	}
+	return rows
+}
+
+func (m Model) altTextMaxScroll() int {
+	return max(0, len(m.altTextRows())-m.altTextVisibleRows())
+}
+
+func (m Model) viewAltText() string {
+	post, ok := m.currentPost()
+	if !ok || len(post.Media) == 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(muted).Render("this post has no images"))
+	}
+	w := m.altTextPanelWidth()
+	name := post.AuthorName
+	if name == "" {
+		name = "someone"
+	}
+	rows := m.altTextRows()
+	start := max(0, min(m.altTextMaxScroll(), m.altTextScroll))
+	end := min(len(rows), start+m.altTextVisibleRows())
+	visible := rows[start:end]
+
+	footer := "A/enter/esc close"
+	if len(rows) > m.altTextVisibleRows() {
+		footer = fmt.Sprintf("↑/↓ scroll  ·  %d-%d/%d  ·  %s", start+1, end, len(rows), footer)
+	}
+	content := []string{
+		lipgloss.NewStyle().Foreground(pink).Bold(true).Render("image descriptions"),
+		lipgloss.NewStyle().Foreground(muted).Render(name + "  @" + post.Handle), "",
+	}
+	content = append(content, visible...)
+	content = append(content, lipgloss.NewStyle().Foreground(muted).Render(footer))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
+		Padding(1, 2).Width(w).Render(lipgloss.JoinVertical(lipgloss.Left, content...))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
 func (m Model) viewHelp() string {
 	w := m.contentWidth()
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply\nR           refresh\nenter       read full post\ni           zoom image\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply\nR           refresh\nenter       read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\nenter read · i zoom\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"
+		keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\nenter read · i zoom · A alt text\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"
 	}
 	images := "images: " + string(m.imageMode)
 	if m.imageNote != "" && m.height >= 28 {

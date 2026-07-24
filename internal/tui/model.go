@@ -79,11 +79,20 @@ type Model struct {
 	cancelling     bool
 	postID         string
 	clipboard      clipboardReader
+	drafts         draftStore
+	draftSeq       int
 }
 
 func New(clip clipboardReader) Model {
+	return newWithDraftStore(clip, memorylessDraftStore{})
+}
+
+func newWithDraftStore(clip clipboardReader, drafts draftStore) Model {
 	if clip == nil {
 		clip = systemClipboard{initErr: fmt.Errorf("clipboard unavailable")}
+	}
+	if drafts == nil {
+		drafts = memorylessDraftStore{}
 	}
 	editor := textarea.New()
 	editor.Placeholder = "what are you thinking?"
@@ -102,14 +111,28 @@ func New(clip clipboardReader) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
-	return Model{width: 72, height: 22, editor: editor, pathInput: path, spinner: s, clipboard: clip}
+	return Model{width: 72, height: 22, editor: editor, pathInput: path, spinner: s, clipboard: clip, drafts: drafts}
 }
 
 func (m Model) Init() tea.Cmd { return textarea.Blink }
 
 func Run() error {
-	m := New(systemClipboard{initErr: clip.Init()})
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	store, err := newFileDraftStore()
+	if err != nil {
+		return fmt.Errorf("initialize draft recovery: %w", err)
+	}
+	m := newWithDraftStore(systemClipboard{initErr: clip.Init()}, store)
+	text, attachments, restoreErr := store.Load()
+	if text != "" || len(attachments) > 0 {
+		m.editor.SetValue(text)
+		m.attachments = attachments
+		m.toast = "Restored your saved draft"
+		m.resize()
+	}
+	if restoreErr != nil {
+		m.toast = restoreErr.Error()
+	}
+	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -184,8 +207,7 @@ func beginPost(text string, attachments []media.Attachment) tea.Cmd {
 			id, err := client.PostTweet(ctx, text, "", uploads, func(event api.PostEvent) {
 				events <- postProgressMsg{event: event}
 			})
-			if err == nil && client.Refreshed() {
-				cfg.CreateTweetQID = client.QueryID()
+			if client.ApplyRefreshedQueryIDs(cfg) {
 				_ = mgr.Save(cfg)
 			}
 			events <- postResultMsg{id: id, err: err, diagnostic: client.LastDiagnostic()}

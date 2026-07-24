@@ -17,13 +17,14 @@
 - Lazy inline truecolor image previews in the timeline
 - multi-image timeline collages and optional native Kitty/iTerm2 previews
 - Bounded API retries, rate-limit errors, session-expiry detection, and cookie-leak tests
+- Draft autosave and restore across process exits, including clipboard images
+- Actionable offline, timeout, service outage, rate-limit, and expired-session recovery
+- Persistent operation-ID caching for posting, timelines, likes, and unlikes
+- Keyboard-accessible image descriptions, including text-only mode
 
 ## Next
 
-- Draft autosave and restore across process exits
 - `xeet whoami` session/account display
-- Graceful offline handling
-- Accessible image alt text
 - Following timeline option
 - Configurable theme without changing layout
 - Chunked upload for video and large media

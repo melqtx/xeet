@@ -34,6 +34,7 @@ type ActionKind int
 const (
 	ActionQuit ActionKind = iota
 	ActionCompose
+	ActionAuthenticate
 )
 
 type Action struct{ Kind ActionKind }
@@ -58,6 +59,8 @@ type Model struct {
 	loadingMore   bool
 	refreshing    bool
 	help          bool
+	altText       bool
+	altTextScroll int
 	expanded      bool
 	zoom          bool
 	action        Action
@@ -199,7 +202,11 @@ func fetchPage(cursor string, more bool) tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
-		page, err := api.NewWebClient(cfg).FetchHomeTimeline(ctx, cursor, 30)
+		client := api.NewWebClient(cfg)
+		page, err := client.FetchHomeTimeline(ctx, cursor, 30)
+		if client.ApplyRefreshedQueryIDs(cfg) {
+			_ = mgr.Save(cfg)
+		}
 		return pageMsg{page: page, err: err, more: more}
 	}
 }
@@ -216,7 +223,11 @@ func setLike(tweetID string, liked bool) tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		err = api.NewWebClient(cfg).SetTweetLiked(ctx, tweetID, liked)
+		client := api.NewWebClient(cfg)
+		err = client.SetTweetLiked(ctx, tweetID, liked)
+		if client.ApplyRefreshedQueryIDs(cfg) {
+			_ = mgr.Save(cfg)
+		}
 		return likeMsg{id: tweetID, liked: liked, err: err}
 	}
 }
@@ -235,8 +246,7 @@ func sendReply(tweetID, text string) tea.Cmd {
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		id, err := client.PostTweet(ctx, text, tweetID, nil, nil)
-		if err == nil && client.Refreshed() {
-			cfg.CreateTweetQID = client.QueryID()
+		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.Save(cfg)
 		}
 		return replyResultMsg{id: id, err: err}
@@ -273,6 +283,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	}
+	if m.altText {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "A", "esc", "enter":
+				m.altText = false
+				return m, m.imageRepaint()
+			case "j", "down":
+				m.moveAltText(1)
+			case "k", "up":
+				m.moveAltText(-1)
+			case "pgdown", "ctrl+d":
+				m.moveAltText(m.altTextVisibleRows())
+			case "pgup", "ctrl+u":
+				m.moveAltText(-m.altTextVisibleRows())
+			case "home", "g":
+				m.altTextScroll = 0
+			case "end", "G":
+				m.altTextScroll = m.altTextMaxScroll()
+			}
+			// Panel keys must not trigger actions in the feed underneath it.
+			return m, nil
+		}
+		// Background results (likes, pages, and previews) must still reach the
+		// normal handlers while the panel is open.
 	}
 	if m.zoom {
 		// Keys close the zoom view; everything else (preview arrivals,
@@ -439,6 +476,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 			return m, m.imageRepaint(m.replyEditor.Focus())
 		}
+	case "a":
+		if errors.Is(m.err, api.ErrSessionExpired) {
+			m.action = Action{Kind: ActionAuthenticate}
+			return m, tea.Quit
+		}
 	case "P", "c":
 		m.action = Action{Kind: ActionCompose}
 		return m, tea.Quit
@@ -452,6 +494,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "o":
 		if post, ok := m.currentPost(); ok {
 			return m, openURL(postURL(post))
+		}
+	case "A":
+		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
+			m.altText = true
+			m.altTextScroll = 0
+			return m, m.imageRepaint()
 		}
 	case "i":
 		if post, ok := m.currentPost(); ok && len(post.Media) > 0 {
@@ -485,6 +533,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) moveAltText(delta int) {
+	m.altTextScroll = max(0, min(m.altTextMaxScroll(), m.altTextScroll+delta))
 }
 
 func (m *Model) moveSelection(target int) {

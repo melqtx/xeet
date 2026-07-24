@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"xeet/internal/tui"
@@ -24,6 +25,8 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() error { return rootCmd.Execute() }
+
+func ExecuteContext(ctx context.Context) error { return rootCmd.ExecuteContext(ctx) }
 
 func SetVersion(version, commit, buildTime string) {
 	appVersion = version
@@ -55,5 +58,5 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if barebones {
 		imageMode = "off"
 	}
-	return runTimeline(imageMode)
+	return runTimeline(cmd.Context(), imageMode)
 }
