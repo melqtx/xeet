@@ -17,9 +17,10 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
-    # go.mod may pin a patch release newer than the one in nixpkgs. Leaving
-    # GOTOOLCHAIN on auto lets the go command fetch the exact toolchain
-    # instead of refusing to build.
+    # An older nixpkgs channel may carry a go patch release behind go.mod's;
+    # the pinned version matters because it usually carries stdlib security
+    # fixes. Leaving GOTOOLCHAIN on auto lets the go command fetch the exact
+    # toolchain rather than silently building against an older one.
     export GOTOOLCHAIN=auto
     export GOPATH="''${GOPATH:-$HOME/go}"
     export PATH="$GOPATH/bin:$PATH"
