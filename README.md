@@ -6,19 +6,18 @@
 ██╔╝ ██╗███████╗███████╗   ██║
 ╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝
              /\_/\
-            ( o.o )   78 65 65 74
+            ( o.o )
              > ^ <    ready when you are ✦
 ```
 
-post to x from your terminal. no api keys, no electron, no browser tab
-eating 2gb of ram. browse your timeline with actual inline images, reply,
-like, and go back to whatever you were doing.
+post to x from your terminal. no api keys, no browser tab. browse your
+timeline with inline images, reply, like, done.
 
 > [!WARNING]
-> real talk: xeet uses the same internal endpoints the x website uses, with
-> your browser's session cookies. that probably violates x's terms of
-> service. it's unofficial, not affiliated with x corp, and x could break it
-> any tuesday. treat it like a fun tool, not infrastructure.
+> xeet uses the same internal endpoints the x website uses, with your
+> browser's session cookies. that probably violates x's terms of service.
+> it's unofficial, not affiliated with x corp, and could break at any time.
+> use at your own risk.
 
 <!-- demo gif goes here -->
 
@@ -31,7 +30,7 @@ like, and go back to whatever you were doing.
 
 ## get it
 
-works on macos and linux. windows isn't supported — open an issue if you
+works on macos and linux. windows isn't supported, open an issue if you
 want it.
 
 **grab a release** (recommended): download the archive for your platform
@@ -66,7 +65,7 @@ then:
 xeet auth
 ```
 
-xeet borrows that browser session — it never asks for your password. macos
+xeet borrows that browser session. it never asks for your password. macos
 may prompt for keychain access; linux may ask you to unlock gnome keyring /
 secret service / kde wallet. snap and flatpak browser installs are detected,
 and multiple profiles work.
@@ -84,7 +83,7 @@ xeet post --image meme.png             # image-only, no text
 xeet post "a reply" --reply 1234567890
 ```
 
-something feel off with your session? there's a toolbox:
+if your session feels off:
 
 ```bash
 xeet whoami            # which account is connected
@@ -93,7 +92,7 @@ xeet doctor --offline  # local metadata only, no network
 xeet logout            # delete xeet's copy of the session
 ```
 
-diagnostics print a short fingerprint and the browser/profile — never the
+diagnostics print a short fingerprint and the browser/profile, never the
 cookie values.
 
 ## the tui
@@ -115,7 +114,7 @@ cookie values.
 
 up to four png/jpeg/gif/webp images per post. the composer shows real
 format, dimensions, and size before anything uploads. unfinished drafts
-autosave — including clipboard images — and come back next time.
+autosave (including clipboard images) and come back next time.
 
 **timeline**
 
@@ -131,7 +130,7 @@ autosave — including clipboard images — and come back next time.
 | `o` | open in browser |
 | `y` | copy link |
 | `P` | write a new post |
-| `R` | refresh in place — new posts stack on top, you keep your spot |
+| `R` | refresh in place, new posts stack on top, you keep your spot |
 | `?` | key guide + which image renderer is active and why |
 
 more posts load automatically near the bottom. inside a conversation,
@@ -139,7 +138,7 @@ more posts load automatically near the bottom. inside a conversation,
 reloads, and `esc` drops you back exactly where you were in the timeline.
 
 <details>
-<summary>nerd stuff: how images actually render</summary>
+<summary>details: how images render</summary>
 
 images are prefetched around your position so scrolling lands on
 already-loaded previews. videos and gifs show their poster frame with a `▶`
@@ -177,13 +176,13 @@ and `ctrl+o` file attachment still works.
 
 xeet reuses the x.com session already in your browser and speaks the same
 unsupported internal graphql endpoints the website does. the imported
-`auth_token` and `ct0` cookies grant account-level access — treat them like
-a password. they live in the macos keychain or linux secret service, never
+`auth_token` and `ct0` cookies grant account-level access, so treat them
+like a password. they live in the macos keychain or linux secret service, never
 in the yaml config file. `xeet logout` deletes xeet's copy (your browser
 stays logged in).
 
 <details>
-<summary>nerd stuff: query ids and the no-double-post rule</summary>
+<summary>details: query ids and retries</summary>
 
 x rotates its internal graphql operation ids periodically; xeet discovers
 and caches current ids for posting, timelines, likes, and unlikes. if
@@ -196,12 +195,12 @@ refreshed and sent once with the current id.) if x returns an unclear
 result, xeet performs one read-only timeline check; if it still can't prove
 the post landed, it preserves your draft and asks you to check your profile
 before retrying. the `details` line contains only a response-shape
-fingerprint, status, type names, and rate-limit metadata — never the draft
+fingerprint, status, type names, and rate-limit metadata, never the draft
 or session cookies.
 
 to compare a successful browser post with xeet's request without exposing
 secrets, export a har from devtools and run `xeet inspect-har file.har`.
-it prints names and structural keys only — never values, post text, or
+it prints names and structural keys only, never values, post text, or
 response bodies. keep the har local; it contains session cookies.
 
 </details>
@@ -209,11 +208,8 @@ response bodies. keep the har local; it contains session cookies.
 ## wontfix
 
 no scheduling, no bulk posting, no scraping, no automated engagement, no
-mass-posting. this is a client, not a growth hack. these are out of scope
-and will not be added.
+mass-posting. out of scope, will not be added.
 
 ---
 
-made at 2am by [melqtx](https://github.com/melqtx) · [MIT](LICENSE) · not affiliated with x corp (obviously)
-
-`/ᐠ - ˕ -マ` found a bug? [open an issue](https://github.com/melqtx/xeet/issues) · security stuff → [SECURITY.md](SECURITY.md)
+[MIT](LICENSE) · not affiliated with x corp · bugs go [here](https://github.com/melqtx/xeet/issues) · security goes [here](SECURITY.md)
