@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"xeet/internal/media"
 
@@ -63,6 +64,13 @@ func TestClipboardDraftAttachmentIsPersistedAndCleaned(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("draft media entries=%v err=%v", entries, err)
 	}
+	mediaDirInfo, err := os.Stat(store.mediaDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && mediaDirInfo.Mode().Perm() != 0700 {
+		t.Fatalf("draft media permissions = %o, want 700", mediaDirInfo.Mode().Perm())
+	}
 
 	text, attachments, err := store.Load()
 	if err != nil {
@@ -78,6 +86,25 @@ func TestClipboardDraftAttachmentIsPersistedAndCleaned(t *testing.T) {
 	}
 	if _, err := os.Stat(attachments[0].Path); err != nil {
 		t.Fatalf("restored clipboard sidecar was removed: %v", err)
+	}
+
+	// The in-memory clipboard attachment remains marked as clipboard-sourced.
+	// Later text autosaves must reuse its content-addressed sidecar rather than
+	// rewriting and syncing the full image each time.
+	sidecar := filepath.Join(store.mediaDir, attachment.ID+".png")
+	oldTime := time.Unix(1_600_000_000, 0)
+	if err := os.Chtimes(sidecar, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("edited text", []media.Attachment{attachment}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(oldTime) {
+		t.Fatalf("clipboard sidecar was rewritten: mtime=%v", info.ModTime())
 	}
 	if err := store.Clear(); err != nil {
 		t.Fatal(err)

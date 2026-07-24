@@ -281,8 +281,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.help = false
 				return m, m.imageRepaint()
 			}
+			// Help keys must not trigger actions in the feed underneath it.
+			return m, nil
 		}
-		return m, nil
+		// Keep applying background results while help is open.
 	}
 	if m.altText {
 		if key, ok := msg.(tea.KeyMsg); ok {

@@ -157,6 +157,14 @@ func (s *fileDraftStore) saveClipboardAttachment(attachment media.Attachment) (s
 	if err := rejectSymlink(path); err != nil {
 		return "", err
 	}
+	// IDs are content hashes and the sidecar directory is private. Once this
+	// exact-size sidecar exists, avoid rewriting and syncing the full image on
+	// every subsequent text autosave.
+	if info, err := os.Stat(path); err == nil && info.Size() == int64(len(attachment.Data)) {
+		return path, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
 	if err := atomicWrite0600(path, attachment.Data); err != nil {
 		return "", fmt.Errorf("save clipboard attachment: %w", err)
 	}
