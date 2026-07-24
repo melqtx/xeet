@@ -325,8 +325,8 @@ func TestToastExpiresOnlyForLatestSequence(t *testing.T) {
 	}
 }
 
-func TestExperimentalEnterOpensRepliesAndEscRestoresFeed(t *testing.T) {
-	m := newModel("off", true)
+func TestEnterOpensRepliesAndEscRestoresFeed(t *testing.T) {
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.posts = []api.TimelinePost{
 		{ID: "first", Handle: "one", Text: "first"},
@@ -353,7 +353,7 @@ func TestExperimentalEnterOpensRepliesAndEscRestoresFeed(t *testing.T) {
 }
 
 func TestThreadIgnoresStaleConversationAndKeepsFeedUpdatesAlive(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.posts = []api.TimelinePost{{ID: "root", Text: "root"}}
 	m.mode = modeThread
@@ -374,7 +374,7 @@ func TestThreadIgnoresStaleConversationAndKeepsFeedUpdatesAlive(t *testing.T) {
 }
 
 func TestThreadContinuationResolvesParentFromEarlierPage(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -393,7 +393,7 @@ func TestThreadContinuationResolvesParentFromEarlierPage(t *testing.T) {
 }
 
 func TestThreadResultCompletesWhileReplyEditorIsOpen(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -415,7 +415,7 @@ func TestThreadResultCompletesWhileReplyEditorIsOpen(t *testing.T) {
 }
 
 func TestFeedResultDuringThreadReplyPreservesBothSelections(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.posts = []api.TimelinePost{{ID: "a", Text: "a"}, {ID: "root", Text: "root"}}
 	m.feedSelected = 1
@@ -438,7 +438,7 @@ func TestFeedResultDuringThreadReplyPreservesBothSelections(t *testing.T) {
 }
 
 func TestThreadIgnoresOlderRequestForSameRoot(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -454,7 +454,7 @@ func TestThreadIgnoresOlderRequestForSameRoot(t *testing.T) {
 }
 
 func TestThreadErrorIsVisibleWithSeededRoot(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -469,7 +469,7 @@ func TestThreadErrorIsVisibleWithSeededRoot(t *testing.T) {
 }
 
 func TestThreadSessionExpiryOffersReconnect(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -488,7 +488,7 @@ func TestThreadSessionExpiryOffersReconnect(t *testing.T) {
 }
 
 func TestThreadEscPromotesSessionExpiryToFeed(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -506,7 +506,7 @@ func TestThreadEscPromotesSessionExpiryToFeed(t *testing.T) {
 }
 
 func TestThreadEscKeepsOrdinaryErrorsOutOfFeed(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -519,7 +519,7 @@ func TestThreadEscKeepsOrdinaryErrorsOutOfFeed(t *testing.T) {
 }
 
 func TestThreadRefreshKeepsRootWhenPageOmitsIt(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -541,7 +541,7 @@ func TestThreadRefreshKeepsRootWhenPageOmitsIt(t *testing.T) {
 }
 
 func TestThreadReplyTargetsSelectedReplyAndReturnsToThread(t *testing.T) {
-	m := newModel("off", true)
+	m := NewWithImageMode("off")
 	m.loading = false
 	m.mode = modeThread
 	m.threadRootID = "root"
@@ -562,7 +562,7 @@ func TestThreadReplyTargetsSelectedReplyAndReturnsToThread(t *testing.T) {
 	}
 }
 
-func TestEnterExpandsTruncatedPost(t *testing.T) {
+func TestReadKeyExpandsTruncatedPost(t *testing.T) {
 	m := New()
 	m.loading = false
 	m.posts = []api.TimelinePost{{
@@ -573,17 +573,17 @@ func TestEnterExpandsTruncatedPost(t *testing.T) {
 	if strings.Contains(m.viewport.View(), "ENDMARKER") {
 		t.Fatal("long post was not truncated")
 	}
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
 	if !m.expanded {
-		t.Fatal("enter did not expand the post")
+		t.Fatal("e did not expand the post")
 	}
 	content, _, _ := m.renderFeedContent()
 	if !strings.Contains(content, "ENDMARKER") {
 		t.Fatal("expanded post is still truncated")
 	}
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
 	if m.expanded {
-		t.Fatal("enter did not collapse the post")
+		t.Fatal("e did not collapse the post")
 	}
 }
 

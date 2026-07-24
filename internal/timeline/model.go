@@ -74,22 +74,21 @@ type Model struct {
 	spinner       spinner.Model
 	viewport      viewport.Model
 
-	mode           mode
-	threadsEnabled bool
-	feedSelected   int
-	threadRootID   string
-	threadPosts    []api.ConversationPost
-	threadCursor   string
-	threadLoading  bool
-	threadMore     bool
-	threadErr      error
-	threadSeq      int
-	replyReturn    mode
-	replyEditor    textarea.Model
-	replyPost      api.TimelinePost
-	replyPosting   bool
-	replyErr       error
-	replyNotice    string
+	mode          mode
+	feedSelected  int
+	threadRootID  string
+	threadPosts   []api.ConversationPost
+	threadCursor  string
+	threadLoading bool
+	threadMore    bool
+	threadErr     error
+	threadSeq     int
+	replyReturn   mode
+	replyEditor   textarea.Model
+	replyPost     api.TimelinePost
+	replyPosting  bool
+	replyErr      error
+	replyNotice   string
 }
 
 type pageMsg struct {
@@ -166,10 +165,6 @@ func New() Model {
 }
 
 func NewWithImageMode(requested string) Model {
-	return newModel(requested, false)
-}
-
-func newModel(requested string, threads bool) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	vp := viewport.New(72, 18)
@@ -184,7 +179,7 @@ func newModel(requested string, threads bool) Model {
 	return Model{
 		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
 		liking: map[string]bool{}, previews: map[string]previewState{},
-		spinner: s, viewport: vp, replyEditor: editor, threadsEnabled: threads,
+		spinner: s, viewport: vp, replyEditor: editor,
 	}
 }
 
@@ -192,9 +187,8 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, fetchPage("", false), clockTick())
 }
 
-func Run(images string, threads ...bool) (Action, error) {
-	enableThreads := len(threads) > 0 && threads[0]
-	m := newModel(images, enableThreads)
+func Run(images string) (Action, error) {
+	m := NewWithImageMode(images)
 	// Auto-detected native mode is a claim, not a capability: multiplexers
 	// like cmux inherit ghostty's TERM without reliably rendering graphics.
 	// Confirm with the terminal itself; --images native skips the probe.
@@ -481,7 +475,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.action = Action{Kind: ActionCompose}
 		return m, tea.Quit
 	case "enter":
-		if post, ok := m.currentPost(); ok && m.threadsEnabled {
+		if post, ok := m.currentPost(); ok {
 			m.feedSelected = m.selected
 			m.mode = modeThread
 			m.threadRootID = post.ID
@@ -494,12 +488,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.YOffset = 0
 			m.syncViewport()
 			return m, m.imageRepaint(tea.Batch(m.spinner.Tick, m.requestThread("", false), m.requestPreviews()))
-		}
-		if len(m.posts) > 0 {
-			m.expanded = !m.expanded
-			m.syncViewport()
-			m.ensureSelectedVisible()
-			return m, m.imageRepaint()
 		}
 	case " ", "e":
 		if len(m.posts) > 0 {

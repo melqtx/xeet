@@ -106,16 +106,9 @@ func (m Model) footer() string {
 		return fmt.Sprintf("%d/%d  ·  ? help", position, len(m.posts))
 	}
 	if m.expanded {
-		key := "enter"
-		if m.threadsEnabled {
-			key = "e"
-		}
-		return fmt.Sprintf("%d/%d · %s collapse · o browser · ? help", position, len(m.posts), key)
+		return fmt.Sprintf("%d/%d · e collapse · o browser · ? help", position, len(m.posts))
 	}
-	if m.threadsEnabled {
-		return fmt.Sprintf("%d/%d · enter replies · e read · r reply · ? help", position, len(m.posts))
-	}
-	return fmt.Sprintf("%d/%d · enter read · l like · r reply · ? help", position, len(m.posts))
+	return fmt.Sprintf("%d/%d · enter replies · e read · r reply · ? help", position, len(m.posts))
 }
 
 func (m Model) errorFooter(includeQuit bool) string {
@@ -573,18 +566,12 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply\nR           refresh\nenter       read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
-	if m.threadsEnabled {
-		keys = strings.Replace(keys, "enter       read full post", "enter       open replies\ne / space   read full post", 1)
-	}
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
 		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\nenter read · i zoom · A alt text\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"
-		if m.threadsEnabled {
-			keys = strings.Replace(keys, "enter read", "enter replies · e read", 1)
-		}
+		keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"
 		if m.mode == modeThread {
 			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser\nesc back · q quit"
 		}
