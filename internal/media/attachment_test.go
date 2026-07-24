@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +68,51 @@ func TestNormalizePath(t *testing.T) {
 func TestRejectsGarbage(t *testing.T) {
 	if _, err := FromClipboard([]byte("not an image")); err == nil {
 		t.Fatal("expected corrupt image error")
+	}
+}
+
+func TestFromPathDetectsMP4Video(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clip.mp4")
+	data := append([]byte{0, 0, 0, 0x18}, []byte("ftypisom")...)
+	data = append(data, make([]byte, 64)...)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := FromPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.IsVideo() || a.MIME != "video/mp4" || a.Format != "MP4" {
+		t.Fatalf("attachment = %+v, want mp4 video", a)
+	}
+	if len(a.Data) != 0 || a.Path != path || a.Size != int64(len(data)) {
+		t.Fatalf("video must stay path-backed: %+v", a)
+	}
+}
+
+func TestFromPathDetectsQuickTime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clip.mov")
+	data := append([]byte{0, 0, 0, 0x14}, []byte("ftypqt  ")...)
+	data = append(data, make([]byte, 32)...)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := FromPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.MIME != "video/quicktime" || a.Format != "MOV" {
+		t.Fatalf("attachment = %+v, want quicktime video", a)
+	}
+}
+
+func TestFromPathRejectsUnsupportedVideo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clip.webm")
+	if err := os.WriteFile(path, []byte{0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := FromPath(path)
+	if err == nil || !strings.Contains(err.Error(), "unsupported video format") {
+		t.Fatalf("expected targeted video error, got %v", err)
 	}
 }

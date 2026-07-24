@@ -24,6 +24,7 @@ const (
 	MaxAttachments = 4
 	MaxImageBytes  = 5 << 20
 	MaxGIFBytes    = 15 << 20
+	MaxVideoBytes  = 512 << 20
 )
 
 type Source string
@@ -46,6 +47,12 @@ type Attachment struct {
 	Data   []byte
 }
 
+// IsVideo reports whether the attachment streams from disk as video rather
+// than travelling in Data as an image.
+func (a Attachment) IsVideo() bool {
+	return strings.HasPrefix(a.MIME, "video/")
+}
+
 func FromClipboard(data []byte) (Attachment, error) {
 	return fromBytes("Clipboard image", "", SourceClipboard, data)
 }
@@ -57,18 +64,82 @@ func FromPath(input string) (Attachment, error) {
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return Attachment{}, fmt.Errorf("open image: %w", err)
+		return Attachment{}, fmt.Errorf("open media: %w", err)
 	}
 	defer f.Close()
 
-	data, err := io.ReadAll(io.LimitReader(f, MaxGIFBytes+1))
+	head := make([]byte, 16)
+	headLen, err := io.ReadFull(f, head)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return Attachment{}, fmt.Errorf("read media: %w", err)
+	}
+	head = head[:headLen]
+	if mime := videoMIME(head); mime != "" {
+		return videoFromFile(f, path, mime)
+	}
+	rest, err := io.ReadAll(io.LimitReader(f, MaxGIFBytes+1))
 	if err != nil {
 		return Attachment{}, fmt.Errorf("read image: %w", err)
 	}
+	data := append(head, rest...)
 	if len(data) > MaxGIFBytes {
 		return Attachment{}, fmt.Errorf("image is larger than %s", HumanBytes(MaxGIFBytes))
 	}
 	return fromBytes(filepath.Base(path), path, SourceFile, data)
+}
+
+// videoMIME sniffs the container from the file's first bytes. MP4 and
+// QuickTime are the formats X accepts; other known video magic returns
+// "" here and surfaces a targeted error from fromBytes via looksLikeVideo.
+func videoMIME(head []byte) string {
+	if len(head) < 12 || string(head[4:8]) != "ftyp" {
+		return ""
+	}
+	if string(head[8:10]) == "qt" {
+		return "video/quicktime"
+	}
+	return "video/mp4"
+}
+
+// looksLikeVideo recognizes common non-MP4 video containers so the error can
+// say "convert it" instead of "corrupt image".
+func looksLikeVideo(head []byte) bool {
+	if len(head) >= 4 && head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
+		return true // Matroska/WebM
+	}
+	if len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "AVI " {
+		return true
+	}
+	return false
+}
+
+// videoFromFile builds a path-backed attachment: video never loads into
+// memory here; the uploader streams it from disk in chunks.
+func videoFromFile(f *os.File, path, mime string) (Attachment, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return Attachment{}, fmt.Errorf("read video: %w", err)
+	}
+	if info.Size() > MaxVideoBytes {
+		return Attachment{}, fmt.Errorf("videos must be %s or smaller", HumanBytes(MaxVideoBytes))
+	}
+	if info.Size() == 0 {
+		return Attachment{}, fmt.Errorf("video is empty")
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d", path, info.Size(), info.ModTime().UnixNano())))
+	format := "MP4"
+	if mime == "video/quicktime" {
+		format = "MOV"
+	}
+	return Attachment{
+		ID:     hex.EncodeToString(sum[:6]),
+		Name:   filepath.Base(path),
+		Source: SourceFile,
+		Path:   path,
+		MIME:   mime,
+		Format: format,
+		Size:   info.Size(),
+	}, nil
 }
 
 func fromBytes(name, path string, source Source, data []byte) (Attachment, error) {
@@ -77,6 +148,9 @@ func fromBytes(name, path string, source Source, data []byte) (Attachment, error
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
+		if looksLikeVideo(data) {
+			return Attachment{}, fmt.Errorf("unsupported video format; X accepts MP4 (H.264/AAC) or MOV")
+		}
 		return Attachment{}, fmt.Errorf("unsupported or corrupt image: %w", err)
 	}
 	format = strings.ToLower(format)

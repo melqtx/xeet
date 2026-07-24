@@ -42,17 +42,21 @@ type LoginResult struct {
 	LastUsedAt   time.Time
 }
 
-// Upload is one image to upload and attach to a post.
+// Upload is one media item to upload and attach to a post. Images travel in
+// Data; large media (video) sets Path instead and streams from disk through
+// the chunked endpoint.
 type Upload struct {
 	Filename    string
 	ContentType string
 	Data        []byte
+	Path        string
 }
 
 type PostStage string
 
 const (
 	PostStageUploading   PostStage = "uploading"
+	PostStageProcessing  PostStage = "processing"
 	PostStageDiscovering PostStage = "discovering"
 	PostStagePublishing  PostStage = "publishing"
 	PostStageReconciling PostStage = "reconciling"
@@ -60,11 +64,15 @@ const (
 )
 
 // PostEvent reports coarse posting progress. The callback is optional.
+// Chunked uploads additionally fill the byte counters so UIs can show a
+// percentage while a video transfers.
 type PostEvent struct {
-	Stage   PostStage
-	Current int
-	Total   int
-	Name    string
+	Stage            PostStage
+	Current          int
+	Total            int
+	Name             string
+	TransferredBytes int64
+	TotalBytes       int64
 }
 
 type ProgressFunc func(PostEvent)
@@ -443,7 +451,7 @@ func newCreateTweetVariables(text string) createTweetVariables {
 }
 
 // PostTweet posts through the web GraphQL endpoint and returns the created id.
-// Images are uploaded first and attached to the same CreateTweet operation.
+// Media is uploaded first and attached to the same CreateTweet operation.
 func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploads []Upload, progress ProgressFunc) (string, error) {
 	c.lastDiagnostic = ""
 	if c.authToken == "" || c.ct0 == "" {
@@ -456,14 +464,30 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 		return "", fmt.Errorf("post has no text or images")
 	}
 	for i, upload := range uploads {
-		if len(upload.Data) == 0 {
-			return "", fmt.Errorf("image %d is empty", i+1)
+		if len(upload.Data) == 0 && upload.Path == "" {
+			return "", fmt.Errorf("attachment %d is empty", i+1)
 		}
 	}
 	vars := newCreateTweetVariables(text)
 	for i, upload := range uploads {
 		emitProgress(progress, PostEvent{Stage: PostStageUploading, Current: i + 1, Total: len(uploads), Name: upload.Filename})
-		mediaID, err := c.uploadMedia(ctx, upload)
+		var mediaID string
+		var err error
+		if upload.needsChunkedUpload() {
+			mediaID, err = c.uploadMediaChunked(ctx, upload, func(sent, total int64) {
+				stage := PostStageUploading
+				if sent == total {
+					// The transfer is done; anything after this is X transcoding.
+					stage = PostStageProcessing
+				}
+				emitProgress(progress, PostEvent{
+					Stage: stage, Current: i + 1, Total: len(uploads), Name: upload.Filename,
+					TransferredBytes: sent, TotalBytes: total,
+				})
+			})
+		} else {
+			mediaID, err = c.uploadMedia(ctx, upload)
+		}
 		if err != nil {
 			return "", fmt.Errorf("upload %q: %w", upload.Filename, err)
 		}
