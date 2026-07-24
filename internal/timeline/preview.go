@@ -150,7 +150,7 @@ func (m *Model) requestPreviews() tea.Cmd {
 		if i == m.selected {
 			selectedChanged = true
 		}
-		cmds = append(cmds, fetchPreview(post.ID, post.Media[0], width, rows, m.imageMode))
+		cmds = append(cmds, fetchPreview(m.requestContext(), post.ID, post.Media[0], width, rows, m.imageMode))
 	}
 	if selectedChanged {
 		m.syncViewport()
@@ -182,7 +182,7 @@ func (m *Model) requestZoom() tea.Cmd {
 		width = min(width, len(kittyDiacritics))
 		rows = min(rows, len(kittyDiacritics))
 	}
-	return fetchPreview(key, post.Media[0], width, rows, m.imageMode)
+	return fetchPreview(m.requestContext(), key, post.Media[0], width, rows, m.imageMode)
 }
 
 func (m Model) zoomLoading() bool {
@@ -248,7 +248,11 @@ func abs(value int) int {
 	return value
 }
 
-func fetchPreview(postID string, media api.TimelineMedia, width, maxRows int, mode imageMode) tea.Cmd {
+// fetchPreview hangs its timeout off the model's context so a download in
+// flight when the program stops cannot write a native PNG after
+// cleanupPreviews has already run, which would strand it in the temp dir for
+// the rest of a compose handoff.
+func fetchPreview(parent context.Context, postID string, media api.TimelineMedia, width, maxRows int, mode imageMode) tea.Cmd {
 	return func() tea.Msg {
 		parsed, err := url.Parse(previewMediaURL(media.URL, mode))
 		if err != nil {
@@ -257,7 +261,7 @@ func fetchPreview(postID string, media api.TimelineMedia, width, maxRows int, mo
 		if err := validateMediaURL(parsed); err != nil {
 			return previewMsg{postID: postID, err: err}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 		if err != nil {

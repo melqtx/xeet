@@ -61,8 +61,17 @@ func runTimeline(ctx context.Context, imageMode string, following bool) error {
 		case timeline.ActionAuthenticate:
 			authInvocation := &cobra.Command{}
 			authInvocation.SetContext(ctx)
+			// An interrupt surfaces here as an error: the browser picker
+			// reports its own cancellation and verification fails on the dead
+			// context. Neither is worth printing as a failure.
 			if err := runAuth(authInvocation, nil); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
+			}
+			if ctx.Err() != nil {
+				return nil
 			}
 		default:
 			return nil
