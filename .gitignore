@@ -34,3 +34,7 @@ coverage.out
 tmp/
 temp/
 debug*
+
+# Nix build outputs
+result
+result-*
