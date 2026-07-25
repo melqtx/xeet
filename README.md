@@ -40,7 +40,7 @@ nix profile install github:melqtx/xeet   # install
 nix run github:melqtx/xeet               # or just try it
 ```
 
-**with go** (1.26+):
+**with go** (1.26.5+, for the patched tls stack):
 
 ```bash
 go install github.com/melqtx/xeet@latest
