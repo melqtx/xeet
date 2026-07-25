@@ -19,7 +19,10 @@ timeline with inline images, reply, like, done.
 > it's unofficial, not affiliated with x corp, and could break at any time.
 > use at your own risk.
 
-<!-- demo gif goes here -->
+![the xeet timeline running in a terminal: posts from the for you feed with
+author, handle, and relative time, each with a full-color inline image preview
+rendered in the terminal, like and reply counts underneath, and a footer
+showing 1/37 with the enter, e, r, and ? key hints](docs/timeline.png)
 
 ```
 ╭────────────────────────────────────────╮
