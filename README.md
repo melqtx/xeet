@@ -17,7 +17,7 @@ timeline with inline images, reply, like, done.
 > xeet uses the same internal endpoints the x website uses, with your
 > browser's session cookies. that probably violates x's terms of service.
 > it's unofficial, not affiliated with x corp, and could break at any time.
-> use at your own risk.
+
 
 ![the xeet timeline running in a terminal: posts from the for you feed with
 author, handle, and relative time, each with a full-color inline image preview
