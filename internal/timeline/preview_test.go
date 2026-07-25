@@ -385,6 +385,29 @@ func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 	}
 }
 
+func TestThreadRefetchesAPreviewTooWideForItsRail(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadPosts = []api.ConversationPost{{TimelinePost: mediaPosts(1)[0]}}
+	m.threadPosts[0].ID = "root"
+	m.syncViewport()
+
+	// A preview cached at the feed's full width cannot fit a thread, where
+	// every post reserves room for the deepest rail.
+	m.previews["root"] = previewState{columns: m.contentWidth() - 4}
+	if cmd := m.requestPreviews(); cmd == nil || !m.previews["root"].loading {
+		t.Fatalf("a preview too wide for the thread was kept: %+v", m.previews["root"])
+	}
+
+	// One that already fits is left alone.
+	m.previews["root"] = previewState{columns: m.contentWidth() - 4 - 2*maxRailDepth}
+	if cmd := m.requestPreviews(); cmd != nil {
+		t.Fatalf("a preview that fits was refetched: %+v", m.previews["root"])
+	}
+}
+
 func TestThreadSelectionRequestsInlinePreview(t *testing.T) {
 	m := NewWithImageMode("ansi")
 	m.loading = false

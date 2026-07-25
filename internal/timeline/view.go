@@ -75,6 +75,9 @@ func (m Model) header(width int) string {
 	}
 	if m.mode == modeThread {
 		status = "replies"
+		if root, ok := m.threadRootPost(); ok && root.Handle != "" {
+			status = truncateRunes("replies to @"+root.Handle, max(9, width-12))
+		}
 	}
 	if m.mode == modeThread && (m.threadLoading || m.threadMore) {
 		status = m.spinner.View() + " loading replies"
@@ -167,27 +170,99 @@ func (m Model) renderThreadContent() (string, []int, []int) {
 	if len(m.threadPosts) == 0 {
 		return lipgloss.NewStyle().Foreground(muted).Width(m.contentWidth()).Align(lipgloss.Center).Render("no replies yet · press r to start one"), nil, nil
 	}
-	blocks := make([]string, 0, len(m.threadPosts))
+	handles := make(map[string]string, len(m.threadPosts))
+	for _, item := range m.threadPosts {
+		handles[item.ID] = item.Handle
+	}
+	pieces := make([]string, 0, 2*len(m.threadPosts))
 	starts := make([]int, 0, len(m.threadPosts))
 	ends := make([]int, 0, len(m.threadPosts))
 	line := 0
 	for i, item := range m.threadPosts {
-		block := m.renderPost(item.TimelinePost, i == m.selected, true)
-		if item.Depth > 0 {
-			depth := min(item.Depth, 3)
-			branch := strings.Repeat("  ", depth-1) + "↳ reply"
-			block = lipgloss.NewStyle().Foreground(muted).Render(branch) + "\n" + block
+		// The gap between posts carries this post's ancestor rails so the
+		// conversation reads as one unbroken line down the left.
+		if i > 0 {
+			pieces = append(pieces, threadSpacer(item.Depth))
+			line++
+		}
+		block := m.renderPost(item.TimelinePost, i == m.selected, true, item.Depth)
+		if context := m.replyContext(i, handles); context != "" {
+			block = context + "\n" + block
 		}
 		height := lipgloss.Height(block)
 		starts = append(starts, line)
 		ends = append(ends, line+height-1)
-		blocks = append(blocks, block)
+		pieces = append(pieces, block)
 		line += height
-		if i < len(m.threadPosts)-1 {
-			line++
-		}
 	}
-	return strings.Join(blocks, "\n\n"), starts, ends
+	return strings.Join(pieces, "\n"), starts, ends
+}
+
+const (
+	// maxRailDepth caps how far replies step to the right. A long chain keeps
+	// rendering at the deepest rail rather than walking off the frame.
+	maxRailDepth = 3
+	// feedDepth marks a post that belongs to no conversation. A thread's focal
+	// post is depth zero and still carries a rail, since its replies hang from
+	// it; a feed post carries none.
+	feedDepth = -1
+)
+
+func railLevels(depth int) int { return min(max(0, depth), maxRailDepth) }
+
+// railBar is one two-column rail level: the line a post's replies hang from.
+func railBar() string { return lipgloss.NewStyle().Foreground(muted).Render("│") + " " }
+
+// threadRail is the prefix every line of a post carries: one rail level for
+// each ancestor, then the post's own marker -- the selection bar when it is
+// selected, otherwise the rail its own replies will hang from.
+func threadRail(depth int, selected bool) string {
+	own := railBar()
+	if depth == feedDepth {
+		own = "  "
+	}
+	if selected {
+		own = lipgloss.NewStyle().Foreground(selectionAccent(depth)).Render("▎") + " "
+	}
+	return strings.Repeat(railBar(), railLevels(depth)) + own
+}
+
+// threadSpacer fills the gap above a post with its ancestors' rails, so the
+// conversation's line survives the blank row between two posts.
+func threadSpacer(depth int) string {
+	levels := railLevels(depth)
+	if levels == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat(railBar(), levels), " ")
+}
+
+// selectionAccent separates a reply's selection bar from the focal post's, so
+// the color says whether the cursor sits on the conversation's root or in it.
+func selectionAccent(depth int) lipgloss.Color {
+	if depth > 0 {
+		return lavender
+	}
+	return blue
+}
+
+// replyContext names the parent of a reply the rail cannot place: one whose
+// parent is not the post directly above it, or one nested past maxRailDepth,
+// where every further level draws at the same indent.
+func (m Model) replyContext(index int, handles map[string]string) string {
+	item := m.threadPosts[index]
+	if index == 0 || item.Depth <= 1 {
+		return ""
+	}
+	if item.InReplyToID == m.threadPosts[index-1].ID && item.Depth <= maxRailDepth {
+		return ""
+	}
+	handle := handles[item.InReplyToID]
+	if handle == "" {
+		return ""
+	}
+	return threadRail(item.Depth, false) +
+		lipgloss.NewStyle().Foreground(muted).Render("↳ @"+handle)
 }
 
 func (m Model) renderFeedContent() (string, []int, []int) {
@@ -206,7 +281,7 @@ func (m Model) renderFeedContent() (string, []int, []int) {
 			// soon as the selection moves away from their post.
 			showImage = true
 		}
-		block := m.renderPost(post, i == m.selected, showImage)
+		block := m.renderPost(post, i == m.selected, showImage, feedDepth)
 		height := lipgloss.Height(block)
 		starts = append(starts, line)
 		ends = append(ends, line+height-1)
@@ -219,7 +294,10 @@ func (m Model) renderFeedContent() (string, []int, []int) {
 	return strings.Join(blocks, "\n\n"), starts, ends
 }
 
-func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool) string {
+// renderPost draws one post. depth is its place in a conversation: feedDepth in
+// the timeline, zero for a thread's focal post, and deeper for each reply level,
+// which shifts the whole block right behind its rail.
+func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, depth int) string {
 	width := m.contentWidth()
 	name := post.AuthorName
 	if name == "" {
@@ -230,12 +308,11 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool) s
 	nameColor := dim
 	textColor := dim
 	handleColor := muted
-	gutter := "  "
+	gutter := threadRail(depth, selected)
 	if selected {
 		nameColor = bright
 		textColor = bright
-		handleColor = blue
-		gutter = lipgloss.NewStyle().Foreground(blue).Render("▎") + " "
+		handleColor = selectionAccent(depth)
 	}
 	header := gutter +
 		lipgloss.NewStyle().Foreground(nameColor).Bold(true).Render(name) + "  " +
@@ -247,16 +324,19 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool) s
 
 	parts := []string{header}
 	indent := gutter + "  "
+	// Text wraps inside whatever the rail leaves it, so a deep reply stays in
+	// the same frame as the post it answers.
+	pad := lipgloss.Width(indent)
 	body := cleanText(post.Text)
 	if len(post.Media) > 0 {
 		body = stripTrailingMediaLink(body)
 	}
 	if body != "" {
-		wrapped := lipgloss.NewStyle().Width(max(12, width-4)).Render(highlightEntities(body, textColor))
+		wrapped := lipgloss.NewStyle().Width(max(12, width-pad)).Render(highlightEntities(body, textColor))
 		textLines := strings.Split(wrapped, "\n")
 		if !(selected && m.expanded) && len(textLines) > 4 {
 			textLines = textLines[:4]
-			textLines[3] = ansi.Truncate(textLines[3], max(2, width-6), "…")
+			textLines[3] = ansi.Truncate(textLines[3], max(2, width-pad-2), "…")
 		}
 		for _, line := range textLines {
 			parts = append(parts, indent+line)
@@ -279,7 +359,8 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool) s
 			imageShown = true
 		}
 		if imageBlock != "" {
-			parts = append(parts, indent, prefixLines(imageBlock, indent))
+			prefix := imagePrefix(indent, gutter, width, previewColumns(preview))
+			parts = append(parts, indent, prefixLines(imageBlock, prefix))
 			if len(post.Media) > 1 {
 				caption := fmt.Sprintf("▣ 1/%d", len(post.Media))
 				if selected {
@@ -301,6 +382,28 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool) s
 
 	parts = append(parts, indent+m.actionLine(post))
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// imagePrefix keeps a preview inside the frame. Previews are cached per post at
+// the width they were fetched, so one loaded in the feed is too wide for the
+// same post indented in a thread; the prefix gives up columns rather than let
+// the image spill past the right edge and corrupt the frame diff.
+func imagePrefix(indent, gutter string, width, columns int) string {
+	for _, candidate := range []string{indent, gutter} {
+		if columns+lipgloss.Width(candidate) <= width {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// previewColumns is the width a preview occupies: native protocols report their
+// own cell size, while an ANSI mosaic is measured from its rendered rows.
+func previewColumns(preview previewState) int {
+	if preview.columns > 0 {
+		return preview.columns
+	}
+	return lipgloss.Width(preview.content)
 }
 
 // prefixLines carries the post's gutter down every row of a multi-line

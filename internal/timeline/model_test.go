@@ -344,8 +344,12 @@ func TestEnterOpensRepliesAndEscRestoresFeed(t *testing.T) {
 		{TimelinePost: api.TimelinePost{ID: "root", Handle: "alice", Text: "root"}},
 		{TimelinePost: api.TimelinePost{ID: "reply", Handle: "bob", Text: "hello", InReplyToID: "root"}, Depth: 1},
 	}}})
-	if m.threadLoading || len(m.threadPosts) != 2 || !strings.Contains(m.View(), "↳ reply") {
+	view := m.View()
+	if m.threadLoading || len(m.threadPosts) != 2 || !strings.Contains(view, "@bob") {
 		t.Fatalf("thread did not render: loading=%v posts=%+v", m.threadLoading, m.threadPosts)
+	}
+	if !strings.Contains(view, "replies to @alice") {
+		t.Fatalf("thread header does not name the focal author:\n%s", view)
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.mode != modeFeed || m.selected != 1 || m.posts[m.selected].ID != "root" {
