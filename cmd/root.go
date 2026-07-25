@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 
 	"github.com/melqtx/xeet/internal/tui"
 	"github.com/melqtx/xeet/pkg/config"
@@ -42,10 +43,42 @@ func ExecuteContext(ctx context.Context) error {
 	return rootCmd.ExecuteContext(ctx)
 }
 
+// SetVersion records the build information main.go received through -X. Only
+// goreleaser and the nix package set those, so `go install github.com/melqtx/
+// xeet@latest` would otherwise report "dev" forever. Fall back to the data the
+// go tool stamps into every binary: the module version for `go install`, and
+// the VCS revision/time for a plain `go build` in a checkout.
 func SetVersion(version, commit, buildTime string) {
 	appVersion = version
 	appCommit = commit
 	appBuildTime = buildTime
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+
+	// A checkout built without -X reports "(devel)", which is no more useful
+	// than "dev"; the VCS revision below covers that case instead.
+	if unset(appVersion) && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		appVersion = info.Main.Version
+	}
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			if unset(appCommit) {
+				appCommit = setting.Value
+			}
+		case "vcs.time":
+			if unset(appBuildTime) {
+				appBuildTime = setting.Value
+			}
+		}
+	}
+}
+
+func unset(value string) bool {
+	return value == "" || value == "dev" || value == "unknown"
 }
 
 func init() {

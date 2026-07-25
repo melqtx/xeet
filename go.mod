@@ -1,5 +1,10 @@
 module github.com/melqtx/xeet
 
+// The patch version is deliberate, not incidental: go1.26.5 is the release
+// that fixes GO-2026-5856 (an Encrypted Client Hello privacy leak in
+// crypto/tls) along with GO-2026-5039 and GO-2026-5037. Relaxing this to
+// "go 1.26" lets an older toolchain build xeet against a vulnerable TLS
+// stack, and CI's govulncheck job fails when it happens.
 go 1.26.5
 
 require (

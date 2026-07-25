@@ -9,14 +9,14 @@
 buildGoModule (finalAttrs: {
   pname = "xeet";
   # Keep in step with the latest release tag.
-  version = "0.1.8";
+  version = "0.1.9";
 
   src = lib.cleanSource ./.;
 
   # Regenerate whenever go.mod or go.sum changes (including on dependabot
   # bumps): set this to lib.fakeHash, run `nix build .#default`, and copy the
   # hash nix reports. CI's nix job fails when it goes stale.
-  vendorHash = "sha256-gwprri6z2If6rEqdY179WvfEE/az+JsaAaFLihIlqCM=";
+  vendorHash = "sha256-Hij56rK+qINQYCjGdLUgM/5N7e0XAfh/zvcOYDs6gek=";
 
   # main.go reads these through -X; without them the binary reports "dev".
   ldflags = [
