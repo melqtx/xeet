@@ -110,6 +110,12 @@ func (m *Model) requestPreviews() tea.Cmd {
 		return nil
 	}
 	width := max(12, m.contentWidth()-4)
+	if m.mode == modeThread {
+		// Replies sit behind a rail, so reserve the deepest indent for every
+		// post in the conversation. One width for all of them keeps a cached
+		// preview usable at whatever depth a later page settles its post on.
+		width = max(12, m.contentWidth()-4-2*maxRailDepth)
+	}
 	rows := min(16, max(3, m.viewport.Height-5))
 	if m.imageMode == imageModeNative {
 		// Kitty Unicode placeholders encode cell coordinates through the
@@ -141,8 +147,14 @@ func (m *Model) requestPreviews() tea.Cmd {
 			continue
 		}
 		if state, exists := m.previews[post.ID]; exists {
+			// A preview cached at a wider frame -- from the feed, before a
+			// thread indented its post behind a rail, or from before the window
+			// shrank -- would spill past the right edge, so it is fetched again
+			// at the width it now has to fit. Both renderers cap themselves at
+			// the width they are given, so the refetch cannot repeat.
+			tooWide := !state.loading && state.err == nil && previewColumns(state) > width
 			// A failed fetch retries only once its post is selected again.
-			if i != m.selected || state.loading || state.err == nil {
+			if !tooWide && (i != m.selected || state.loading || state.err == nil) {
 				continue
 			}
 		}
