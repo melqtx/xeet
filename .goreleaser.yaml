@@ -34,13 +34,11 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Let GitHub write the notes from merged PR titles and authors. The previous
+# hand-rolled changelog sorted by commit *message*, so v0.1.9 shipped an
+# alphabetised wall of full SHAs. sort/filters/groups do not apply here.
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^Merge '
-      - '^docs:'
-      - '^test:'
+  use: github-native
 
 release:
   draft: false
