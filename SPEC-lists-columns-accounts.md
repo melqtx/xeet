@@ -327,6 +327,23 @@ U+10EEEE is Plane-16 PUA (go-runewidth reports width 1) and the row/column diacr
 
 ---
 
+> **Added after the C2 smoke test (2026-07-27).** Two columns render correctly in
+> Ghostty with kitty-graphics images contained inside each column, so the header
+> work below is a real observation rather than a guess: the ASCII cat logo is
+> repeated verbatim per column, costing two rows times the column count and
+> telling the user nothing once several columns are on screen. Deferred from C3
+> to here because what a column header should say is only decidable once columns
+> can carry different feeds — which is this phase.
+>
+> **C4 additionally owns:**
+> - Render the logo **once** for the screen, not once per column.
+> - Per-column header shows what distinguishes that column: its feed label
+>   (`for you`, `following`, `bookmarks`, `search: <q>`, `List: <name>`), and
+>   nothing else.
+> - The focused column must be **unmistakable at a glance**. The C2 accent was
+>   not obviously visible in the smoke test; verify against a real terminal and
+>   strengthen it (reuse existing theme styles — no new theme entries).
+
 ## 7. Phase C4 — configuring columns (decision #8)
 
 **v1 configuration surface: `--columns` flag + optional config key. No in-TUI add/remove.** In-TUI layout editing is UI polish that should ride on a stable base; the flag delivers the whole feature value now.
