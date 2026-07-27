@@ -35,12 +35,13 @@ const (
 	// inlineImageRadius bounds how many posts around the selection render
 	// their cached image inline; further posts show a media chip instead,
 	// which keeps each frame's render cost flat.
-	inlineImageRadius = 6
-	// maxCachedPreviews bounds memory and temp-file usage; entries further
-	// than previewKeepRadius posts from the selection are eligible to evict.
-	maxCachedPreviews = 48
-	previewKeepRadius = 16
+	inlineImageRadius      = 6
+	previewsPerColumn      = 48
+	maxPreviewCacheEntries = 144
+	previewKeepRadius      = 16
 )
+
+const multiColumnImageNote = "multi-column: iTerm2/WezTerm images fall back to ANSI"
 
 type imageMode string
 
@@ -104,18 +105,57 @@ func resolveImageMode(requested string) (imageMode, string) {
 	return imageModeANSI, "this terminal has no native image protocol"
 }
 
+// enforceMultiColumnImageMode keeps relative-cursor iTerm2 image commands out
+// of JoinHorizontal frames, where neighbouring text can land between their
+// reserved cells and cursor restoration.
+func (m *Model) enforceMultiColumnImageMode() {
+	if m.imageMode == imageModeWezTerm && len(m.columns) > 1 {
+		m.imageMode = imageModeANSI
+		m.imageNote = multiColumnImageNote
+	}
+}
+
+func maxCachedPreviews(columnCount int) int {
+	return min(maxPreviewCacheEntries, previewsPerColumn*max(1, columnCount))
+}
+
 func (m *Model) requestPreviews() tea.Cmd {
-	c := m.cur()
-	posts := m.activePosts()
-	if m.imageMode == imageModeOff || len(posts) == 0 || c.selected < 0 || c.selected >= len(posts) {
+	if m.imageMode == imageModeOff {
 		return nil
 	}
-	width := max(12, m.contentWidth()-4)
 	if m.mode == modeThread {
+		width := max(12, columnContentWidth(m.width, 1)-4)
 		// Replies sit behind a rail, so reserve the deepest indent for every
 		// post in the conversation. One width for all of them keeps a cached
 		// preview usable at whatever depth a later page settles its post on.
-		width = max(12, m.contentWidth()-4-2*maxRailDepth)
+		width = max(12, width-2*maxRailDepth)
+		cmds, selectedChanged := m.requestColumnPreviews(m.cur(), m.activePosts(), width)
+		if selectedChanged {
+			m.syncViewport()
+			m.ensureSelectedVisible()
+		}
+		return batchPreviewCommands(cmds)
+	}
+
+	first, count := m.visibleColumnRange()
+	width := max(12, columnContentWidth(m.width, count)-4)
+	var cmds []tea.Cmd
+	selectedChanged := false
+	for index := first; index < first+count; index++ {
+		c := &m.columns[index]
+		columnCmds, changed := m.requestColumnPreviews(c, c.posts, width)
+		cmds = append(cmds, columnCmds...)
+		selectedChanged = selectedChanged || changed
+	}
+	if selectedChanged {
+		m.resize()
+	}
+	return batchPreviewCommands(cmds)
+}
+
+func (m *Model) requestColumnPreviews(c *column, posts []api.TimelinePost, width int) ([]tea.Cmd, bool) {
+	if len(posts) == 0 || c.selected < 0 || c.selected >= len(posts) {
+		return nil, false
 	}
 	rows := min(16, max(3, c.viewport.Height-5))
 	if m.imageMode == imageModeNative {
@@ -165,10 +205,10 @@ func (m *Model) requestPreviews() tea.Cmd {
 		}
 		cmds = append(cmds, fetchPreview(m.requestContext(), post.ID, post.Media[0], width, rows, m.imageMode, c.id))
 	}
-	if selectedChanged {
-		m.syncViewport()
-		m.ensureSelectedVisible()
-	}
+	return cmds, selectedChanged
+}
+
+func batchPreviewCommands(cmds []tea.Cmd) tea.Cmd {
 	if len(cmds) == 0 {
 		return nil
 	}
@@ -210,13 +250,34 @@ func (m Model) zoomLoading() bool {
 }
 
 func (m *Model) evictDistantPreviews() {
-	if len(m.previews) <= maxCachedPreviews {
+	budget := maxCachedPreviews(len(m.columns))
+	if len(m.previews) <= budget {
 		return
 	}
-	posts := m.activePosts()
-	index := make(map[string]int, len(posts))
-	for i := range posts {
-		index[posts[i].ID] = i
+	inFeed := make(map[string]bool)
+	keep := make(map[string]bool)
+	addWindow := func(posts []api.TimelinePost, selected int) {
+		for index := range posts {
+			inFeed[posts[index].ID] = true
+		}
+		if selected < 0 || selected >= len(posts) {
+			return
+		}
+		from := max(0, selected-previewKeepRadius)
+		to := min(len(posts)-1, selected+previewKeepRadius)
+		for index := from; index <= to; index++ {
+			keep[posts[index].ID] = true
+		}
+		keep[posts[selected].ID] = true
+	}
+	if m.mode == modeThread {
+		addWindow(m.activePosts(), m.cur().selected)
+	} else {
+		first, count := m.visibleColumnRange()
+		for index := first; index < first+count; index++ {
+			c := &m.columns[index]
+			addWindow(c.posts, c.selected)
+		}
 	}
 	activeZoom := ""
 	if post, ok := m.currentPost(); ok && m.zoom {
@@ -228,19 +289,16 @@ func (m *Model) evictDistantPreviews() {
 		if preview.loading || id == activeZoom {
 			continue
 		}
-		if _, inFeed := index[id]; inFeed {
+		if inFeed[id] {
 			continue
 		}
 		m.evictPreview(id, preview)
 	}
 	for id, preview := range m.previews {
-		if len(m.previews) <= maxCachedPreviews {
+		if len(m.previews) <= budget {
 			return
 		}
-		if preview.loading || id == activeZoom {
-			continue
-		}
-		if pos, ok := index[id]; ok && abs(pos-m.cur().selected) <= previewKeepRadius {
+		if preview.loading || id == activeZoom || keep[id] {
 			continue
 		}
 		m.evictPreview(id, preview)

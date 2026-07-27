@@ -84,4 +84,5 @@ func (m *Model) configureColumns(count int, feed FeedKind, query, listID string)
 		}
 	}
 	m.focus = 0
+	m.enforceMultiColumnImageMode()
 }

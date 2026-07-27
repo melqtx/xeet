@@ -47,7 +47,7 @@ var timelineCmd = &cobra.Command{
 }
 
 func init() {
-	timelineCmd.Flags().StringVar(&timelineImageMode, "images", "auto", "image mode: auto, native, ansi, or off")
+	timelineCmd.Flags().StringVar(&timelineImageMode, "images", "auto", "image mode: auto, native, ansi, or off (multi-column iTerm2/WezTerm falls back to ansi)")
 	timelineCmd.Flags().BoolVar(&timelineFollowing, "following", false, "start on the Following feed instead of For You")
 	timelineCmd.Flags().BoolVar(&timelineBookmarks, "bookmarks", false, "start on your bookmarks feed")
 	timelineCmd.Flags().StringVar(&timelineListID, "list", "", "start on the given list id")

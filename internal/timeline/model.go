@@ -87,11 +87,14 @@ type Model struct {
 	toast         string
 	toastSeq      int
 	liking        map[string]bool
-	previews      map[string]previewState
-	spinner       spinner.Model
-	columns       []column
-	focus         int
-	nextColID     int
+	// previews is shared by post ID rather than duplicated per column because
+	// every feed column has the same width. Unequal panes would need a
+	// per-column cache to avoid alternating width-based refetches.
+	previews  map[string]previewState
+	spinner   spinner.Model
+	columns   []column
+	focus     int
+	nextColID int
 
 	mode              mode
 	replyReturn       mode
@@ -622,11 +625,26 @@ func (m *Model) applyPreview(msg previewMsg) tea.Cmd {
 		return nil
 	}
 	m.evictDistantPreviews()
-	if c != m.cur() {
+	if m.mode == modeThread {
+		if c != m.cur() {
+			return nil
+		}
+		m.syncViewport()
+		m.ensureSelectedVisible()
+		return m.imageRepaint()
+	}
+	first, count := m.visibleColumnRange()
+	visible := false
+	for index := first; index < first+count; index++ {
+		if &m.columns[index] == c {
+			visible = true
+			break
+		}
+	}
+	if !visible {
 		return nil
 	}
-	m.syncViewport()
-	m.ensureSelectedVisible()
+	m.resize()
 	return m.imageRepaint()
 }
 
@@ -844,6 +862,9 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if !focused || m.mode == modeReply {
+		if !focused && m.mode == modeFeed {
+			return m, m.imageRepaint(m.requestPreviews(), toast)
+		}
 		return m, toast
 	}
 	m.syncViewport()

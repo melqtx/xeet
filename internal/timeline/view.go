@@ -128,8 +128,9 @@ func (m Model) shell(center, footer string) string {
 
 const columnGutter = 2
 
-// columnContentWidth keeps feed panes equal-width; the shared preview cache
-// relies on that invariant once multi-column previews arrive in C3.
+// columnContentWidth deliberately keeps all feed columns equal-width: the
+// post-ID-keyed previews map depends on that invariant. Unequal panes would
+// require per-column previews to avoid alternating width-based refetches.
 func columnContentWidth(totalWidth, ncols int) int {
 	ncols = max(1, ncols)
 	usable := totalWidth - 4

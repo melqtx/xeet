@@ -107,6 +107,7 @@ xeet --bookmarks                      # start on your bookmarks
 xeet lists                            # pick a list and browse it
 xeet --list 1234567890                # start on a list by id
 xeet search "go tui"                  # search posts and browse results
+xeet --columns 2                      # show two side-by-side feeds
 xeet --barebones                      # text-only feed
 xeet --compose                        # skip the feed, open the composer
 xeet post "hello from my shell"       # one-shot post
@@ -181,6 +182,19 @@ there too. inside a
 conversation, `j`/`k` moves through replies, `r` replies to the selected
 item, `R` reloads, and `esc` drops you back exactly where you were in the
 timeline.
+
+### multi-column
+
+`--columns 2` through `--columns 4` splits the timeline into equal-width
+feeds. `tab` / `shift+tab` (or `]` / `[`) moves focus; navigation and post
+actions apply to the focused column. if the terminal is too narrow, xeet
+shows only the columns that fit and tells you how many are hidden.
+
+ansi previews and kitty/ghostty Unicode-placeholder images compose across
+columns. iterm2 and wezterm inline images rely on relative cursor movement,
+which cannot be composed safely side by side, so multi-column runs fall back
+to ansi even with `--images native`. the `?` help overlay shows the fallback
+note.
 
 **themes**
 

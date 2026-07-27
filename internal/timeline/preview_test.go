@@ -73,6 +73,57 @@ func TestNativeModeDetection(t *testing.T) {
 	}
 }
 
+func TestMultiColumnForcesANSIOnWezTermWithVisibleNote(t *testing.T) {
+	setWezTermEnvironment(t)
+	m := NewWithImageMode("native")
+	m.configureColumns(2, FeedForYou, "", "")
+	m.width, m.height = 120, 32
+	m.resize()
+	m.help = true
+
+	if m.imageMode != imageModeANSI {
+		t.Fatalf("multi-column WezTerm mode=%q, want ansi", m.imageMode)
+	}
+	if m.imageNote != multiColumnImageNote {
+		t.Fatalf("multi-column WezTerm note=%q", m.imageNote)
+	}
+	view := strings.Join(strings.Fields(ansi.Strip(m.View())), " ")
+	if !strings.Contains(view, "multi-column:") || !strings.Contains(view, "back to ANSI") {
+		t.Fatalf("image downgrade note is not visible in help:\n%s", view)
+	}
+}
+
+func TestWezTermPathNeverRunsMultiColumn(t *testing.T) {
+	setWezTermEnvironment(t)
+	m := NewWithImageMode("native")
+	m.configureColumns(1, FeedForYou, "", "")
+	if m.imageMode != imageModeWezTerm {
+		t.Fatalf("single-column WezTerm mode=%q", m.imageMode)
+	}
+	_ = m.imageFrameKey()
+
+	m.configureColumns(2, FeedForYou, "", "")
+	if m.imageMode == imageModeWezTerm {
+		t.Fatal("iTerm2-protocol renderer survived multi-column configuration")
+	}
+	if cmd := m.imageRepaint(); cmd != nil {
+		t.Fatal("multi-column mode still scheduled an iTerm2 full-screen repaint")
+	}
+}
+
+func setWezTermEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("ZELLIJ", "")
+	t.Setenv("TMUX", "")
+	t.Setenv("__CFBundleIdentifier", "")
+	t.Setenv("LC_TERMINAL", "")
+	t.Setenv("ITERM_SESSION_ID", "")
+	t.Setenv("WEZTERM_PANE", "")
+	t.Setenv("WEZTERM_EXECUTABLE", "")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("TERM_PROGRAM", "WezTerm")
+}
+
 func TestEmbeddedGhosttyHostDowngrades(t *testing.T) {
 	t.Setenv("ZELLIJ", "")
 	t.Setenv("TMUX", "")
@@ -168,6 +219,16 @@ func TestKittyPlaceholderBlockOccupiesCells(t *testing.T) {
 	}
 	if !strings.Contains(block, "\x1b[38;2;3;2;1m") {
 		t.Fatal("native placeholder does not encode its 24-bit image id as truecolor")
+	}
+}
+
+func TestNativePlaceholderRowsMeasureAtDeclaredWidth(t *testing.T) {
+	m := NewWithImageMode("native")
+	preview := previewState{nativePath: "/tmp/image.png", imageID: 0x030201, columns: 37, rows: 6}
+	for rowIndex, row := range strings.Split(m.nativePreviewBlock(preview), "\n") {
+		if width := lipgloss.Width(row); width != preview.columns {
+			t.Fatalf("native placeholder row %d width=%d, want %d", rowIndex, width, preview.columns)
+		}
 	}
 }
 
@@ -351,6 +412,49 @@ func TestSelectedPostRequestsInlinePreview(t *testing.T) {
 	}
 }
 
+func TestPreviewRequestsCoverVisibleNonFocusedColumns(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.configureColumns(2, FeedForYou, "", "")
+	m.width, m.height = 120, 30
+	for index, id := range []string{"left", "right"} {
+		c := &m.columns[index]
+		c.loading = false
+		c.posts = []api.TimelinePost{{
+			ID: id, Text: "photo",
+			Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/" + id, Type: "photo"}},
+		}}
+	}
+	m.resize()
+
+	if cmd := m.requestPreviews(); cmd == nil {
+		t.Fatal("visible columns requested no previews")
+	}
+	for _, id := range []string{"left", "right"} {
+		if !m.previews[id].loading {
+			t.Fatalf("visible post %q was not requested", id)
+		}
+	}
+}
+
+func TestPreviewArrivalRepaintsVisibleNonFocusedColumn(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.configureColumns(2, FeedForYou, "", "")
+	m.width, m.height = 120, 30
+	right := &m.columns[1]
+	right.loading = false
+	right.posts = []api.TimelinePost{{
+		ID: "right", Text: "photo",
+		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/right", Type: "photo"}},
+	}}
+	m.resize()
+
+	m.applyPreview(previewMsg{postID: "right", colID: right.id, content: "RIGHT-PREVIEW"})
+
+	if !strings.Contains(m.columns[1].viewport.View(), "RIGHT-PREVIEW") {
+		t.Fatal("visible non-focused column did not repaint its arrived preview")
+	}
+}
+
 func mediaPosts(count int) []api.TimelinePost {
 	result := make([]api.TimelinePost, count)
 	for i := range result {
@@ -468,7 +572,7 @@ func TestPreviewCacheEvictsDistantEntries(t *testing.T) {
 	}
 	m.previews["gone-from-feed"] = previewState{content: "img"}
 	m.evictDistantPreviews()
-	if len(m.previews) > maxCachedPreviews {
+	if len(m.previews) > maxCachedPreviews(1) {
 		t.Fatalf("cache holds %d entries", len(m.previews))
 	}
 	for i := m.cur().selected - previewKeepRadius; i <= 79; i++ {
@@ -478,5 +582,43 @@ func TestPreviewCacheEvictsDistantEntries(t *testing.T) {
 	}
 	if _, ok := m.previews["gone-from-feed"]; ok {
 		t.Fatal("orphaned preview survived eviction")
+	}
+}
+
+func TestEvictionKeepsPreviewsVisibleInNonFocusedColumns(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.configureColumns(2, FeedForYou, "", "")
+	m.width = 120
+	m.columns[0].posts = []api.TimelinePost{{ID: "focused"}}
+	m.columns[1].posts = []api.TimelinePost{{ID: "non-focused"}}
+	m.previews["focused"] = previewState{content: "img"}
+	m.previews["non-focused"] = previewState{content: "img"}
+	for index := 0; index < maxCachedPreviews(2); index++ {
+		m.previews[fmt.Sprintf("orphan-%d", index)] = previewState{content: "img"}
+	}
+
+	m.evictDistantPreviews()
+
+	if _, ok := m.previews["non-focused"]; !ok {
+		t.Fatal("eviction removed a preview selected in a visible non-focused column")
+	}
+	if len(m.previews) > maxCachedPreviews(2) {
+		t.Fatalf("two-column cache holds %d entries", len(m.previews))
+	}
+}
+
+func TestPreviewBudgetScalesWithColumnCount(t *testing.T) {
+	for _, test := range []struct {
+		columns int
+		want    int
+	}{
+		{columns: 1, want: 48},
+		{columns: 2, want: 96},
+		{columns: 3, want: 144},
+		{columns: 4, want: 144},
+	} {
+		if got := maxCachedPreviews(test.columns); got != test.want {
+			t.Fatalf("maxCachedPreviews(%d)=%d, want %d", test.columns, got, test.want)
+		}
 	}
 }
