@@ -70,7 +70,10 @@ func (m Model) contentWidth() int {
 
 func (m Model) header(width int) string {
 	status := "for you"
-	if m.following {
+	switch m.feed {
+	case FeedForYou:
+		status = "for you"
+	case FeedFollowing:
 		status = "following"
 	}
 	if m.mode == modeThread {

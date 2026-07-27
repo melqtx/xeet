@@ -6,6 +6,7 @@ import (
 	"io"
 	"runtime/debug"
 
+	"github.com/melqtx/xeet/internal/timeline"
 	"github.com/melqtx/xeet/internal/tui"
 	"github.com/melqtx/xeet/pkg/config"
 
@@ -118,7 +119,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if barebones {
 		imageMode = "off"
 	}
-	return runTimeline(cmd.Context(), imageMode, rootFollowing)
+	feed := timeline.FeedForYou
+	if rootFollowing {
+		feed = timeline.FeedFollowing
+	}
+	return runTimeline(cmd.Context(), imageMode, feed)
 }
 
 // printFirstRun greets someone who has not connected an account yet. It is the

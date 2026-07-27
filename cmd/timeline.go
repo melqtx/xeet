@@ -26,7 +26,11 @@ var timelineCmd = &cobra.Command{
 		if err := applyConfiguredTheme(timelineTheme); err != nil {
 			return err
 		}
-		return runTimeline(cmd.Context(), timelineImageMode, timelineFollowing)
+		feed := timeline.FeedForYou
+		if timelineFollowing {
+			feed = timeline.FeedFollowing
+		}
+		return runTimeline(cmd.Context(), timelineImageMode, feed)
 	},
 }
 
@@ -37,14 +41,14 @@ func init() {
 	rootCmd.AddCommand(timelineCmd)
 }
 
-func runTimeline(ctx context.Context, imageMode string, following bool) error {
+func runTimeline(ctx context.Context, imageMode string, feed timeline.FeedKind) error {
 	switch imageMode {
 	case "auto", "native", "ansi", "off":
 	default:
 		return fmt.Errorf("invalid --images value %q (use auto, native, ansi, or off)", imageMode)
 	}
 	for {
-		action, err := timeline.Run(ctx, imageMode, following)
+		action, err := timeline.Run(ctx, imageMode, feed)
 		if err != nil {
 			return err
 		}
