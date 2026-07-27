@@ -40,6 +40,9 @@ func TestThemePickerPTYHelper(t *testing.T) {
 	if os.Getenv("XEET_THEME_PTY_HELPER") != "1" {
 		return
 	}
+	// The child starts with TERM=dumb so terminal capability probes finish
+	// before any scripted input exists. The picker still runs as xterm below.
+	t.Setenv("TERM", "xterm-256color")
 	chosen, err := runThemePicker(context.Background(), theme.Names()[0])
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +56,7 @@ func TestThemePickerPTYHelper(t *testing.T) {
 // exits.
 func TestThemePickerPTYRunsInARealTerminal(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestThemePickerPTYHelper$")
-	cmd.Env = append(os.Environ(), "XEET_THEME_PTY_HELPER=1", "TERM=xterm-256color", "NO_COLOR=1")
+	cmd.Env = append(os.Environ(), "XEET_THEME_PTY_HELPER=1", "TERM=dumb", "NO_COLOR=1")
 	terminal, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 30, Cols: 100})
 	if err != nil {
 		t.Fatal(err)
@@ -70,11 +73,7 @@ func TestThemePickerPTYRunsInARealTerminal(t *testing.T) {
 		time.Sleep(pause)
 	}
 
-	// Answer the terminal queries lipgloss makes on startup first. A pty with
-	// nobody on the other end never replies, and the reader waiting on that
-	// reply would otherwise swallow the keystrokes below.
 	time.Sleep(150 * time.Millisecond)
-	write("\x1b]11;rgb:0000/0000/0000\x1b\\\x1b[1;1R", 100*time.Millisecond)
 	write("j", 150*time.Millisecond)
 	write("\r", 150*time.Millisecond)
 

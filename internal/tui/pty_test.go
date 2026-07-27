@@ -48,6 +48,10 @@ func TestComposerPTYHelper(t *testing.T) {
 	if os.Getenv("XEET_COMPOSER_PTY_HELPER") != "1" {
 		return
 	}
+	// The child starts with TERM=dumb so Bubble Tea's package initializer
+	// cannot consume scripted input while probing a bare PTY. Restore the
+	// production terminal identity before exercising the composer itself.
+	t.Setenv("TERM", "xterm-256color")
 	m := New(fakeClipboard{})
 	if _, err := tea.NewProgram(ptyComposerModel{Model: m}, tea.WithAltScreen(), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout)).Run(); err != nil {
 		t.Fatal(err)
@@ -56,7 +60,7 @@ func TestComposerPTYHelper(t *testing.T) {
 
 func TestComposerPTYUnicodeResizeAndDraftDialog(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestComposerPTYHelper$")
-	cmd.Env = append(os.Environ(), "XEET_COMPOSER_PTY_HELPER=1", "TERM=xterm-256color", "NO_COLOR=1")
+	cmd.Env = append(os.Environ(), "XEET_COMPOSER_PTY_HELPER=1", "TERM=dumb", "NO_COLOR=1")
 	terminal, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +78,6 @@ func TestComposerPTYUnicodeResizeAndDraftDialog(t *testing.T) {
 	}
 
 	time.Sleep(120 * time.Millisecond)
-	write("\x1b]11;rgb:0000/0000/0000\x1b\\\x1b[1;1R", 80*time.Millisecond)
 	write("hello 🐈 café", 150*time.Millisecond)
 	if err := pty.Setsize(terminal, &pty.Winsize{Rows: 15, Cols: 42}); err != nil {
 		t.Fatal(err)
