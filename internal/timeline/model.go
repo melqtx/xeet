@@ -246,6 +246,11 @@ func (m Model) Init() tea.Cmd {
 			m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
 		))
 	}
+	// Columns built from --columns or a saved layout carry only a list id, and
+	// one enumeration names all of them.
+	if m.namesPendingForListColumns() {
+		cmds = append(cmds, fetchListsCmd(m.requestContext()))
+	}
 	cmds = append(cmds, clockTick())
 	return tea.Batch(cmds...)
 }
@@ -466,6 +471,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyPreview(msg)
 	case likeMsg:
 		return m, m.applyLikeResult(msg)
+	case listsMsg:
+		// Outside the picker this only ever arrives from Init's backfill, and a
+		// failure just leaves the ids on screen — the feeds themselves loaded.
+		if msg.err == nil {
+			m.nameListColumns(msg.lists)
+		}
+		return m, nil
 	}
 
 	key, ok := msg.(tea.KeyMsg)

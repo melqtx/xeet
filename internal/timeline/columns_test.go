@@ -275,3 +275,43 @@ func lineContainsAll(value string, parts ...string) bool {
 	}
 	return false
 }
+
+func TestListColumnsFromSpecsShowNamesOnceTheListsArrive(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.configureColumns([]ColumnSpec{
+		{Kind: FeedForYou},
+		{Kind: FeedList, ListID: "175677451"},
+	})
+	if !m.namesPendingForListColumns() {
+		t.Fatal("a column built from a spec starts with only an id, so a name lookup is owed")
+	}
+	if got := m.columns[1].listName; got != "175677451" {
+		t.Fatalf("placeholder name = %q, want the id so the header is never blank", got)
+	}
+
+	next, _ := m.Update(listsMsg{lists: []api.ListInfo{
+		{ID: "999", Name: "other"},
+		{ID: "175677451", Name: "music"},
+	}})
+	m = next.(Model)
+
+	if got := m.columns[1].listName; got != "music" {
+		t.Fatalf("list column name = %q, want music", got)
+	}
+	if m.namesPendingForListColumns() {
+		t.Fatal("nothing should still be owed once the names arrived")
+	}
+}
+
+func TestPickerChosenNameSurvivesALaterListsResponse(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.configureColumns([]ColumnSpec{{Kind: FeedList, ListID: "175677451"}})
+	m.columns[0].listName = "music"
+
+	next, _ := m.Update(listsMsg{lists: []api.ListInfo{{ID: "175677451", Name: "renamed upstream"}}})
+	m = next.(Model)
+
+	if got := m.columns[0].listName; got != "music" {
+		t.Fatalf("name = %q; a resolved name must not be overwritten by a later enumeration", got)
+	}
+}
