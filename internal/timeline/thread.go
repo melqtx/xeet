@@ -248,6 +248,8 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
 		}
+	case "/":
+		return m, m.beginSearch()
 	case "enter", " ", "e":
 		m.expanded = !m.expanded
 		m.syncViewport()

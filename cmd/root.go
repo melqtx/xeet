@@ -131,7 +131,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if rootBookmarks {
 		feed = timeline.FeedBookmarks
 	}
-	return runTimeline(cmd.Context(), imageMode, feed)
+	return runTimeline(cmd.Context(), imageMode, feed, "")
 }
 
 // printFirstRun greets someone who has not connected an account yet. It is the

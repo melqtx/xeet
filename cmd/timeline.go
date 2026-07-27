@@ -35,7 +35,7 @@ var timelineCmd = &cobra.Command{
 		if timelineBookmarks {
 			feed = timeline.FeedBookmarks
 		}
-		return runTimeline(cmd.Context(), timelineImageMode, feed)
+		return runTimeline(cmd.Context(), timelineImageMode, feed, "")
 	},
 }
 
@@ -48,14 +48,14 @@ func init() {
 	rootCmd.AddCommand(timelineCmd)
 }
 
-func runTimeline(ctx context.Context, imageMode string, feed timeline.FeedKind) error {
+func runTimeline(ctx context.Context, imageMode string, feed timeline.FeedKind, query string) error {
 	switch imageMode {
 	case "auto", "native", "ansi", "off":
 	default:
 		return fmt.Errorf("invalid --images value %q (use auto, native, ansi, or off)", imageMode)
 	}
 	for {
-		action, err := timeline.Run(ctx, imageMode, feed)
+		action, err := timeline.Run(ctx, imageMode, feed, query)
 		if err != nil {
 			return err
 		}
