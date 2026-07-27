@@ -15,8 +15,14 @@ func (m *Model) beginSearch() tea.Cmd {
 }
 
 func (m Model) cancelSearch() (tea.Model, tea.Cmd) {
-	m.mode = m.searchReturn
 	m.searchInput.Blur()
+	// `xeet search` starts directly in an empty prompt. There is no previous
+	// feed to reveal in that case, so escape should leave instead of exposing
+	// an empty search-results screen.
+	if m.searchReturn == modeFeed && m.feed == FeedSearch && m.searchQuery == "" && len(m.posts) == 0 {
+		return m, tea.Quit
+	}
+	m.mode = m.searchReturn
 	m.syncViewport()
 	m.ensureSelectedVisible()
 	return m, m.imageRepaint(m.requestPreviews())
