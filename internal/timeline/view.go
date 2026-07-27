@@ -37,15 +37,36 @@ func (m Model) View() string {
 
 	footer := m.footer()
 	if m.loading && len(m.posts) == 0 {
+		message := m.spinner.View() + " gathering xeets…"
+		loadingFooter := footer
+		if m.feed == FeedSearch {
+			query := ansi.Truncate(m.searchQuery, max(8, m.viewport.Width-20), "…")
+			message = m.spinner.View() + " searching “" + query + "”…"
+			loadingFooter = "/ edit search  ·  q quit"
+		}
 		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View()+" gathering xeets…"))
-		return m.shell(center, footer)
+			lipgloss.NewStyle().Foreground(lavender).Render(message))
+		return m.shell(center, loadingFooter)
 	}
 	if m.err != nil && len(m.posts) == 0 {
+		title := "the cat lost the timeline"
+		errorFooter := m.errorFooter(true)
+		if m.feed == FeedSearch {
+			title = "search couldn't reach X"
+			errorFooter = m.searchErrorFooter(true)
+		}
 		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
 			lipgloss.NewStyle().Foreground(red).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
-				Render("the cat lost the timeline\n\n"+m.err.Error()))
-		return m.shell(center, m.errorFooter(true))
+				Render(title+"\n\n"+m.err.Error()))
+		return m.shell(center, errorFooter)
+	}
+	if m.feed == FeedSearch && len(m.posts) == 0 {
+		query := ansi.Truncate(m.searchQuery, max(8, m.viewport.Width-24), "…")
+		message := lipgloss.NewStyle().Foreground(bright).Bold(true).Render("no posts found") + "\n\n" +
+			lipgloss.NewStyle().Foreground(muted).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
+				Render("nothing matched “"+query+"”\ntry fewer words or remove a search operator")
+		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center, message)
+		return m.shell(center, m.searchEmptyFooter())
 	}
 	return m.shell(m.viewport.View(), footer)
 }
@@ -81,7 +102,7 @@ func (m Model) header(width int) string {
 	case FeedBookmarks:
 		status = "bookmarks"
 	case FeedSearch:
-		status = truncateRunes("search: "+m.searchQuery, max(9, width-12))
+		status = ansi.Truncate("search · “"+m.searchQuery+"”", max(9, width-12), "…")
 	}
 	if m.mode == modeThread {
 		status = "replies"
@@ -112,11 +133,26 @@ func (m Model) footer() string {
 		return m.toast
 	}
 	if m.err != nil {
+		if m.feed == FeedSearch {
+			return m.searchErrorFooter(false)
+		}
 		return m.errorFooter(false)
 	}
 	position := 0
 	if len(m.posts) > 0 {
 		position = m.selected + 1
+	}
+	if m.feed == FeedSearch {
+		var footer string
+		if m.expanded {
+			footer = fmt.Sprintf("%d/%d · / edit · e collapse · o browser · ? help", position, len(m.posts))
+		} else {
+			footer = fmt.Sprintf("%d/%d · / edit search · R refresh · enter replies · ? help", position, len(m.posts))
+		}
+		if ansi.StringWidth(footer) > m.contentWidth() {
+			return fmt.Sprintf("%d/%d · / edit · ? help", position, len(m.posts))
+		}
+		return footer
 	}
 	if m.contentWidth() < 50 || len(m.posts) == 0 {
 		return fmt.Sprintf("%d/%d  ·  ? help", position, len(m.posts))
@@ -136,6 +172,29 @@ func (m Model) errorFooter(includeQuit bool) string {
 		parts = append(parts, "q quit")
 	}
 	return strings.Join(parts, "  ·  ")
+}
+
+func (m Model) searchErrorFooter(includeQuit bool) string {
+	edit := "/ edit search"
+	if m.contentWidth() < 44 {
+		edit = "/ edit"
+	}
+	parts := []string{"R retry", edit}
+	if errors.Is(m.err, api.ErrSessionExpired) {
+		parts = append([]string{"a reconnect"}, parts...)
+	}
+	if includeQuit {
+		parts = append(parts, "q quit")
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+func (m Model) searchEmptyFooter() string {
+	footer := "/ edit search  ·  f for you  ·  q quit"
+	if ansi.StringWidth(footer) > m.contentWidth() {
+		return "/ edit  ·  f for you  ·  q quit"
+	}
+	return footer
 }
 
 func (m Model) viewThread() string {
@@ -572,12 +631,70 @@ func (m Model) viewReply() string {
 
 func (m Model) viewSearch() string {
 	w := m.contentWidth()
-	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("search")
+	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("search posts")
+	description := "find words, accounts, or exact phrases"
+	if m.width < 48 {
+		description = "type a query"
+	}
+	// Keep the text input itself narrower than its styled border so long
+	// queries scroll horizontally instead of making the panel grow vertically.
+	m.searchInput.Width = max(10, w-16)
+	m.searchInput.SetCursor(m.searchInput.Position())
 	input := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(blue).
-		Padding(0, 1).Width(w - 4).Render(m.searchInput.View())
-	hint := lipgloss.NewStyle().Foreground(muted).Render("enter: search · esc: cancel")
-	content := title + "\n\n" + input + "\n\n" + hint
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		Padding(0, 1).Width(max(16, w-12)).Render(m.searchInput.View())
+
+	back := m.searchBackLabel()
+	hint := "enter search  ·  esc " + back
+	if m.width < 48 {
+		hint = "enter search  ·  esc " + m.searchBackShortLabel()
+	} else if m.width >= 52 {
+		hint += "  ·  ctrl+u clear"
+	}
+	content := title + "\n" +
+		lipgloss.NewStyle().Foreground(muted).Render(description) + "\n\n" +
+		input + "\n\n" +
+		lipgloss.NewStyle().Foreground(muted).Render(hint)
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
+		Padding(1, 2).Width(max(20, w-6)).Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) searchBackLabel() string {
+	if m.searchReturn == modeThread {
+		return "back to replies"
+	}
+	switch m.feed {
+	case FeedFollowing:
+		return "back to following"
+	case FeedBookmarks:
+		return "back to bookmarks"
+	case FeedSearch:
+		if m.searchQuery == "" && len(m.posts) == 0 {
+			return "quit"
+		}
+		return "back to results"
+	default:
+		return "back to for you"
+	}
+}
+
+func (m Model) searchBackShortLabel() string {
+	if m.searchReturn == modeThread {
+		return "replies"
+	}
+	switch m.feed {
+	case FeedFollowing:
+		return "following"
+	case FeedBookmarks:
+		return "bookmarks"
+	case FeedSearch:
+		if m.searchQuery == "" && len(m.posts) == 0 {
+			return "quit"
+		}
+		return "results"
+	default:
+		return "for you"
+	}
 }
 
 func (m Model) viewZoom() string {

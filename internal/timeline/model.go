@@ -213,7 +213,7 @@ func NewWithImageMode(requested string) Model {
 	editor.SetWidth(60)
 	editor.SetHeight(6)
 	search := textinput.New()
-	search.Placeholder = "search"
+	search.Placeholder = `from:alice "terminal ui"`
 	search.CharLimit = 512
 	mode, note := resolveImageMode(requested)
 	return Model{
@@ -827,7 +827,8 @@ func (m *Model) resize() {
 	m.viewport.Height = viewportHeight
 	m.replyEditor.SetWidth(max(20, w-6))
 	m.replyEditor.SetHeight(min(7, max(3, m.height-16)))
-	m.searchInput.Width = max(20, w-6)
+	m.searchInput.Width = max(10, w-16)
+	m.searchInput.SetCursor(m.searchInput.Position())
 	m.syncViewport()
 	m.ensureSelectedVisible()
 }

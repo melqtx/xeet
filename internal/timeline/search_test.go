@@ -1,6 +1,8 @@
 package timeline
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -148,16 +150,142 @@ func TestSearchViewAndHeaderExposeQueryWithinWidth(t *testing.T) {
 	m.beginSearch()
 
 	view := m.View()
-	for _, want := range []string{"search", "enter: search", "esc: cancel"} {
+	for _, want := range []string{"search posts", "type a query", "enter search", "esc results"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("search prompt missing %q:\n%s", want, view)
 		}
+	}
+	if width := maxLineWidth(view); width > m.width {
+		t.Fatalf("search prompt width=%d exceeds terminal width=%d:\n%s", width, m.width, view)
+	}
+	if lines := strings.Count(view, "\n") + 1; lines > m.height {
+		t.Fatalf("search prompt has %d lines in a %d-row terminal:\n%s", lines, m.height, view)
 	}
 
 	m.mode = modeFeed
 	header := m.header(m.contentWidth())
 	if width := maxLineWidth(header); width > m.contentWidth() {
 		t.Fatalf("search header width=%d exceeds content width=%d:\n%s", width, m.contentWidth(), header)
+	}
+}
+
+func TestSearchPromptExplainsWhereEscapeReturns(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		feed       FeedKind
+		returnMode mode
+		query      string
+		want       string
+	}{
+		{name: "for you", feed: FeedForYou, want: "esc back to for you"},
+		{name: "following", feed: FeedFollowing, want: "esc back to following"},
+		{name: "bookmarks", feed: FeedBookmarks, want: "esc back to bookmarks"},
+		{name: "results", feed: FeedSearch, query: "cats", want: "esc back to results"},
+		{name: "thread", feed: FeedSearch, returnMode: modeThread, query: "cats", want: "esc back to replies"},
+		{name: "fresh command", feed: FeedSearch, want: "esc quit"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := NewWithImageMode("off")
+			m.width = 80
+			m.height = 24
+			m.loading = false
+			m.feed = test.feed
+			m.searchQuery = test.query
+			m.mode = modeSearch
+			m.searchReturn = test.returnMode
+			if view := m.View(); !strings.Contains(view, test.want) {
+				t.Fatalf("search prompt missing %q:\n%s", test.want, view)
+			}
+		})
+	}
+}
+
+func TestFreshSearchCommandEscapeQuits(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.feed = FeedSearch
+	m.mode = modeSearch
+	m.searchReturn = modeFeed
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if cmd == nil || m.searchInput.Focused() || m.mode != modeSearch {
+		t.Fatalf("fresh search escape did not quit cleanly: cmd=%v focused=%v mode=%v", cmd, m.searchInput.Focused(), m.mode)
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("fresh search escape returned a non-quit command")
+	}
+}
+
+func TestSearchResultsHavePurposeBuiltLoadingEmptyAndErrorStates(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.feed = FeedSearch
+	m.searchQuery = "from:alice terminal ui"
+
+	if view := m.View(); !strings.Contains(view, "searching “from:alice terminal ui”…") ||
+		!strings.Contains(view, "/ edit search") {
+		t.Fatalf("search loading state is unclear:\n%s", view)
+	}
+
+	m.loading = false
+	if view := m.View(); !strings.Contains(view, "no posts found") ||
+		!strings.Contains(view, "try fewer words") ||
+		!strings.Contains(view, "f for you") {
+		t.Fatalf("search empty state is unclear:\n%s", view)
+	}
+
+	m.err = errors.New("offline")
+	if view := m.View(); !strings.Contains(view, "search couldn't reach X") ||
+		!strings.Contains(view, "R retry") ||
+		!strings.Contains(view, "/ edit search") {
+		t.Fatalf("search error state is unclear:\n%s", view)
+	}
+}
+
+func TestSearchResultsFooterPrioritizesEditingTheQuery(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.width = 80
+	m.loading = false
+	m.feed = FeedSearch
+	m.searchQuery = "cats"
+	m.posts = []api.TimelinePost{{ID: "1", Text: "cat"}}
+
+	footer := m.footer()
+	for _, want := range []string{"/ edit search", "R refresh", "enter replies"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("search footer missing %q: %s", want, footer)
+		}
+	}
+}
+
+func TestSearchResultStatesStayInsideTerminal(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{42, 15}, {80, 24}} {
+		for _, state := range []string{"loading", "empty", "error"} {
+			t.Run(fmt.Sprintf("%dx%d/%s", size.width, size.height, state), func(t *testing.T) {
+				m := NewWithImageMode("off")
+				m.feed = FeedSearch
+				m.searchQuery = strings.Repeat("猫 terminal ", 20)
+				m = update(t, m, tea.WindowSizeMsg{Width: size.width, Height: size.height})
+				switch state {
+				case "empty":
+					m.loading = false
+				case "error":
+					m.loading = false
+					m.err = errors.New("offline")
+				}
+
+				view := m.View()
+				if width := maxLineWidth(view); width > size.width {
+					t.Fatalf("view width=%d exceeds terminal width=%d:\n%s", width, size.width, view)
+				}
+				if lines := strings.Count(view, "\n") + 1; lines != size.height {
+					t.Fatalf("view has %d lines in a %d-row terminal:\n%s", lines, size.height, view)
+				}
+			})
+		}
 	}
 }
 

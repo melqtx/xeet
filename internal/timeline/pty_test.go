@@ -90,6 +90,9 @@ func TestTimelinePTYNavigationResizeAndHelp(t *testing.T) {
 
 	time.Sleep(120 * time.Millisecond)
 	writeKey("j")
+	writeKey("/")
+	writeKey("terminal cats")
+	writeKey("\x1b")
 	if err := pty.Setsize(terminal, &pty.Winsize{Rows: 15, Cols: 42}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +115,7 @@ func TestTimelinePTYNavigationResizeAndHelp(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	output := captured.String()
-	for _, want := range []string{"xeet", "Alice", "timeline keys"} {
+	for _, want := range []string{"xeet", "Alice", "search posts", "timeline keys"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("PTY output missing %q; output:\n%s", want, output)
 		}
