@@ -176,6 +176,8 @@ func NewWebClient(cfg *config.Config) *WebClient {
 		"CreateTweet":        cfg.CreateTweetQID,
 		"HomeTimeline":       cfg.HomeTimelineQID,
 		"HomeLatestTimeline": cfg.HomeLatestTimelineQID,
+		"Bookmarks":          cfg.BookmarksQID,
+		"SearchTimeline":     cfg.SearchTimelineQID,
 		"FavoriteTweet":      cfg.FavoriteTweetQID,
 		"UnfavoriteTweet":    cfg.UnfavoriteTweetQID,
 		"Viewer":             cfg.ViewerQID,
@@ -247,6 +249,10 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.HomeTimelineQID = qid
 		case "HomeLatestTimeline":
 			cfg.HomeLatestTimelineQID = qid
+		case "Bookmarks":
+			cfg.BookmarksQID = qid
+		case "SearchTimeline":
+			cfg.SearchTimelineQID = qid
 		case "FavoriteTweet":
 			cfg.FavoriteTweetQID = qid
 		case "UnfavoriteTweet":

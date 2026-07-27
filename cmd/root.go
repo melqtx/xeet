@@ -6,6 +6,7 @@ import (
 	"io"
 	"runtime/debug"
 
+	"github.com/melqtx/xeet/internal/timeline"
 	"github.com/melqtx/xeet/internal/tui"
 	"github.com/melqtx/xeet/pkg/config"
 
@@ -19,6 +20,7 @@ var (
 	barebones     bool
 	composeOnly   bool
 	rootFollowing bool
+	rootBookmarks bool
 	rootTheme     string
 )
 
@@ -27,6 +29,7 @@ var rootCmd = &cobra.Command{
 	Short: "Terminal interface for browsing and posting to X.com",
 	Example: `  xeet                         # your timeline, with inline images
   xeet --following             # the Following feed instead of For You
+  xeet --bookmarks             # your saved posts
   xeet --compose               # just the composer
   xeet post "hello, terminal"  # post without opening anything
   xeet theme                   # pick a color theme, with a preview`,
@@ -86,9 +89,12 @@ func init() {
 	rootCmd.Flags().BoolVar(&barebones, "barebones", false, "open a text-only timeline without image previews")
 	rootCmd.Flags().BoolVar(&composeOnly, "compose", false, "open only the post composer")
 	rootCmd.Flags().BoolVar(&rootFollowing, "following", false, "start on the Following feed instead of For You")
+	rootCmd.Flags().BoolVar(&rootBookmarks, "bookmarks", false, "start on your bookmarks feed")
 	rootCmd.Flags().StringVar(&rootTheme, "theme", "", "color theme for this run (see 'xeet theme')")
 	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
 	rootCmd.MarkFlagsMutuallyExclusive("compose", "following")
+	rootCmd.MarkFlagsMutuallyExclusive("following", "bookmarks")
+	rootCmd.MarkFlagsMutuallyExclusive("compose", "bookmarks")
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
@@ -118,7 +124,14 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if barebones {
 		imageMode = "off"
 	}
-	return runTimeline(cmd.Context(), imageMode, rootFollowing)
+	feed := timeline.FeedForYou
+	if rootFollowing {
+		feed = timeline.FeedFollowing
+	}
+	if rootBookmarks {
+		feed = timeline.FeedBookmarks
+	}
+	return runTimeline(cmd.Context(), imageMode, feed, "")
 }
 
 // printFirstRun greets someone who has not connected an account yet. It is the

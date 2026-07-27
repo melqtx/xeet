@@ -25,6 +25,9 @@ func (m Model) View() string {
 	if m.zoom {
 		return m.viewZoom()
 	}
+	if m.mode == modeSearch {
+		return m.viewSearch()
+	}
 	if m.mode == modeReply {
 		return m.viewReply()
 	}
@@ -70,8 +73,15 @@ func (m Model) contentWidth() int {
 
 func (m Model) header(width int) string {
 	status := "for you"
-	if m.following {
+	switch m.feed {
+	case FeedForYou:
+		status = "for you"
+	case FeedFollowing:
 		status = "following"
+	case FeedBookmarks:
+		status = "bookmarks"
+	case FeedSearch:
+		status = truncateRunes("search: "+m.searchQuery, max(9, width-12))
 	}
 	if m.mode == modeThread {
 		status = "replies"
@@ -560,6 +570,16 @@ func (m Model) viewReply() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
+func (m Model) viewSearch() string {
+	w := m.contentWidth()
+	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("search")
+	input := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(blue).
+		Padding(0, 1).Width(w - 4).Render(m.searchInput.View())
+	hint := lipgloss.NewStyle().Foreground(muted).Render("enter: search · esc: cancel")
+	content := title + "\n\n" + input + "\n\n" + hint
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
 func (m Model) viewZoom() string {
 	post, ok := m.currentPost()
 	if !ok || len(post.Media) == 0 {
@@ -672,14 +692,14 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP compose · ctrl+l redraw\nq quit"
+		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · ^L redraw\nb bookmarks · q quit"
 		if m.mode == modeThread {
-			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser\nesc back · q quit"
+			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
 		}
 	}
 	images := "images: " + string(m.imageMode)

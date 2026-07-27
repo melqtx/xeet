@@ -13,6 +13,7 @@ import (
 var (
 	timelineImageMode string
 	timelineFollowing bool
+	timelineBookmarks bool
 	timelineTheme     string
 )
 
@@ -21,30 +22,40 @@ var timelineCmd = &cobra.Command{
 	Short: "browse your home timeline",
 	Example: `  xeet timeline                # same as plain 'xeet'
   xeet timeline --following    # the Following feed
+  xeet timeline --bookmarks    # your saved posts
   xeet timeline --images off   # text only, no previews`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := applyConfiguredTheme(timelineTheme); err != nil {
 			return err
 		}
-		return runTimeline(cmd.Context(), timelineImageMode, timelineFollowing)
+		feed := timeline.FeedForYou
+		if timelineFollowing {
+			feed = timeline.FeedFollowing
+		}
+		if timelineBookmarks {
+			feed = timeline.FeedBookmarks
+		}
+		return runTimeline(cmd.Context(), timelineImageMode, feed, "")
 	},
 }
 
 func init() {
 	timelineCmd.Flags().StringVar(&timelineImageMode, "images", "auto", "image mode: auto, native, ansi, or off")
 	timelineCmd.Flags().BoolVar(&timelineFollowing, "following", false, "start on the Following feed instead of For You")
+	timelineCmd.Flags().BoolVar(&timelineBookmarks, "bookmarks", false, "start on your bookmarks feed")
 	timelineCmd.Flags().StringVar(&timelineTheme, "theme", "", "color theme for this run (see 'xeet theme')")
+	timelineCmd.MarkFlagsMutuallyExclusive("following", "bookmarks")
 	rootCmd.AddCommand(timelineCmd)
 }
 
-func runTimeline(ctx context.Context, imageMode string, following bool) error {
+func runTimeline(ctx context.Context, imageMode string, feed timeline.FeedKind, query string) error {
 	switch imageMode {
 	case "auto", "native", "ansi", "off":
 	default:
 		return fmt.Errorf("invalid --images value %q (use auto, native, ansi, or off)", imageMode)
 	}
 	for {
-		action, err := timeline.Run(ctx, imageMode, following)
+		action, err := timeline.Run(ctx, imageMode, feed, query)
 		if err != nil {
 			return err
 		}

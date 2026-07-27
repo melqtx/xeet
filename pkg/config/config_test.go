@@ -45,7 +45,8 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 
 	in := &Config{
 		AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789",
-		HomeTimelineQID: "home123", FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123",
+		HomeTimelineQID: "home123", BookmarksQID: "bookmarks123", SearchTimelineQID: "search123",
+		FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123",
 		TweetDetailQID: "detail123",
 		SessionBrowser: "Firefox", SessionProfile: "default-release", SessionDomain: "x.com",
 		SessionExpires:  time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC),
@@ -87,6 +88,38 @@ func TestTokensNeverTouchDisk(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "Firefox") || !strings.Contains(string(data), "default-release") {
 		t.Fatalf("expected non-secret session source metadata, got:\n%s", data)
+	}
+}
+
+func TestSaveWithoutSessionPersistsBookmarksQueryID(t *testing.T) {
+	dir := t.TempDir()
+	cm := newConfigManagerAt(dir, newFakeStore())
+
+	if err := cm.Save(&Config{BookmarksQID: "bookmarks123"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := cm.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BookmarksQID != "bookmarks123" {
+		t.Fatalf("BookmarksQID = %q, want bookmarks123", cfg.BookmarksQID)
+	}
+}
+
+func TestSaveWithoutSessionPersistsSearchTimelineQueryID(t *testing.T) {
+	dir := t.TempDir()
+	cm := newConfigManagerAt(dir, newFakeStore())
+
+	if err := cm.Save(&Config{SearchTimelineQID: "search123"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := cm.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SearchTimelineQID != "search123" {
+		t.Fatalf("SearchTimelineQID = %q, want search123", cfg.SearchTimelineQID)
 	}
 }
 

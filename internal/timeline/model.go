@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -49,12 +50,23 @@ const (
 
 type Action struct{ Kind ActionKind }
 
+// FeedKind identifies which timeline the feed pane is showing.
+type FeedKind int
+
+const (
+	FeedForYou FeedKind = iota
+	FeedFollowing
+	FeedBookmarks
+	FeedSearch
+)
+
 type mode int
 
 const (
 	modeFeed mode = iota
 	modeThread
 	modeReply
+	modeSearch
 )
 
 type Model struct {
@@ -65,7 +77,8 @@ type Model struct {
 	width, height int
 	imageMode     imageMode
 	imageNote     string
-	following     bool
+	feed          FeedKind
+	searchQuery   string
 	feedSeq       int
 	posts         []api.TimelinePost
 	cursor        string
@@ -106,6 +119,8 @@ type Model struct {
 	replyPosting  bool
 	replyErr      error
 	replyNotice   string
+	searchInput   textinput.Model
+	searchReturn  mode
 }
 
 type pageMsg struct {
@@ -197,12 +212,15 @@ func NewWithImageMode(requested string) Model {
 	editor.ShowLineNumbers = false
 	editor.SetWidth(60)
 	editor.SetHeight(6)
+	search := textinput.New()
+	search.Placeholder = "search"
+	search.CharLimit = 512
 	mode, note := resolveImageMode(requested)
 	return Model{
 		ctx:   context.Background(),
 		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
 		liking: map[string]bool{}, previews: map[string]previewState{},
-		spinner: s, viewport: vp, replyEditor: editor,
+		spinner: s, viewport: vp, replyEditor: editor, searchInput: search,
 	}
 }
 
@@ -216,13 +234,21 @@ func (m Model) requestContext() context.Context {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, "", false, m.feedSeq), clockTick())
+	if m.feed == FeedSearch && m.searchQuery == "" {
+		return tea.Batch(m.searchInput.Focus(), clockTick())
+	}
+	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq), clockTick())
 }
 
-func Run(ctx context.Context, images string, following bool) (Action, error) {
+func Run(ctx context.Context, images string, feed FeedKind, query string) (Action, error) {
 	m := NewWithImageMode(images)
 	m.ctx = ctx
-	m.following = following
+	m.feed = feed
+	m.searchQuery = query
+	if feed == FeedSearch && query == "" {
+		m.loading = false
+		m.beginSearch()
+	}
 	// Auto-detected native mode is a claim, not a capability: multiplexers
 	// like cmux inherit ghostty's TERM without reliably rendering graphics.
 	// Confirm with the terminal itself; --images native skips the probe.
@@ -252,7 +278,7 @@ func Run(ctx context.Context, images string, following bool) (Action, error) {
 	return Action{}, err
 }
 
-func fetchPageSeq(parent context.Context, following bool, cursor string, more bool, seq int) tea.Cmd {
+func fetchPageSeq(parent context.Context, feed FeedKind, query, cursor string, more bool, seq int) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
@@ -266,8 +292,16 @@ func fetchPageSeq(parent context.Context, following bool, cursor string, more bo
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		fetch := client.FetchHomeTimeline
-		if following {
+		switch feed {
+		case FeedFollowing:
 			fetch = client.FetchFollowingTimeline
+		case FeedBookmarks:
+			fetch = client.FetchBookmarks
+		case FeedSearch:
+			q := query
+			fetch = func(ctx context.Context, cursor string, count int) (*api.TimelinePage, error) {
+				return client.FetchSearchTimeline(ctx, q, cursor, count)
+			}
 		}
 		page, err := fetch(ctx, cursor, 30)
 		if client.ApplyRefreshedQueryIDs(cfg) {
@@ -385,10 +419,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.mode == modeReply {
+	switch m.mode {
+	case modeReply:
 		return m.updateReply(msg)
-	}
-	if m.mode == modeThread {
+	case modeSearch:
+		return m.updateSearch(msg)
+	case modeThread:
 		return m.updateThread(msg)
 	}
 
@@ -452,7 +488,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, func() tea.Msg { return tea.ClearScreen() }
 	case "f":
-		return m.switchFeed()
+		return m, m.switchFeed()
+	case "b":
+		if m.feed == FeedBookmarks {
+			return m, m.setFeed(FeedForYou)
+		}
+		return m, m.setFeed(FeedBookmarks)
+	case "/":
+		return m, m.beginSearch()
 	case "R", "ctrl+r":
 		if len(m.posts) == 0 {
 			m.loading = true
@@ -460,7 +503,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshing = true
 		}
 		m.err = nil
-		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, "", false, m.feedSeq)))
+		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
@@ -628,9 +671,9 @@ func (m *Model) moveSelection(target int) {
 	m.ensureSelectedVisible()
 }
 
-// switchFeed flips between the For You and Following feeds in place.
-func (m Model) switchFeed() (tea.Model, tea.Cmd) {
-	m.following = !m.following
+// setFeed resets feed state and kicks off a fresh first page for kind.
+func (m *Model) setFeed(kind FeedKind) tea.Cmd {
+	m.feed = kind
 	m.feedSeq++
 	m.posts = nil
 	m.cursor = ""
@@ -642,13 +685,22 @@ func (m Model) switchFeed() (tea.Model, tea.Cmd) {
 	m.err = nil
 	m.viewport.YOffset = 0
 	m.syncViewport()
-	return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, "", false, m.feedSeq)))
+	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq)))
+}
+
+// switchFeed keeps the f-key semantics: toggle For You <-> Following.
+// From any other feed kind it returns to For You.
+func (m *Model) switchFeed() tea.Cmd {
+	if m.feed == FeedForYou {
+		return m.setFeed(FeedFollowing)
+	}
+	return m.setFeed(FeedForYou)
 }
 
 func (m *Model) maybeLoadMore() tea.Cmd {
 	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
 		m.loadingMore = true
-		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.following, m.cursor, true, m.feedSeq))
+		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.cursor, true, m.feedSeq))
 	}
 	return nil
 }
@@ -667,7 +719,9 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.err = nil
-	threadContext := m.mode == modeThread || (m.mode == modeReply && m.replyReturn == modeThread)
+	threadContext := m.mode == modeThread ||
+		(m.mode == modeReply && m.replyReturn == modeThread) ||
+		(m.mode == modeSearch && m.searchReturn == modeThread)
 	feedIndex := m.selected
 	if threadContext {
 		feedIndex = m.feedSelected
@@ -773,6 +827,7 @@ func (m *Model) resize() {
 	m.viewport.Height = viewportHeight
 	m.replyEditor.SetWidth(max(20, w-6))
 	m.replyEditor.SetHeight(min(7, max(3, m.height-16)))
+	m.searchInput.Width = max(20, w-6)
 	m.syncViewport()
 	m.ensureSelectedVisible()
 }

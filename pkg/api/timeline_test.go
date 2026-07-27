@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseTimeline(t *testing.T) {
-	fixture := `[
+	fixture := `{"entries":[
 	  {"itemContent":{"tweet_results":{"result":{
 	    "rest_id":"1",
 	    "legacy":{"full_text":"hello timeline","reply_count":2,"retweet_count":3,"favorite_count":4,"favorited":true,"created_at":"Mon Jul 20 10:00:00 +0000 2026","extended_entities":{"media":[{"type":"photo","media_url_https":"https://pbs.twimg.com/media/abc","ext_alt_text":"a cat","original_info":{"width":1200,"height":800}}]}},
@@ -19,7 +19,7 @@ func TestParseTimeline(t *testing.T) {
 	    "core":{"user_results":{"result":{"legacy":{"name":"Bob","screen_name":"bob"}}}}
 	  }}}}},
 	  {"cursorType":"Bottom","value":"next-page"}
-	]`
+	]}`
 	var payload any
 	if err := json.Unmarshal([]byte(fixture), &payload); err != nil {
 		t.Fatal(err)
@@ -53,18 +53,18 @@ func TestParseTimelineUnescapesText(t *testing.T) {
 
 func TestParseTimelineDeduplicatesTweet(t *testing.T) {
 	item := map[string]any{"itemContent": map[string]any{"tweet_results": map[string]any{"result": map[string]any{"rest_id": "1", "legacy": map[string]any{"full_text": "same"}}}}}
-	page := parseTimeline([]any{item, item})
+	page := parseTimeline(map[string]any{"entries": []any{item, item}})
 	if len(page.Posts) != 1 {
 		t.Fatalf("got %d posts", len(page.Posts))
 	}
 }
 
 func TestParseTimelineSkipsDeletedAndPromotedPosts(t *testing.T) {
-	fixture := `{"data":{"timeline":[
+	fixture := `{"data":{"timeline":{"entries":[
 	  {"itemContent":{"tweet_results":{"result":{"__typename":"TweetTombstone","tombstone":{"text":{"text":"deleted"}}}}}},
 	  {"itemContent":{"promoted_metadata":{},"tweet_results":{"result":{"rest_id":"ad","legacy":{"full_text":"ad"}}}}},
 	  {"itemContent":{"tweet_results":{"result":{"rest_id":"ok","legacy":{"full_text":"real post"}}}}}
-	]}}`
+	]}}}`
 	var payload any
 	if err := json.Unmarshal([]byte(fixture), &payload); err != nil {
 		t.Fatal(err)
@@ -76,10 +76,10 @@ func TestParseTimelineSkipsDeletedAndPromotedPosts(t *testing.T) {
 }
 
 func TestParseTimelineVisibilityWrapper(t *testing.T) {
-	fixture := `{"itemContent":{"tweet_results":{"result":{"__typename":"TweetWithVisibilityResults","tweet":{
+	fixture := `{"entries":[{"itemContent":{"tweet_results":{"result":{"__typename":"TweetWithVisibilityResults","tweet":{
 	  "rest_id":"wrapped","legacy":{"full_text":"visible"},
 	  "core":{"user_results":{"result":{"core":{"name":"Alice","screen_name":"alice"}}}}
-	}}}}}`
+	}}}}}]}`
 	var payload any
 	if err := json.Unmarshal([]byte(fixture), &payload); err != nil {
 		t.Fatal(err)
@@ -91,13 +91,13 @@ func TestParseTimelineVisibilityWrapper(t *testing.T) {
 }
 
 func TestParseTimelineMultipleImages(t *testing.T) {
-	fixture := `{"itemContent":{"tweet_results":{"result":{
+	fixture := `{"entries":[{"itemContent":{"tweet_results":{"result":{
 	  "rest_id":"photos","legacy":{"full_text":"album","extended_entities":{"media":[
 	    {"type":"photo","media_url_https":"https://pbs.twimg.com/media/a?format=jpg&name=small"},
 	    {"type":"photo","media_url_https":"https://pbs.twimg.com/media/b?format=png&name=small","ext_alt_text":"second image"},
 	    {"type":"photo"}
 	  ]}}
-	}}}}`
+	}}}}]}`
 	var payload any
 	if err := json.Unmarshal([]byte(fixture), &payload); err != nil {
 		t.Fatal(err)
@@ -108,5 +108,35 @@ func TestParseTimelineMultipleImages(t *testing.T) {
 	}
 	if page.Posts[0].Media[1].AltText != "second image" {
 		t.Fatalf("media = %+v", page.Posts[0].Media)
+	}
+}
+
+func TestParseTimelinePreservesDirectAndModuleItemOrderAndShowMoreCursor(t *testing.T) {
+	item := func(id string) map[string]any {
+		return map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+			"rest_id": id,
+			"legacy":  map[string]any{"full_text": id},
+		}}}
+	}
+	payload := map[string]any{"data": map[string]any{"timeline": map[string]any{"entries": []any{
+		map[string]any{"content": map[string]any{"itemContent": item("direct")}},
+		map[string]any{"content": map[string]any{"items": []any{
+			map[string]any{"item": map[string]any{"itemContent": item("module-first")}},
+			map[string]any{"item": map[string]any{"itemContent": item("module-second")}},
+		}}},
+		map[string]any{"content": map[string]any{"cursorType": "ShowMoreThreads", "value": "next-module"}},
+	}}}}
+
+	page := parseTimeline(payload)
+	if page.Cursor != "next-module" {
+		t.Fatalf("cursor = %q, want next-module", page.Cursor)
+	}
+	if len(page.Posts) != 3 {
+		t.Fatalf("posts = %+v", page.Posts)
+	}
+	for i, want := range []string{"direct", "module-first", "module-second"} {
+		if page.Posts[i].ID != want {
+			t.Fatalf("post %d ID = %q, want %q", i, page.Posts[i].ID, want)
+		}
 	}
 }

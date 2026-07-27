@@ -20,7 +20,7 @@ var commandGroups = []struct {
 	names []string
 }{
 	{"start here", []string{"auth", "whoami", "doctor", "logout"}},
-	{"every day", []string{"timeline", "post", "theme"}},
+	{"every day", []string{"timeline", "search", "post", "theme"}},
 	{"extras", []string{"version", "inspect-har", "completion", "help"}},
 }
 
