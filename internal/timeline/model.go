@@ -246,17 +246,28 @@ func (m Model) Init() tea.Cmd {
 	if m.feed == FeedSearch && m.searchQuery == "" {
 		return tea.Batch(m.searchInput.Focus(), clockTick())
 	}
+	if m.mode == modeListPicker {
+		return tea.Batch(m.spinner.Tick, fetchListsCmd(m.requestContext()), clockTick())
+	}
 	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, "", false, m.feedSeq), clockTick())
 }
 
-func Run(ctx context.Context, images string, feed FeedKind, query string) (Action, error) {
+func Run(ctx context.Context, images string, feed FeedKind, query, listID string) (Action, error) {
 	m := NewWithImageMode(images)
 	m.ctx = ctx
 	m.feed = feed
 	m.searchQuery = query
+	m.listID = listID
 	if feed == FeedSearch && query == "" {
 		m.loading = false
 		m.beginSearch()
+	}
+	if feed == FeedList {
+		m.listName = listID
+		if listID == "" {
+			m.loading = false
+			m.beginListPicker()
+		}
 	}
 	// Auto-detected native mode is a claim, not a capability: multiplexers
 	// like cmux inherit ghostty's TERM without reliably rendering graphics.

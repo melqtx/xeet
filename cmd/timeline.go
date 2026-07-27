@@ -14,6 +14,7 @@ var (
 	timelineImageMode string
 	timelineFollowing bool
 	timelineBookmarks bool
+	timelineListID    string
 	timelineTheme     string
 )
 
@@ -23,6 +24,7 @@ var timelineCmd = &cobra.Command{
 	Example: `  xeet timeline                # same as plain 'xeet'
   xeet timeline --following    # the Following feed
   xeet timeline --bookmarks    # your saved posts
+  xeet timeline --list 123     # a list by id
   xeet timeline --images off   # text only, no previews`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := applyConfiguredTheme(timelineTheme); err != nil {
@@ -35,7 +37,10 @@ var timelineCmd = &cobra.Command{
 		if timelineBookmarks {
 			feed = timeline.FeedBookmarks
 		}
-		return runTimeline(cmd.Context(), timelineImageMode, feed, "")
+		if timelineListID != "" {
+			feed = timeline.FeedList
+		}
+		return runTimeline(cmd.Context(), timelineImageMode, feed, "", timelineListID)
 	},
 }
 
@@ -43,19 +48,23 @@ func init() {
 	timelineCmd.Flags().StringVar(&timelineImageMode, "images", "auto", "image mode: auto, native, ansi, or off")
 	timelineCmd.Flags().BoolVar(&timelineFollowing, "following", false, "start on the Following feed instead of For You")
 	timelineCmd.Flags().BoolVar(&timelineBookmarks, "bookmarks", false, "start on your bookmarks feed")
+	timelineCmd.Flags().StringVar(&timelineListID, "list", "", "start on the given list id")
 	timelineCmd.Flags().StringVar(&timelineTheme, "theme", "", "color theme for this run (see 'xeet theme')")
-	timelineCmd.MarkFlagsMutuallyExclusive("following", "bookmarks")
+	timelineCmd.MarkFlagsMutuallyExclusive("following", "bookmarks", "list")
 	rootCmd.AddCommand(timelineCmd)
 }
 
-func runTimeline(ctx context.Context, imageMode string, feed timeline.FeedKind, query string) error {
+func runTimeline(ctx context.Context, imageMode string, feed timeline.FeedKind, query, listID string) error {
 	switch imageMode {
 	case "auto", "native", "ansi", "off":
 	default:
 		return fmt.Errorf("invalid --images value %q (use auto, native, ansi, or off)", imageMode)
 	}
+	if feed == timeline.FeedList && listID != "" && !isNumericListID(listID) {
+		return fmt.Errorf("invalid --list value %q (use a numeric list id)", listID)
+	}
 	for {
-		action, err := timeline.Run(ctx, imageMode, feed, query)
+		action, err := timeline.Run(ctx, imageMode, feed, query, listID)
 		if err != nil {
 			return err
 		}
@@ -91,4 +100,13 @@ func runTimeline(ctx context.Context, imageMode string, feed timeline.FeedKind, 
 			return nil
 		}
 	}
+}
+
+func isNumericListID(id string) bool {
+	for i := range len(id) {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
+	}
+	return id != ""
 }
