@@ -55,6 +55,7 @@ type FeedKind int
 const (
 	FeedForYou FeedKind = iota
 	FeedFollowing
+	FeedBookmarks
 )
 
 type mode int
@@ -274,8 +275,11 @@ func fetchPageSeq(parent context.Context, feed FeedKind, cursor string, more boo
 		defer cancel()
 		client := api.NewWebClient(cfg)
 		fetch := client.FetchHomeTimeline
-		if feed == FeedFollowing {
+		switch feed {
+		case FeedFollowing:
 			fetch = client.FetchFollowingTimeline
+		case FeedBookmarks:
+			fetch = client.FetchBookmarks
 		}
 		page, err := fetch(ctx, cursor, 30)
 		if client.ApplyRefreshedQueryIDs(cfg) {
@@ -461,6 +465,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return tea.ClearScreen() }
 	case "f":
 		return m, m.switchFeed()
+	case "b":
+		if m.feed == FeedBookmarks {
+			return m, m.setFeed(FeedForYou)
+		}
+		return m, m.setFeed(FeedBookmarks)
 	case "R", "ctrl+r":
 		if len(m.posts) == 0 {
 			m.loading = true

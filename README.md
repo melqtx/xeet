@@ -103,6 +103,7 @@ then just:
 ```bash
 xeet                                  # browse your timeline, images and all
 xeet --following                      # start on the following feed
+xeet --bookmarks                      # start on your bookmarks
 xeet --barebones                      # text-only feed
 xeet --compose                        # skip the feed, open the composer
 xeet post "hello from my shell"       # one-shot post
@@ -156,6 +157,7 @@ come back next time.
 |---|---|
 | `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
 | `f` | switch between the for you and following feeds |
+| `b` | switch between bookmarks and the for you feed |
 | `enter` | open the post's replies |
 | `e` / `space` | read a truncated post in full |
 | `i` | zoom the post's image to the whole terminal |
