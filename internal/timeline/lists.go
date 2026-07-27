@@ -31,7 +31,7 @@ func fetchListsCmd(parent context.Context) tea.Cmd {
 		client := api.NewWebClient(cfg)
 		lists, err := client.FetchOwnedLists(ctx)
 		if client.ApplyRefreshedQueryIDs(cfg) {
-			_ = mgr.Save(cfg)
+			_ = mgr.SaveQueryIDs(cfg)
 		}
 		return listsMsg{lists: lists, err: err}
 	}

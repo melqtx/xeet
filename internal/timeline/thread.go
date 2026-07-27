@@ -32,7 +32,7 @@ func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq,
 		client := api.NewWebClient(cfg)
 		page, err := client.FetchTweetDetail(ctx, tweetID, cursor, 40)
 		if client.ApplyRefreshedQueryIDs(cfg) {
-			_ = mgr.Save(cfg)
+			_ = mgr.SaveQueryIDs(cfg)
 		}
 		return threadMsg{rootID: tweetID, seq: seq, colID: colID, page: page, err: err, more: more}
 	}

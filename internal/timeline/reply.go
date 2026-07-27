@@ -31,7 +31,7 @@ func sendReply(parent context.Context, tweetID, text string) tea.Cmd {
 		client := api.NewWebClient(cfg)
 		id, err := client.PostTweet(ctx, text, tweetID, nil, nil)
 		if client.ApplyRefreshedQueryIDs(cfg) {
-			_ = mgr.Save(cfg)
+			_ = mgr.SaveQueryIDs(cfg)
 		}
 		return replyResultMsg{id: id, err: err}
 	}

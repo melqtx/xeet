@@ -328,7 +328,7 @@ func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, cursor s
 		}
 		page, err := fetch(ctx, cursor, 30)
 		if client.ApplyRefreshedQueryIDs(cfg) {
-			_ = mgr.Save(cfg)
+			_ = mgr.SaveQueryIDs(cfg)
 		}
 		return pageMsg{page: page, err: err, more: more, seq: seq, colID: colID}
 	}
@@ -349,7 +349,7 @@ func setLike(parent context.Context, tweetID string, liked bool) tea.Cmd {
 		client := api.NewWebClient(cfg)
 		err = client.SetTweetLiked(ctx, tweetID, liked)
 		if client.ApplyRefreshedQueryIDs(cfg) {
-			_ = mgr.Save(cfg)
+			_ = mgr.SaveQueryIDs(cfg)
 		}
 		return likeMsg{id: tweetID, liked: liked, err: err}
 	}

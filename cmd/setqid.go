@@ -30,7 +30,7 @@ Then run:  xeet setqid <THIS-PART>`,
 			return err
 		}
 		cfg.CreateTweetQID = args[0]
-		if err := configMgr.Save(cfg); err != nil {
+		if err := configMgr.SaveQueryIDs(cfg); err != nil {
 			return err
 		}
 		fmt.Printf("saved CreateTweet query id: %s\n", args[0])

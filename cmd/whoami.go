@@ -41,8 +41,11 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("identify saved session: %w", err)
 	}
+	if err := manager.RecordViewer(account.ID, account.Handle); err != nil {
+		return fmt.Errorf("update saved account identity: %w", err)
+	}
 	if client.ApplyRefreshedQueryIDs(cfg) {
-		_ = manager.Save(cfg)
+		_ = manager.SaveQueryIDs(cfg)
 	}
 	printAccount(cmd.OutOrStdout(), account, sessionSource(cfg))
 	return nil

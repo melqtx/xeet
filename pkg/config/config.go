@@ -14,15 +14,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the whole of xeet's saved state: your x.com browser session plus
-// cached, non-secret operation ids and session metadata. AuthToken is the
-// session cookie and CT0 is the matching CSRF token; both live in the OS keyring (macOS Keychain, Linux
-// Secret Service), never on disk. The config file contains only non-secret
-// state: X's rotating GraphQL query ids and browser-session source metadata used
-// by `xeet doctor`.
+// Config resolves one account's x.com browser session together with global,
+// non-secret operation ids and settings. AuthToken and CT0 live in the OS
+// keyring, never on disk.
 type Config struct {
 	AuthToken                      string    `yaml:"-"`
 	CT0                            string    `yaml:"-"`
+	UserID                         string    `yaml:"-"`
+	Handle                         string    `yaml:"-"`
 	CreateTweetQID                 string    `yaml:"create_tweet_qid"`
 	HomeTimelineQID                string    `yaml:"home_timeline_qid,omitempty"`
 	HomeLatestTimelineQID          string    `yaml:"home_latest_timeline_qid,omitempty"`
@@ -47,10 +46,15 @@ type Config struct {
 const keyringService = "xeet"
 
 const (
-	keyAuthToken            = "auth_token"
-	keyCT0                  = "ct0"
+	currentConfigVersion    = 2
+	legacyAccountID         = "legacy"
+	keyLegacyAuthToken      = "auth_token"
+	keyLegacyCT0            = "ct0"
 	keyLegacySessionCookies = "session_cookies"
 )
+
+func authTokenKey(userID string) string { return "auth_token:" + userID }
+func ct0Key(userID string) string       { return "ct0:" + userID }
 
 // ErrSecretNotFound is returned by a SecretStore when a key has no value.
 var ErrSecretNotFound = errors.New("secret not found")
@@ -98,26 +102,38 @@ func (systemKeyring) Delete(key string) error {
 // fileConfig is the on-disk shape. auth_token and ct0 are only read for
 // migration from the pre-keyring layout and are never written back.
 type fileConfig struct {
-	AuthToken                      string   `yaml:"auth_token,omitempty"`
-	CT0                            string   `yaml:"ct0,omitempty"`
-	CreateTweetQID                 string   `yaml:"create_tweet_qid,omitempty"`
-	HomeTimelineQID                string   `yaml:"home_timeline_qid,omitempty"`
-	HomeLatestTimelineQID          string   `yaml:"home_latest_timeline_qid,omitempty"`
-	BookmarksQID                   string   `yaml:"bookmarks_qid,omitempty"`
-	SearchTimelineQID              string   `yaml:"search_timeline_qid,omitempty"`
-	ListLatestTweetsTimelineQID    string   `yaml:"list_latest_tweets_timeline_qid,omitempty"`
-	ListsManagementPageTimelineQID string   `yaml:"lists_management_page_timeline_qid,omitempty"`
-	FavoriteTweetQID               string   `yaml:"favorite_tweet_qid,omitempty"`
-	UnfavoriteTweetQID             string   `yaml:"unfavorite_tweet_qid,omitempty"`
-	ViewerQID                      string   `yaml:"viewer_qid,omitempty"`
-	TweetDetailQID                 string   `yaml:"tweet_detail_qid,omitempty"`
-	Theme                          string   `yaml:"theme,omitempty"`
-	Columns                        []string `yaml:"columns,omitempty"`
-	SessionBrowser                 string   `yaml:"session_browser,omitempty"`
-	SessionProfile                 string   `yaml:"session_profile,omitempty"`
-	SessionDomain                  string   `yaml:"session_domain,omitempty"`
-	SessionExpires                 string   `yaml:"session_expires,omitempty"`
-	SessionImported                string   `yaml:"session_imported,omitempty"`
+	Version                        int                    `yaml:"version,omitempty"`
+	Active                         string                 `yaml:"active,omitempty"`
+	AuthToken                      string                 `yaml:"auth_token,omitempty"`
+	CT0                            string                 `yaml:"ct0,omitempty"`
+	CreateTweetQID                 string                 `yaml:"create_tweet_qid,omitempty"`
+	HomeTimelineQID                string                 `yaml:"home_timeline_qid,omitempty"`
+	HomeLatestTimelineQID          string                 `yaml:"home_latest_timeline_qid,omitempty"`
+	BookmarksQID                   string                 `yaml:"bookmarks_qid,omitempty"`
+	SearchTimelineQID              string                 `yaml:"search_timeline_qid,omitempty"`
+	ListLatestTweetsTimelineQID    string                 `yaml:"list_latest_tweets_timeline_qid,omitempty"`
+	ListsManagementPageTimelineQID string                 `yaml:"lists_management_page_timeline_qid,omitempty"`
+	FavoriteTweetQID               string                 `yaml:"favorite_tweet_qid,omitempty"`
+	UnfavoriteTweetQID             string                 `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID                      string                 `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID                 string                 `yaml:"tweet_detail_qid,omitempty"`
+	Theme                          string                 `yaml:"theme,omitempty"`
+	Columns                        []string               `yaml:"columns,omitempty"`
+	SessionBrowser                 string                 `yaml:"session_browser,omitempty"`
+	SessionProfile                 string                 `yaml:"session_profile,omitempty"`
+	SessionDomain                  string                 `yaml:"session_domain,omitempty"`
+	SessionExpires                 string                 `yaml:"session_expires,omitempty"`
+	SessionImported                string                 `yaml:"session_imported,omitempty"`
+	Accounts                       map[string]fileAccount `yaml:"accounts,omitempty"`
+}
+
+type fileAccount struct {
+	Handle          string `yaml:"handle,omitempty"`
+	SessionBrowser  string `yaml:"session_browser,omitempty"`
+	SessionProfile  string `yaml:"session_profile,omitempty"`
+	SessionDomain   string `yaml:"session_domain,omitempty"`
+	SessionExpires  string `yaml:"session_expires,omitempty"`
+	SessionImported string `yaml:"session_imported,omitempty"`
 }
 
 type ConfigManager struct {
@@ -147,67 +163,22 @@ func (cm *ConfigManager) Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	config := &Config{
-		CreateTweetQID:                 fc.CreateTweetQID,
-		HomeTimelineQID:                fc.HomeTimelineQID,
-		HomeLatestTimelineQID:          fc.HomeLatestTimelineQID,
-		BookmarksQID:                   fc.BookmarksQID,
-		SearchTimelineQID:              fc.SearchTimelineQID,
-		ListLatestTweetsTimelineQID:    fc.ListLatestTweetsTimelineQID,
-		ListsManagementPageTimelineQID: fc.ListsManagementPageTimelineQID,
-		FavoriteTweetQID:               fc.FavoriteTweetQID,
-		UnfavoriteTweetQID:             fc.UnfavoriteTweetQID,
-		ViewerQID:                      fc.ViewerQID,
-		TweetDetailQID:                 fc.TweetDetailQID,
-		Theme:                          fc.Theme,
-		Columns:                        append([]string(nil), fc.Columns...),
-		SessionBrowser:                 fc.SessionBrowser,
-		SessionProfile:                 fc.SessionProfile,
-		SessionDomain:                  fc.SessionDomain,
-	}
-	if fc.SessionExpires != "" {
-		if parsed, parseErr := time.Parse(time.RFC3339, fc.SessionExpires); parseErr == nil {
-			config.SessionExpires = parsed
+	if fc.Version == 0 {
+		migrated, migrateErr := cm.migrateV1(fc)
+		if migrateErr != nil {
+			return nil, migrateErr
 		}
-	}
-	if fc.SessionImported != "" {
-		if parsed, parseErr := time.Parse(time.RFC3339, fc.SessionImported); parseErr == nil {
-			config.SessionImported = parsed
-		}
-	}
-
-	token, err := cm.secrets.Get(keyAuthToken)
-	switch {
-	case err == nil:
-		ct0, ct0Err := cm.secrets.Get(keyCT0)
-		if errors.Is(ct0Err, ErrSecretNotFound) || token == "" || ct0 == "" {
-			return nil, ErrSessionIncomplete
-		}
-		if ct0Err != nil {
-			return nil, ct0Err
-		}
-		config.AuthToken = token
-		config.CT0 = ct0
-	case errors.Is(err, ErrSecretNotFound):
-		// A leftover ct0 without auth_token is also corruption.
-		if ct0, ct0Err := cm.secrets.Get(keyCT0); ct0Err == nil && ct0 != "" {
-			return nil, ErrSessionIncomplete
-		} else if ct0Err != nil && !errors.Is(ct0Err, ErrSecretNotFound) {
-			return nil, ct0Err
-		}
-		// Nothing in the keyring. If the config file still holds tokens from
-		// the old layout, migrate them into the keyring now.
-		if fc.AuthToken != "" {
-			if err := cm.migrateLegacy(fc, config); err != nil {
+		if migrated {
+			fc, err = cm.readFile()
+			if err != nil {
 				return nil, err
 			}
 		}
-	default:
-		return nil, err
 	}
-
-	return config, nil
+	if fc.Active == "" {
+		return configFromFile(fc), nil
+	}
+	return cm.loadAccount(fc, fc.Active)
 }
 
 // Theme reads the saved theme name from the config file, or "" when none is
@@ -238,86 +209,39 @@ func (cm *ConfigManager) SaveColumns(columns []string) error {
 	if err != nil {
 		return err
 	}
+	if err := writableVersion(fc); err != nil {
+		return err
+	}
 	fc.Columns = append([]string(nil), columns...)
 	return cm.writeFile(fc)
 }
 
-// migrateLegacy moves tokens from the pre-keyring on-disk layout (AES-GCM
-// encrypted auth_token with the key sitting next to it in ~/.xeet.key, ct0 in
-// plaintext) into the OS keyring, rewrites the config file without them, and
-// deletes the now-useless key file.
-func (cm *ConfigManager) migrateLegacy(fc *fileConfig, config *Config) error {
-	token := fc.AuthToken
-	if key, err := secureReadFile(cm.legacyKeyPath); err == nil {
-		decrypted, err := legacyDecrypt(token, key)
-		if err != nil {
-			return fmt.Errorf("migrating legacy session: %w (run 'xeet auth' to reconnect)", err)
-		}
-		token = decrypted
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("migrating legacy session key: %w", err)
-	}
-
-	config.AuthToken = token
-	config.CT0 = fc.CT0
-
-	if err := cm.Save(config); err != nil {
-		return fmt.Errorf("migrating legacy session: %w", err)
-	}
-	_ = os.Remove(cm.legacyKeyPath)
-	return nil
-}
-
+// Save is the version-gated full-replacement path. Commands that change one
+// concern use SaveAccount, SaveQueryIDs, SaveTheme, or SaveColumns instead.
 func (cm *ConfigManager) Save(config *Config) error {
 	if config == nil {
 		return errors.New("config is nil")
 	}
-	if (config.AuthToken == "") != (config.CT0 == "") {
-		return ErrSessionIncomplete
-	}
-	if config.AuthToken == "" {
-		return cm.writeFile(&fileConfig{
-			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
-			HomeLatestTimelineQID:          config.HomeLatestTimelineQID,
-			BookmarksQID:                   config.BookmarksQID,
-			SearchTimelineQID:              config.SearchTimelineQID,
-			ListLatestTweetsTimelineQID:    config.ListLatestTweetsTimelineQID,
-			ListsManagementPageTimelineQID: config.ListsManagementPageTimelineQID,
-			FavoriteTweetQID:               config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
-			ViewerQID: config.ViewerQID, TweetDetailQID: config.TweetDetailQID,
-			Theme: config.Theme, Columns: append([]string(nil), config.Columns...),
-		})
-	}
-
-	oldAuth, err := cm.snapshotSecret(keyAuthToken)
+	fc, err := cm.readFile()
 	if err != nil {
 		return err
 	}
-	oldCT0, err := cm.snapshotSecret(keyCT0)
-	if err != nil {
+	if err := writableVersion(fc); err != nil {
 		return err
 	}
-	rollback := func(cause error) error {
-		return errors.Join(cause, cm.restoreSecret(keyAuthToken, oldAuth), cm.restoreSecret(keyCT0, oldCT0))
+	if config.UserID == "" {
+		if config.AuthToken != "" || config.CT0 != "" {
+			return errors.New("account user id is required")
+		}
+		return cm.writeFile(fileConfigFor(config))
 	}
-
-	if err := cm.secrets.Set(keyAuthToken, config.AuthToken); err != nil {
-		return err
-	}
-	if err := cm.secrets.Set(keyCT0, config.CT0); err != nil {
-		return rollback(err)
-	}
-	// Clean up the short-lived full-cookie experiment. Requests intentionally
-	// use only auth_token and ct0, matching the previously working behavior.
-	_ = cm.secrets.Delete(keyLegacySessionCookies)
-	if err := cm.writeFile(fileConfigFor(config)); err != nil {
-		return rollback(err)
-	}
-	return nil
+	return cm.saveAccountReplacingFile(config)
 }
 
 func fileConfigFor(config *Config) *fileConfig {
 	result := &fileConfig{
+		Version:                        currentConfigVersion,
+		Active:                         config.UserID,
 		CreateTweetQID:                 config.CreateTweetQID,
 		HomeTimelineQID:                config.HomeTimelineQID,
 		HomeLatestTimelineQID:          config.HomeLatestTimelineQID,
@@ -331,15 +255,11 @@ func fileConfigFor(config *Config) *fileConfig {
 		TweetDetailQID:                 config.TweetDetailQID,
 		Theme:                          config.Theme,
 		Columns:                        append([]string(nil), config.Columns...),
-		SessionBrowser:                 config.SessionBrowser,
-		SessionProfile:                 config.SessionProfile,
-		SessionDomain:                  config.SessionDomain,
 	}
-	if !config.SessionExpires.IsZero() {
-		result.SessionExpires = config.SessionExpires.UTC().Format(time.RFC3339)
-	}
-	if !config.SessionImported.IsZero() {
-		result.SessionImported = config.SessionImported.UTC().Format(time.RFC3339)
+	if config.UserID != "" {
+		result.Accounts = map[string]fileAccount{
+			config.UserID: fileAccountFor(config),
+		}
 	}
 	return result
 }
@@ -347,6 +267,19 @@ func fileConfigFor(config *Config) *fileConfig {
 type secretSnapshot struct {
 	value  string
 	exists bool
+}
+
+type committedWriteError struct{ err error }
+
+func (e *committedWriteError) Error() string { return e.err.Error() }
+func (e *committedWriteError) Unwrap() error { return e.err }
+
+func rollbackUncommitted(err error, rollback func(error) error) error {
+	var committed *committedWriteError
+	if errors.As(err, &committed) {
+		return err
+	}
+	return rollback(err)
 }
 
 func (cm *ConfigManager) snapshotSecret(key string) (secretSnapshot, error) {
@@ -367,18 +300,26 @@ func (cm *ConfigManager) restoreSecret(key string, snapshot secretSnapshot) erro
 	return cm.secrets.Delete(key)
 }
 
-// Erase deletes the saved session: keyring entries, config file, and any
-// legacy key file. It keeps going on individual failures and reports the
-// first one, so a partial logout still removes as much as possible.
-func (cm *ConfigManager) Erase() error {
+// EraseAll deletes every saved session, the config file, and any legacy key
+// file. It keeps going on individual failures so a partial logout removes as
+// much as possible.
+func (cm *ConfigManager) EraseAll() error {
 	var firstErr error
 	keep := func(err error) {
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	keep(cm.secrets.Delete(keyAuthToken))
-	keep(cm.secrets.Delete(keyCT0))
+	if fc, err := cm.readFile(); err == nil {
+		for userID := range fc.Accounts {
+			keep(cm.secrets.Delete(authTokenKey(userID)))
+			keep(cm.secrets.Delete(ct0Key(userID)))
+		}
+	} else {
+		keep(err)
+	}
+	keep(cm.secrets.Delete(keyLegacyAuthToken))
+	keep(cm.secrets.Delete(keyLegacyCT0))
 	keep(cm.secrets.Delete(keyLegacySessionCookies))
 	if err := os.Remove(cm.configPath); err != nil && !os.IsNotExist(err) {
 		keep(err)
@@ -388,6 +329,10 @@ func (cm *ConfigManager) Erase() error {
 	}
 	return firstErr
 }
+
+// Erase retains the pre-v2 API for callers that explicitly want a complete
+// reset. Normal logout uses EraseAccount so global preferences survive.
+func (cm *ConfigManager) Erase() error { return cm.EraseAll() }
 
 func (cm *ConfigManager) readFile() (*fileConfig, error) {
 	data, err := secureReadFile(cm.configPath)
@@ -443,7 +388,12 @@ func (cm *ConfigManager) writeFile(fc *fileConfig) error {
 	if err := os.Rename(tmpPath, cm.configPath); err != nil {
 		return err
 	}
-	return syncDirectory(dir)
+	if err := syncDirectory(dir); err != nil {
+		// Rename already published the new file; rolling back its matching
+		// keyring pair here would create an account entry with no session.
+		return &committedWriteError{err: err}
+	}
+	return nil
 }
 
 // legacyDecrypt undoes the old AES-GCM-with-key-on-disk scheme, used only to

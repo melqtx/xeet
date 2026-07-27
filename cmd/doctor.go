@@ -42,7 +42,17 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if cfg.AuthToken == "" || cfg.CT0 == "" {
 		return fmt.Errorf("no saved session; run 'xeet auth' first")
 	}
+	version, err := manager.Version()
+	if err != nil {
+		return err
+	}
+	accounts, err := manager.Accounts()
+	if err != nil {
+		return err
+	}
 
+	fmt.Fprintf(cmd.OutOrStdout(), "config version: %d\n", version)
+	fmt.Fprintf(cmd.OutOrStdout(), "accounts: %d\n", len(accounts))
 	fmt.Fprintln(cmd.OutOrStdout(), "saved session: present")
 	fmt.Fprintf(cmd.OutOrStdout(), "fingerprint: %s\n", sessionFingerprint(cfg.AuthToken, cfg.CT0))
 	fmt.Fprintf(cmd.OutOrStdout(), "source: %s\n", sessionSource(cfg))

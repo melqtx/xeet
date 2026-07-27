@@ -122,7 +122,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 	}
 	// Cache freshly discovered operation ids so later commands avoid discovery.
 	if client.ApplyRefreshedQueryIDs(cfg) {
-		_ = configMgr.Save(cfg)
+		_ = configMgr.SaveQueryIDs(cfg)
 	}
 	if id != "" {
 		fmt.Printf("posted: https://x.com/i/status/%s\n", id)

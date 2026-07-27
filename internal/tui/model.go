@@ -234,7 +234,7 @@ func beginPost(parent context.Context, text string, attachments []media.Attachme
 				events <- postProgressMsg{event: event}
 			})
 			if client.ApplyRefreshedQueryIDs(cfg) {
-				_ = mgr.Save(cfg)
+				_ = mgr.SaveQueryIDs(cfg)
 			}
 			events <- postResultMsg{id: id, err: err, diagnostic: client.LastDiagnostic()}
 			close(events)

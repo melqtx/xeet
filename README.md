@@ -125,7 +125,8 @@ if your session feels off:
 xeet whoami            # which account is connected
 xeet doctor            # session metadata + one authenticated read
 xeet doctor --offline  # local metadata only, no network
-xeet logout            # delete xeet's copy of the session
+xeet logout            # delete xeet's active session
+xeet logout --all      # delete every xeet session and the config file
 ```
 
 diagnostics print a short fingerprint and the browser/profile, never the
@@ -259,8 +260,13 @@ xeet reuses the x.com session already in your browser and speaks the same
 unsupported internal graphql endpoints the website does. the imported
 `auth_token` and `ct0` cookies grant account-level access, so treat them
 like a password. they live in the macos keychain or linux secret service, never
-in the yaml config file. `xeet logout` deletes xeet's copy (your browser
-stays logged in).
+in the yaml config file. account metadata and global settings use config schema
+v2 in `~/.xeet.yaml`; sessions from older installs migrate offline on first
+load. don't run an older xeet binary after migration: it cannot understand the
+`accounts:` block and may erase it when saving. new binaries refuse writes to
+config versions newer than they understand. `xeet logout` deletes the active
+session and `xeet logout --all` deletes every saved session (your browser stays
+logged in).
 
 <details>
 <summary>details: query ids and retries</summary>
