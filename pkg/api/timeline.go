@@ -112,6 +112,17 @@ func (c *WebClient) FetchFollowingTimeline(ctx context.Context, cursor string, c
 }
 
 func (c *WebClient) fetchTimeline(ctx context.Context, operation, fallback, environment, cursor string, count int) (*TimelinePage, error) {
+	return c.fetchTimelineOp(ctx, operation, fallback, environment, count, func(count int) map[string]any {
+		return timelineVariables(cursor, count)
+	})
+}
+
+func (c *WebClient) fetchTimelineOp(
+	ctx context.Context,
+	operation, fallback, environment string,
+	count int,
+	buildVars func(count int) map[string]any,
+) (*TimelinePage, error) {
 	if c.authToken == "" || c.ct0 == "" {
 		return nil, fmt.Errorf("no session; run 'xeet auth' first")
 	}
@@ -119,8 +130,15 @@ func (c *WebClient) fetchTimeline(ctx context.Context, operation, fallback, envi
 		count = 30
 	}
 	qid := c.operationQueryID(operation, fallback, environment)
+	if qid == "" {
+		fresh, discoverErr := c.discoverOperation(ctx, operation)
+		if discoverErr != nil {
+			return nil, fmt.Errorf("discover %s endpoint: %w", operation, discoverErr)
+		}
+		qid = fresh
+	}
 
-	res, err := c.doTimeline(ctx, operation, qid, cursor, count)
+	res, err := c.doTimelineOp(ctx, operation, qid, buildVars(count))
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +147,7 @@ func (c *WebClient) fetchTimeline(ctx context.Context, operation, fallback, envi
 		if discoverErr != nil {
 			return nil, fmt.Errorf("home timeline endpoint changed and discovery failed: %w", discoverErr)
 		}
-		res, err = c.doTimeline(ctx, operation, fresh, cursor, count)
+		res, err = c.doTimelineOp(ctx, operation, fresh, buildVars(count))
 		if err != nil {
 			return nil, err
 		}
@@ -159,8 +177,7 @@ func (c *WebClient) fetchTimeline(ctx context.Context, operation, fallback, envi
 	return &page, nil
 }
 
-// doTimeline is a read, so transient failures are retried.
-func (c *WebClient) doTimeline(ctx context.Context, operation, qid, cursor string, count int) (*httpResult, error) {
+func timelineVariables(cursor string, count int) map[string]any {
 	variables := map[string]any{
 		"count":                  count,
 		"includePromotedContent": true,
@@ -173,6 +190,12 @@ func (c *WebClient) doTimeline(ctx context.Context, operation, qid, cursor strin
 		variables["cursor"] = cursor
 		variables["requestContext"] = "scroll"
 	}
+	return variables
+}
+
+// Timeline reads are idempotent, so transient failures are retried here; the
+// mutation paths deliberately are not.
+func (c *WebClient) doTimelineOp(ctx context.Context, operation, qid string, variables map[string]any) (*httpResult, error) {
 	variablesJSON, _ := json.Marshal(variables)
 	featuresJSON, _ := json.Marshal(timelineFeatures)
 	fieldTogglesJSON, _ := json.Marshal(timelineFieldToggles)
