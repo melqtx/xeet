@@ -16,6 +16,7 @@ type AccountInfo struct {
 	SessionBrowser  string
 	SessionProfile  string
 	SessionImported time.Time
+	Active          bool
 }
 
 func configFromFile(fc *fileConfig) *Config {
@@ -155,6 +156,7 @@ func (cm *ConfigManager) Accounts() ([]AccountInfo, error) {
 			SessionBrowser:  account.SessionBrowser,
 			SessionProfile:  account.SessionProfile,
 			SessionImported: parseTime(account.SessionImported),
+			Active:          userID == fc.Active,
 		})
 	}
 	return accounts, nil

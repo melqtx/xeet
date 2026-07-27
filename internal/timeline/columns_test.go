@@ -62,8 +62,8 @@ func TestInitSchedulesAFirstPageForEveryColumn(t *testing.T) {
 	if !ok {
 		t.Fatalf("Init returned %T, want tea.BatchMsg", msg)
 	}
-	if len(batch) != 5 {
-		t.Fatalf("Init scheduled %d commands, want spinner + 3 fetches + clock", len(batch))
+	if len(batch) != 6 {
+		t.Fatalf("Init scheduled %d commands, want spinner + account metadata + 3 fetches + clock", len(batch))
 	}
 }
 

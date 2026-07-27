@@ -101,6 +101,7 @@ type Model struct {
 	columns   []column
 	focus     int
 	nextColID int
+	accounts  []config.AccountInfo
 
 	mode              mode
 	replyReturn       mode
@@ -234,12 +235,12 @@ func (m Model) requestContext() context.Context {
 func (m Model) Init() tea.Cmd {
 	c := m.cur()
 	if c.feed == FeedSearch && c.searchQuery == "" {
-		return tea.Batch(m.searchInput.Focus(), clockTick())
+		return tea.Batch(m.searchInput.Focus(), loadAccountsCmd(), clockTick())
 	}
 	if m.mode == modeListPicker {
-		return tea.Batch(m.spinner.Tick, fetchListsCmd(m.requestContext()), clockTick())
+		return tea.Batch(m.spinner.Tick, fetchListsCmd(m.requestContext()), loadAccountsCmd(), clockTick())
 	}
-	cmds := []tea.Cmd{m.spinner.Tick}
+	cmds := []tea.Cmd{m.spinner.Tick, loadAccountsCmd()}
 	for i := range m.columns {
 		c := &m.columns[i]
 		cmds = append(cmds, fetchPageSeq(
@@ -387,6 +388,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 		}
 		return m, nil
+	}
+	if loaded, ok := msg.(accountsLoadedMsg); ok {
+		if loaded.err == nil {
+			m.accounts = loaded.accounts
+		}
+		return m, nil
+	}
+	if cycled, ok := msg.(accountCycledMsg); ok {
+		if cycled.err != nil {
+			return m, m.showToast(cycled.err.Error())
+		}
+		m.accounts = cycled.accounts
+		m.mode = modeFeed
+		reload := m.resetEveryColumnFeed()
+		toast := m.showToast("switched to " + accountInfoLabel(cycled.active))
+		return m, m.imageRepaint(reload, toast)
 	}
 
 	if m.help {
@@ -536,6 +553,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.beginSearch()
 	case "L":
 		return m, m.beginListPicker()
+	case "@":
+		return m, cycleAccountCmd()
 	case "R", "ctrl+r":
 		c := m.cur()
 		if len(c.posts) == 0 {
@@ -761,21 +780,40 @@ func (m Model) columnsLoading() bool {
 // setFeed resets feed state and kicks off a fresh first page for kind.
 func (m *Model) setFeed(kind FeedKind) tea.Cmd {
 	c := m.cur()
+	fetch := m.resetColumnFeed(c, kind)
+	m.syncViewport()
+	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetch))
+}
+
+func (m *Model) resetColumnFeed(c *column, kind FeedKind) tea.Cmd {
 	c.feed = kind
 	c.feedSeq++
 	c.posts = nil
 	c.cursor = ""
 	c.selected = 0
+	c.starts = nil
+	c.ends = nil
 	c.expanded = false
 	c.loading = true
 	c.loadingMore = false
 	c.refreshing = false
 	c.err = nil
 	c.viewport.YOffset = 0
-	m.syncViewport()
-	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(
+	c.viewport.SetContent("")
+	return fetchPageSeq(
 		m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
-	)))
+	)
+}
+
+func (m *Model) resetEveryColumnFeed() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
+	cmds = append(cmds, m.spinner.Tick)
+	for i := range m.columns {
+		c := &m.columns[i]
+		cmds = append(cmds, m.resetColumnFeed(c, c.feed))
+	}
+	m.resize()
+	return tea.Batch(cmds...)
 }
 
 // switchFeed keeps the f-key semantics: toggle For You <-> Following.

@@ -53,6 +53,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "config version: %d\n", version)
 	fmt.Fprintf(cmd.OutOrStdout(), "accounts: %d\n", len(accounts))
+	fmt.Fprintf(cmd.OutOrStdout(), "active account: %s\n", cfg.UserID)
 	fmt.Fprintln(cmd.OutOrStdout(), "saved session: present")
 	fmt.Fprintf(cmd.OutOrStdout(), "fingerprint: %s\n", sessionFingerprint(cfg.AuthToken, cfg.CT0))
 	fmt.Fprintf(cmd.OutOrStdout(), "source: %s\n", sessionSource(cfg))

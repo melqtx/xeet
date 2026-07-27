@@ -160,7 +160,11 @@ func (m Model) visibleColumnWidth() int {
 
 func (m Model) header(width int) string {
 	c := m.cur()
-	return m.catHeader(c, width, m.columnStatus(c, width))
+	status := m.columnStatus(c, width)
+	if account := m.activeAccountLabel(); account != "" {
+		status = truncateRunes(account+" · "+status, max(9, width-12))
+	}
+	return m.catHeader(c, width, status)
 }
 
 func (m Model) columnHeader(c *column, width int, focused bool) string {
@@ -215,7 +219,7 @@ func (m Model) columnStatus(c *column, width int) string {
 }
 
 func (m Model) screenHeader(width int) string {
-	return m.catHeader(m.cur(), width, "")
+	return m.catHeader(m.cur(), width, m.activeAccountLabel())
 }
 
 func (m Model) catHeader(c *column, width int, status string) string {
@@ -996,12 +1000,12 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n/           search\nL           lists\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
 		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · ^L redraw\nL lists · b saved · q quit"
+		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · @ account\nL lists · b saved · q quit"
 		if m.mode == modeThread {
 			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
 		}

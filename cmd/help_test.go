@@ -51,6 +51,21 @@ func TestFeedCommandsAppearTogetherInEveryDayHelp(t *testing.T) {
 	t.Fatal("root help has no every day command group")
 }
 
+func TestAccountsAppearsInStartHereHelp(t *testing.T) {
+	for _, group := range groupCommands(rootCmd) {
+		if group.title != "start here" {
+			continue
+		}
+		for _, command := range group.commands {
+			if command.Name() == "accounts" {
+				return
+			}
+		}
+		t.Fatalf("accounts is missing from the start here help group: %v", group.commands)
+	}
+	t.Fatal("root help has no start here command group")
+}
+
 func TestRootHelpHidesHiddenCommands(t *testing.T) {
 	tidyGeneratedCommands()
 	var buf bytes.Buffer

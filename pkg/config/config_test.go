@@ -939,7 +939,7 @@ func TestAccountsListsMetadataWithoutTouchingKeyring(t *testing.T) {
 	}
 	if len(accounts) != 1 || accounts[0].UserID != "42" ||
 		accounts[0].Handle != "alice" || accounts[0].SessionBrowser != "Chrome" ||
-		accounts[0].SessionProfile != "Default" {
+		accounts[0].SessionProfile != "Default" || !accounts[0].Active {
 		t.Fatalf("accounts = %+v", accounts)
 	}
 }
