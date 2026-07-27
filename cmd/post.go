@@ -24,7 +24,14 @@ var postCmd = &cobra.Command{
 	Short: "post from the command line, or from a pipe",
 	Long: `Post straight from the command line, with no interface in the way. The text
 can be an argument or piped in on stdin; attachments are up to four images or
-a single video.`,
+a single video.
+
+--account decides which saved account posts, resolved inside this one command
+so nothing else on the machine can move it in between. It only decides; it does
+not judge. A script that used to compare its expected handle against the active
+account was getting a wrong-account check for free, because a mistaken expected
+value disagreed with whatever was active. Passing that same value to --account
+turns it into the destination instead, so the check has to move to the caller.`,
 	Example: `  xeet post "hello world"
   echo "piped tweet" | xeet post
   xeet post "photo" --image ./photo.png
