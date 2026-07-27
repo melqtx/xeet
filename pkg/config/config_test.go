@@ -46,6 +46,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	in := &Config{
 		AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789",
 		HomeTimelineQID: "home123", BookmarksQID: "bookmarks123", SearchTimelineQID: "search123",
+		ListLatestTweetsTimelineQID: "listtimeline123", ListsManagementPageTimelineQID: "listsmanagement123",
 		FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123",
 		TweetDetailQID: "detail123",
 		SessionBrowser: "Firefox", SessionProfile: "default-release", SessionDomain: "x.com",
@@ -120,6 +121,26 @@ func TestSaveWithoutSessionPersistsSearchTimelineQueryID(t *testing.T) {
 	}
 	if cfg.SearchTimelineQID != "search123" {
 		t.Fatalf("SearchTimelineQID = %q, want search123", cfg.SearchTimelineQID)
+	}
+}
+
+func TestSaveWithoutSessionPersistsListsQueryIDs(t *testing.T) {
+	dir := t.TempDir()
+	cm := newConfigManagerAt(dir, newFakeStore())
+
+	if err := cm.Save(&Config{
+		ListLatestTweetsTimelineQID:    "listtimeline123",
+		ListsManagementPageTimelineQID: "listsmanagement123",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := cm.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ListLatestTweetsTimelineQID != "listtimeline123" ||
+		cfg.ListsManagementPageTimelineQID != "listsmanagement123" {
+		t.Fatalf("lists query ids were not persisted: %+v", cfg)
 	}
 }
 
