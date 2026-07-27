@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	replyTo    string
-	imagePaths []string
+	replyTo     string
+	imagePaths  []string
+	postAccount string
 )
 
 var postCmd = &cobra.Command{
@@ -29,13 +30,15 @@ a single video.`,
   xeet post "photo" --image ./photo.png
   xeet post --image one.png --image two.jpg   # no text, images only
   xeet post "clip" --image ./clip.mp4
-  xeet post "a reply" --reply 1234567890`,
+  xeet post "a reply" --reply 1234567890
+  xeet post "hi" --account @alice        # post as a saved account, not the active one`,
 	RunE: runPost,
 }
 
 func init() {
 	postCmd.Flags().StringVar(&replyTo, "reply", "", "tweet id to reply to")
 	postCmd.Flags().StringArrayVarP(&imagePaths, "image", "i", nil, "image or video path (up to 4 images, or 1 video)")
+	postCmd.Flags().StringVar(&postAccount, "account", "", "saved account to post as (handle or user id); defaults to the active one")
 	rootCmd.AddCommand(postCmd)
 }
 
@@ -80,7 +83,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := configMgr.Load()
+	cfg, err := loadAccountSelection(configMgr, postAccount)
 	if err != nil {
 		return err
 	}

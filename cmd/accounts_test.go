@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -162,5 +164,91 @@ func TestRemoveDefaultsToNo(t *testing.T) {
 	}
 	if len(store.removedWrites) != 0 {
 		t.Fatalf("default confirmation removed %v", store.removedWrites)
+	}
+}
+
+type fakeSelectionStore struct {
+	accounts     []config.AccountInfo
+	sessions     map[string]*config.Config
+	active       *config.Config
+	activeReads  int
+	accountReads []string
+}
+
+func (f *fakeSelectionStore) Accounts() ([]config.AccountInfo, error) {
+	return append([]config.AccountInfo(nil), f.accounts...), nil
+}
+
+func (f *fakeSelectionStore) Load() (*config.Config, error) {
+	f.activeReads++
+	return f.active, nil
+}
+
+func (f *fakeSelectionStore) LoadAccount(userID string) (*config.Config, error) {
+	f.accountReads = append(f.accountReads, userID)
+	cfg, ok := f.sessions[userID]
+	if !ok {
+		return nil, fmt.Errorf("no session for %s", userID)
+	}
+	return cfg, nil
+}
+
+func newSelectionStore() *fakeSelectionStore {
+	return &fakeSelectionStore{
+		accounts: []config.AccountInfo{
+			{UserID: "42", Handle: "alice", Active: true},
+			{UserID: "84", Handle: "bob"},
+		},
+		sessions: map[string]*config.Config{
+			"42": {UserID: "42", Handle: "alice", AuthToken: "alice-auth", CT0: "alice-csrf"},
+			"84": {UserID: "84", Handle: "bob", AuthToken: "bob-auth", CT0: "bob-csrf"},
+		},
+		active: &config.Config{UserID: "42", Handle: "alice", AuthToken: "alice-auth", CT0: "alice-csrf"},
+	}
+}
+
+func TestAccountSelectorNeverReadsTheActiveAccount(t *testing.T) {
+	store := newSelectionStore()
+	cfg, err := loadAccountSelection(store, "@bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthToken != "bob-auth" {
+		t.Fatalf("selector resolved to %q, want bob's session", cfg.AuthToken)
+	}
+	if store.activeReads != 0 {
+		t.Fatalf("selector consulted the active account %d times; the flag exists so it cannot", store.activeReads)
+	}
+	if !reflect.DeepEqual(store.accountReads, []string{"84"}) {
+		t.Fatalf("loaded accounts %v, want only 84", store.accountReads)
+	}
+}
+
+func TestEmptyAccountSelectorKeepsTheActiveAccount(t *testing.T) {
+	store := newSelectionStore()
+	cfg, err := loadAccountSelection(store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthToken != "alice-auth" || store.activeReads != 1 || len(store.accountReads) != 0 {
+		t.Fatalf("empty selector did not fall through to the active account: %+v", store)
+	}
+}
+
+func TestAccountSelectorRejectsUnknownAndSessionlessAccounts(t *testing.T) {
+	store := newSelectionStore()
+	if _, err := loadAccountSelection(store, "@nobody"); err == nil {
+		t.Fatal("unknown selector was accepted")
+	} else if !strings.Contains(err.Error(), "@nobody") {
+		t.Fatalf("unknown selector error does not name it: %v", err)
+	}
+
+	store.sessions["84"] = &config.Config{UserID: "84", Handle: "bob"}
+	_, err := loadAccountSelection(store, "@bob")
+	if err == nil {
+		t.Fatal("an account with no keyring pair was accepted")
+	}
+	if !strings.Contains(err.Error(), "xeet auth") {
+		t.Fatalf("sessionless account error lacks the recovery step: %v", err)
 	}
 }

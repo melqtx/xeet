@@ -12,21 +12,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var whoamiAccount string
+
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
 	Short: "show which account is connected",
-	Args:  cobra.NoArgs,
-	RunE:  runWhoami,
+	Example: `  xeet whoami
+  xeet whoami --account @alice   # check one saved account without switching`,
+	Args: cobra.NoArgs,
+	RunE: runWhoami,
 }
 
-func init() { rootCmd.AddCommand(whoamiCmd) }
+func init() {
+	whoamiCmd.Flags().StringVar(&whoamiAccount, "account", "", "saved account to identify (handle or user id); defaults to the active one")
+	rootCmd.AddCommand(whoamiCmd)
+}
 
 func runWhoami(cmd *cobra.Command, args []string) error {
 	manager, err := config.NewConfigManager()
 	if err != nil {
 		return err
 	}
-	cfg, err := manager.Load()
+	cfg, err := loadAccountSelection(manager, whoamiAccount)
 	if err != nil {
 		return err
 	}

@@ -119,6 +119,42 @@ func runAccountsRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// selectedAccountStore is the config surface a per-invocation --account needs:
+// the roster to resolve the selector against, and the session it names.
+type selectedAccountStore interface {
+	Accounts() ([]config.AccountInfo, error)
+	Load() (*config.Config, error)
+	LoadAccount(string) (*config.Config, error)
+}
+
+// loadAccountSelection resolves --account inside the one invocation that uses
+// it. Switching the active account and then acting is not equivalent: anything
+// else on the machine can move `active` in between, so a caller that meant one
+// account can post as another. An empty selector keeps the active account, so
+// the flag only ever narrows.
+func loadAccountSelection(store selectedAccountStore, selector string) (*config.Config, error) {
+	if strings.TrimSpace(selector) == "" {
+		return store.Load()
+	}
+	accounts, err := store.Accounts()
+	if err != nil {
+		return nil, err
+	}
+	account, err := matchSavedAccount(accounts, selector)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := store.LoadAccount(account.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("load account %s: %w", accountIdentity(account), err)
+	}
+	if cfg.AuthToken == "" || cfg.CT0 == "" {
+		return nil, fmt.Errorf("account %s has no usable session; re-run 'xeet auth' for it",
+			accountIdentity(account))
+	}
+	return cfg, nil
+}
+
 func resolveSavedAccount(selector string) (accountsStore, config.AccountInfo, error) {
 	store, err := openAccountsStore()
 	if err != nil {
