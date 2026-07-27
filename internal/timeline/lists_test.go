@@ -71,7 +71,7 @@ func TestListFeedHeaderShowsListNameWithinWidth(t *testing.T) {
 	m.cur().listName = strings.Repeat("very long list name ", 8)
 
 	header := m.header(m.contentWidth())
-	if !strings.Contains(header, "List:") {
+	if !strings.Contains(header, "list · ") {
 		t.Fatalf("list header does not identify the feed:\n%s", header)
 	}
 	if width := maxLineWidth(header); width > m.contentWidth() {

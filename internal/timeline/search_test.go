@@ -188,9 +188,9 @@ func TestSearchPromptExplainsWhereEscapeReturns(t *testing.T) {
 			m := NewWithImageMode("off")
 			m.width = 80
 			m.height = 24
-			m.loading = false
-			m.feed = test.feed
-			m.searchQuery = test.query
+			m.cur().loading = false
+			m.cur().feed = test.feed
+			m.cur().searchQuery = test.query
 			m.mode = modeSearch
 			m.searchReturn = test.returnMode
 			if view := m.View(); !strings.Contains(view, test.want) {
@@ -202,8 +202,8 @@ func TestSearchPromptExplainsWhereEscapeReturns(t *testing.T) {
 
 func TestFreshSearchCommandEscapeQuits(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.loading = false
-	m.feed = FeedSearch
+	m.cur().loading = false
+	m.cur().feed = FeedSearch
 	m.mode = modeSearch
 	m.searchReturn = modeFeed
 
@@ -222,22 +222,22 @@ func TestSearchResultsHavePurposeBuiltLoadingEmptyAndErrorStates(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.resize()
-	m.feed = FeedSearch
-	m.searchQuery = "from:alice terminal ui"
+	m.cur().feed = FeedSearch
+	m.cur().searchQuery = "from:alice terminal ui"
 
 	if view := m.View(); !strings.Contains(view, "searching “from:alice terminal ui”…") ||
 		!strings.Contains(view, "/ edit search") {
 		t.Fatalf("search loading state is unclear:\n%s", view)
 	}
 
-	m.loading = false
+	m.cur().loading = false
 	if view := m.View(); !strings.Contains(view, "no posts found") ||
 		!strings.Contains(view, "try fewer words") ||
 		!strings.Contains(view, "f for you") {
 		t.Fatalf("search empty state is unclear:\n%s", view)
 	}
 
-	m.err = errors.New("offline")
+	m.cur().err = errors.New("offline")
 	if view := m.View(); !strings.Contains(view, "search couldn't reach X") ||
 		!strings.Contains(view, "R retry") ||
 		!strings.Contains(view, "/ edit search") {
@@ -248,10 +248,10 @@ func TestSearchResultsHavePurposeBuiltLoadingEmptyAndErrorStates(t *testing.T) {
 func TestSearchResultsFooterPrioritizesEditingTheQuery(t *testing.T) {
 	m := NewWithImageMode("off")
 	m.width = 80
-	m.loading = false
-	m.feed = FeedSearch
-	m.searchQuery = "cats"
-	m.posts = []api.TimelinePost{{ID: "1", Text: "cat"}}
+	m.cur().loading = false
+	m.cur().feed = FeedSearch
+	m.cur().searchQuery = "cats"
+	m.cur().posts = []api.TimelinePost{{ID: "1", Text: "cat"}}
 
 	footer := m.footer()
 	for _, want := range []string{"/ edit search", "R refresh", "enter replies"} {
@@ -266,15 +266,15 @@ func TestSearchResultStatesStayInsideTerminal(t *testing.T) {
 		for _, state := range []string{"loading", "empty", "error"} {
 			t.Run(fmt.Sprintf("%dx%d/%s", size.width, size.height, state), func(t *testing.T) {
 				m := NewWithImageMode("off")
-				m.feed = FeedSearch
-				m.searchQuery = strings.Repeat("猫 terminal ", 20)
+				m.cur().feed = FeedSearch
+				m.cur().searchQuery = strings.Repeat("猫 terminal ", 20)
 				m = update(t, m, tea.WindowSizeMsg{Width: size.width, Height: size.height})
 				switch state {
 				case "empty":
-					m.loading = false
+					m.cur().loading = false
 				case "error":
-					m.loading = false
-					m.err = errors.New("offline")
+					m.cur().loading = false
+					m.cur().err = errors.New("offline")
 				}
 
 				view := m.View()

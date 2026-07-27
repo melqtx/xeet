@@ -309,7 +309,7 @@ func (m Model) searchErrorFooter(includeQuit bool) string {
 		edit = "/ edit"
 	}
 	parts := []string{"R retry", edit}
-	if errors.Is(m.err, api.ErrSessionExpired) {
+	if errors.Is(m.cur().err, api.ErrSessionExpired) {
 		parts = append([]string{"a reconnect"}, parts...)
 	}
 	if includeQuit {
@@ -804,13 +804,13 @@ func (m Model) searchBackLabel() string {
 	if m.searchReturn == modeThread {
 		return "back to replies"
 	}
-	switch m.feed {
+	switch m.cur().feed {
 	case FeedFollowing:
 		return "back to following"
 	case FeedBookmarks:
 		return "back to bookmarks"
 	case FeedSearch:
-		if m.searchQuery == "" && len(m.posts) == 0 {
+		if m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 			return "quit"
 		}
 		return "back to results"
@@ -823,13 +823,13 @@ func (m Model) searchBackShortLabel() string {
 	if m.searchReturn == modeThread {
 		return "replies"
 	}
-	switch m.feed {
+	switch m.cur().feed {
 	case FeedFollowing:
 		return "following"
 	case FeedBookmarks:
 		return "bookmarks"
 	case FeedSearch:
-		if m.searchQuery == "" && len(m.posts) == 0 {
+		if m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 			return "quit"
 		}
 		return "results"

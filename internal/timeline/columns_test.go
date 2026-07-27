@@ -102,7 +102,7 @@ func TestMultiColumnHeaderShowsOneLogoAndAVisibleFocusBar(t *testing.T) {
 	if count := strings.Count(view, `/\_/\`); count != 1 {
 		t.Fatalf("multi-column view rendered %d cat logos, want one:\n%s", count, view)
 	}
-	for _, label := range []string{"for you", "following", "bookmarks", "search: golang"} {
+	for _, label := range []string{"for you", "following", "bookmarks", "search · “golang”"} {
 		if !strings.Contains(view, label) {
 			t.Fatalf("multi-column header omitted %q:\n%s", label, view)
 		}

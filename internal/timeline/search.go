@@ -19,7 +19,7 @@ func (m Model) cancelSearch() (tea.Model, tea.Cmd) {
 	// `xeet search` starts directly in an empty prompt. There is no previous
 	// feed to reveal in that case, so escape should leave instead of exposing
 	// an empty search-results screen.
-	if m.searchReturn == modeFeed && m.feed == FeedSearch && m.searchQuery == "" && len(m.posts) == 0 {
+	if m.searchReturn == modeFeed && m.cur().feed == FeedSearch && m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 		return m, tea.Quit
 	}
 	m.mode = m.searchReturn
