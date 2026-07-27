@@ -53,8 +53,8 @@ func TestTimelinePTYHelper(t *testing.T) {
 		return
 	}
 	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{
 		{ID: "1", AuthorName: "Alice", Handle: "alice", Text: "hello from the PTY", LikeCount: 3},
 		{ID: "2", AuthorName: "Bob", Handle: "bob", Text: "unicode: 🐈 café 日本語", MediaCount: 1},
 	}

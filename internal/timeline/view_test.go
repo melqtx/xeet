@@ -79,9 +79,9 @@ func TestMediaChip(t *testing.T) {
 
 func TestUnselectedPostNearSelectionRendersCachedImage(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(10)
-	m.selected = 0
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(10)
+	m.cur().selected = 0
 	m.previews["p1"] = previewState{content: "CACHED-IMAGE-BLOCK"}
 	m.previews["p9"] = previewState{content: "FAR-IMAGE-BLOCK"}
 	m.syncViewport()
@@ -99,9 +99,9 @@ func TestUnselectedPostNearSelectionRendersCachedImage(t *testing.T) {
 
 func TestSelectedImageRowsCarryGutter(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(1)
-	m.selected = 0
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(1)
+	m.cur().selected = 0
 	m.previews["p0"] = previewState{content: "IMGROW1\nIMGROW2\nIMGROW3"}
 	m.syncViewport()
 	content, _, _ := m.renderFeedContent()
@@ -114,11 +114,11 @@ func TestSelectedImageRowsCarryGutter(t *testing.T) {
 
 func TestMultiImagePostShowsCountUnderPreview(t *testing.T) {
 	m := New()
-	m.loading = false
+	m.cur().loading = false
 	posts := mediaPosts(1)
 	posts[0].Media = append(posts[0].Media, posts[0].Media[0], posts[0].Media[0])
-	m.posts = posts
-	m.selected = 0
+	m.cur().posts = posts
+	m.cur().selected = 0
 	m.previews["p0"] = previewState{content: "IMGROW"}
 	m.syncViewport()
 	content, _, _ := m.renderFeedContent()
@@ -126,8 +126,8 @@ func TestMultiImagePostShowsCountUnderPreview(t *testing.T) {
 		t.Fatalf("selected multi-image post is missing its count caption:\n%s", content)
 	}
 
-	m.posts = append(mediaPosts(1), posts[0])
-	m.posts[1].ID = "p1"
+	m.cur().posts = append(mediaPosts(1), posts[0])
+	m.cur().posts[1].ID = "p1"
 	m.previews["p1"] = previewState{content: "IMGROW"}
 	m.syncViewport()
 	content, _, _ = m.renderFeedContent()
@@ -138,9 +138,9 @@ func TestMultiImagePostShowsCountUnderPreview(t *testing.T) {
 
 func TestImageBlockIsPaddedWithGutterLines(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(1)
-	m.selected = 0
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(1)
+	m.cur().selected = 0
 	m.previews["p0"] = previewState{content: "IMGROW"}
 	m.syncViewport()
 	content, _, _ := m.renderFeedContent()
@@ -164,15 +164,15 @@ func TestImageBlockIsPaddedWithGutterLines(t *testing.T) {
 // threadModel builds a conversation whose replies nest one level per post.
 func threadModel(depths ...int) Model {
 	m := NewWithImageMode("off")
-	m.loading = false
+	m.cur().loading = false
 	m.mode = modeThread
-	m.threadRootID = "root"
-	m.threadPosts = []api.ConversationPost{
+	m.cur().threadRootID = "root"
+	m.cur().threadPosts = []api.ConversationPost{
 		{TimelinePost: api.TimelinePost{ID: "root", AuthorName: "Alice", Handle: "alice", Text: "the first word"}},
 	}
 	for i, depth := range depths {
-		parent := m.threadPosts[len(m.threadPosts)-1].ID
-		m.threadPosts = append(m.threadPosts, api.ConversationPost{
+		parent := m.cur().threadPosts[len(m.cur().threadPosts)-1].ID
+		m.cur().threadPosts = append(m.cur().threadPosts, api.ConversationPost{
 			TimelinePost: api.TimelinePost{
 				ID: fmt.Sprintf("r%d", i), AuthorName: "Bob", Handle: fmt.Sprintf("bob%d", i),
 				Text: "a reply", InReplyToID: parent,
@@ -220,8 +220,8 @@ func TestThreadRepliesIndentBehindTheRail(t *testing.T) {
 
 	// The feed is untouched by any of this.
 	feed := NewWithImageMode("off")
-	feed.loading = false
-	feed.posts = []api.TimelinePost{{ID: "1", AuthorName: "Alice", Handle: "alice", Text: "the first word"}}
+	feed.cur().loading = false
+	feed.cur().posts = []api.TimelinePost{{ID: "1", AuthorName: "Alice", Handle: "alice", Text: "the first word"}}
 	content, _, _ := feed.renderFeedContent()
 	if got := headerIndent(t, strings.Split(content, "\n"), "@alice"); got != 2 {
 		t.Errorf("feed post indents %d columns, want 2:\n%s", got, content)
@@ -257,7 +257,7 @@ func TestSelectedReplyUsesTheReplyAccent(t *testing.T) {
 
 	// The bar itself lands on the selected post at its own indent.
 	m := threadModel(1)
-	m.selected = 1
+	m.cur().selected = 1
 	lines := threadLines(t, m)
 	if got := headerIndent(t, lines, "@bob0"); got != 4 {
 		t.Errorf("selected reply indents %d columns, want 4", got)
@@ -279,11 +279,11 @@ func TestSelectedReplyUsesTheReplyAccent(t *testing.T) {
 
 func TestDeepRepliesStayInsideTheFrame(t *testing.T) {
 	m := threadModel(1, 2, 3, 4, 5)
-	for i := range m.threadPosts {
-		m.threadPosts[i].Text = strings.Repeat("wordy ", 40)
+	for i := range m.cur().threadPosts {
+		m.cur().threadPosts[i].Text = strings.Repeat("wordy ", 40)
 	}
-	m.selected = len(m.threadPosts) - 1
-	m.expanded = true
+	m.cur().selected = len(m.cur().threadPosts) - 1
+	m.cur().expanded = true
 	for _, line := range threadLines(t, m) {
 		if width := lipgloss.Width(line); width > m.contentWidth() {
 			t.Fatalf("line is %d columns wide, frame is %d: %q", width, m.contentWidth(), ansi.Strip(line))
@@ -308,7 +308,7 @@ func TestReplyNamesTheParentTheRailCannotPlace(t *testing.T) {
 
 	// A reply that arrives out of order does not sit under its parent.
 	m = threadModel(1, 2, 2)
-	m.threadPosts[3].InReplyToID = "r0"
+	m.cur().threadPosts[3].InReplyToID = "r0"
 	if content := threadContent(t, m); !strings.Contains(content, "↳ @bob0") {
 		t.Fatalf("an out-of-order reply did not name its parent:\n%s", content)
 	}
@@ -317,11 +317,11 @@ func TestReplyNamesTheParentTheRailCannotPlace(t *testing.T) {
 func TestIndentedReplyKeepsAWideCachedImageInsideTheFrame(t *testing.T) {
 	m := threadModel(1, 2)
 	m.imageMode = imageModeANSI
-	last := len(m.threadPosts) - 1
-	m.threadPosts[last].Media = []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/abc", Type: "photo"}}
+	last := len(m.cur().threadPosts) - 1
+	m.cur().threadPosts[last].Media = []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/abc", Type: "photo"}}
 	// A preview cached while its post sat in the feed fills the whole frame.
-	m.previews[m.threadPosts[last].ID] = previewState{content: strings.Repeat("X", m.contentWidth()-4)}
-	m.selected = last
+	m.previews[m.cur().threadPosts[last].ID] = previewState{content: strings.Repeat("X", m.contentWidth()-4)}
+	m.cur().selected = last
 	for _, line := range threadLines(t, m) {
 		if width := lipgloss.Width(line); width > m.contentWidth() {
 			t.Fatalf("image row is %d columns wide, frame is %d: %q", width, m.contentWidth(), ansi.Strip(line))
@@ -357,14 +357,14 @@ func TestHelpShowsImageModeNote(t *testing.T) {
 
 func TestUnselectedMediaPostShowsChip(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{
 		{ID: "1", AuthorName: "Alice", Handle: "alice", Text: "words"},
 		{ID: "2", AuthorName: "Bob", Handle: "bob", Text: "pic https://t.co/x",
 			Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/a", Type: "photo"}}},
 	}
 	m.syncViewport()
-	view := m.viewport.View()
+	view := m.cur().viewport.View()
 	if !strings.Contains(view, "▣ image") {
 		t.Fatalf("unselected media post has no chip:\n%s", view)
 	}

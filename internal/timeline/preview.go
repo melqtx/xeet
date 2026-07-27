@@ -105,8 +105,9 @@ func resolveImageMode(requested string) (imageMode, string) {
 }
 
 func (m *Model) requestPreviews() tea.Cmd {
+	c := m.cur()
 	posts := m.activePosts()
-	if m.imageMode == imageModeOff || len(posts) == 0 || m.selected < 0 || m.selected >= len(posts) {
+	if m.imageMode == imageModeOff || len(posts) == 0 || c.selected < 0 || c.selected >= len(posts) {
 		return nil
 	}
 	width := max(12, m.contentWidth()-4)
@@ -116,7 +117,7 @@ func (m *Model) requestPreviews() tea.Cmd {
 		// preview usable at whatever depth a later page settles its post on.
 		width = max(12, m.contentWidth()-4-2*maxRailDepth)
 	}
-	rows := min(16, max(3, m.viewport.Height-5))
+	rows := min(16, max(3, c.viewport.Height-5))
 	if m.imageMode == imageModeNative {
 		// Kitty Unicode placeholders encode cell coordinates through the
 		// diacritics table, so native previews cannot exceed its size.
@@ -125,17 +126,17 @@ func (m *Model) requestPreviews() tea.Cmd {
 
 	var cmds []tea.Cmd
 	selectedChanged := false
-	from := max(0, m.selected-prefetchBehind)
-	to := min(len(posts)-1, m.selected+prefetchAhead)
+	from := max(0, c.selected-prefetchBehind)
+	to := min(len(posts)-1, c.selected+prefetchAhead)
 	if m.imageMode == imageModeNative || m.imageMode == imageModeWezTerm {
 		// Native terminals can render every image currently visible without the
 		// large text payload of ANSI previews. Include the viewport so images in
 		// tall windows load before the cursor lands directly on their post.
 		for i := range posts {
-			if i >= len(m.starts) || i >= len(m.ends) {
+			if i >= len(c.starts) || i >= len(c.ends) {
 				break
 			}
-			if m.ends[i] >= m.viewport.YOffset && m.starts[i] < m.viewport.YOffset+m.viewport.Height {
+			if c.ends[i] >= c.viewport.YOffset && c.starts[i] < c.viewport.YOffset+c.viewport.Height {
 				from = min(from, max(0, i-1))
 				to = max(to, min(len(posts)-1, i+1))
 			}
@@ -154,15 +155,15 @@ func (m *Model) requestPreviews() tea.Cmd {
 			// the width they are given, so the refetch cannot repeat.
 			tooWide := !state.loading && state.err == nil && previewColumns(state) > width
 			// A failed fetch retries only once its post is selected again.
-			if !tooWide && (i != m.selected || state.loading || state.err == nil) {
+			if !tooWide && (i != c.selected || state.loading || state.err == nil) {
 				continue
 			}
 		}
 		m.previews[post.ID] = previewState{loading: true}
-		if i == m.selected {
+		if i == c.selected {
 			selectedChanged = true
 		}
-		cmds = append(cmds, fetchPreview(m.requestContext(), post.ID, post.Media[0], width, rows, m.imageMode))
+		cmds = append(cmds, fetchPreview(m.requestContext(), post.ID, post.Media[0], width, rows, m.imageMode, c.id))
 	}
 	if selectedChanged {
 		m.syncViewport()
@@ -194,7 +195,7 @@ func (m *Model) requestZoom() tea.Cmd {
 		width = min(width, len(kittyDiacritics))
 		rows = min(rows, len(kittyDiacritics))
 	}
-	return fetchPreview(m.requestContext(), key, post.Media[0], width, rows, m.imageMode)
+	return fetchPreview(m.requestContext(), key, post.Media[0], width, rows, m.imageMode, m.cur().id)
 }
 
 func (m Model) zoomLoading() bool {
@@ -239,7 +240,7 @@ func (m *Model) evictDistantPreviews() {
 		if preview.loading || id == activeZoom {
 			continue
 		}
-		if pos, ok := index[id]; ok && abs(pos-m.selected) <= previewKeepRadius {
+		if pos, ok := index[id]; ok && abs(pos-m.cur().selected) <= previewKeepRadius {
 			continue
 		}
 		m.evictPreview(id, preview)
@@ -264,20 +265,20 @@ func abs(value int) int {
 // flight when the program stops cannot write a native PNG after
 // cleanupPreviews has already run, which would strand it in the temp dir for
 // the rest of a compose handoff.
-func fetchPreview(parent context.Context, postID string, media api.TimelineMedia, width, maxRows int, mode imageMode) tea.Cmd {
+func fetchPreview(parent context.Context, postID string, media api.TimelineMedia, width, maxRows int, mode imageMode, colID int) tea.Cmd {
 	return func() tea.Msg {
 		parsed, err := url.Parse(previewMediaURL(media.URL, mode))
 		if err != nil {
-			return previewMsg{postID: postID, err: err}
+			return previewMsg{postID: postID, colID: colID, err: err}
 		}
 		if err := validateMediaURL(parsed); err != nil {
-			return previewMsg{postID: postID, err: err}
+			return previewMsg{postID: postID, colID: colID, err: err}
 		}
 		ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 		if err != nil {
-			return previewMsg{postID: postID, err: err}
+			return previewMsg{postID: postID, colID: colID, err: err}
 		}
 		req.Header.Set("User-Agent", "github.com/melqtx/xeet/terminal-image-preview")
 		client := &http.Client{
@@ -291,41 +292,41 @@ func fetchPreview(parent context.Context, postID string, media api.TimelineMedia
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return previewMsg{postID: postID, err: fmt.Errorf("load image: %w", err)}
+			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("load image: %w", err)}
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return previewMsg{postID: postID, err: fmt.Errorf("load image: HTTP %d", resp.StatusCode)}
+			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("load image: HTTP %d", resp.StatusCode)}
 		}
 		if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "image/") {
-			return previewMsg{postID: postID, err: fmt.Errorf("media is not an image")}
+			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("media is not an image")}
 		}
 		imageData, err := io.ReadAll(io.LimitReader(resp.Body, maxPreviewBytes+1))
 		if err != nil {
-			return previewMsg{postID: postID, err: err}
+			return previewMsg{postID: postID, colID: colID, err: err}
 		}
 		if len(imageData) > maxPreviewBytes {
-			return previewMsg{postID: postID, err: fmt.Errorf("image is too large to preview")}
+			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("image is too large to preview")}
 		}
 		config, _, err := image.DecodeConfig(bytes.NewReader(imageData))
 		if err != nil {
-			return previewMsg{postID: postID, err: fmt.Errorf("decode image: %w", err)}
+			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("decode image: %w", err)}
 		}
 		if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 50_000_000 {
-			return previewMsg{postID: postID, err: fmt.Errorf("image dimensions are too large to preview")}
+			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("image dimensions are too large to preview")}
 		}
 		decoded, _, err := image.Decode(bytes.NewReader(imageData))
 		if err != nil {
-			return previewMsg{postID: postID, err: fmt.Errorf("decode image: %w", err)}
+			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("decode image: %w", err)}
 		}
 		if mode == imageModeNative {
 			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
 			path, err := writePreviewPNG(downscaleForCells(decoded, columns, rows))
 			if err != nil {
-				return previewMsg{postID: postID, err: err}
+				return previewMsg{postID: postID, colID: colID, err: err}
 			}
 			return previewMsg{
-				postID: postID, nativePath: path, imageID: previewImageID(postID),
+				postID: postID, colID: colID, nativePath: path, imageID: previewImageID(postID),
 				columns: columns, rows: rows,
 			}
 		}
@@ -333,11 +334,11 @@ func fetchPreview(parent context.Context, postID string, media api.TimelineMedia
 			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
 			encoded, err := encodePreviewPNG(downscaleForCells(decoded, columns, rows))
 			if err != nil {
-				return previewMsg{postID: postID, err: err}
+				return previewMsg{postID: postID, colID: colID, err: err}
 			}
-			return previewMsg{postID: postID, nativeData: encoded, columns: columns, rows: rows}
+			return previewMsg{postID: postID, colID: colID, nativeData: encoded, columns: columns, rows: rows}
 		}
-		return previewMsg{postID: postID, content: renderANSIImage(decoded, width, maxRows)}
+		return previewMsg{postID: postID, colID: colID, content: renderANSIImage(decoded, width, maxRows)}
 	}
 }
 

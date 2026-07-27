@@ -9,7 +9,7 @@ import (
 
 func (m *Model) beginSearch() tea.Cmd {
 	m.searchReturn = m.mode
-	m.searchInput.SetValue(m.searchQuery)
+	m.searchInput.SetValue(m.cur().searchQuery)
 	m.mode = modeSearch
 	return m.imageRepaint(m.searchInput.Focus())
 }
@@ -44,7 +44,7 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.storePreview(msg)
 		return m, nil
 	case spinner.TickMsg:
-		if m.loading || m.loadingMore || m.refreshing || m.threadLoading || m.threadMore {
+		if m.cur().loading || m.cur().loadingMore || m.cur().refreshing || m.cur().threadLoading || m.cur().threadMore {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -60,7 +60,7 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if query == "" {
 				return m.cancelSearch()
 			}
-			m.searchQuery = query
+			m.cur().searchQuery = query
 			m.searchInput.Blur()
 			m.mode = modeFeed
 			return m, m.setFeed(FeedSearch)

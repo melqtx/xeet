@@ -85,8 +85,8 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		if m.mode == modeThread {
-			m.threadLoading = true
-			m.threadMore = false
+			m.cur().threadLoading = true
+			m.cur().threadMore = false
 			return m, m.imageRepaint(tea.Batch(toast, m.spinner.Tick, m.requestThread("", false)))
 		}
 		return m, m.imageRepaint(toast)

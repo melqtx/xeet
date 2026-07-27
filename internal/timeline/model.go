@@ -79,44 +79,22 @@ type Model struct {
 	width, height int
 	imageMode     imageMode
 	imageNote     string
-	feed          FeedKind
-	searchQuery   string
-	listID        string
-	listName      string
-	feedSeq       int
-	posts         []api.TimelinePost
-	cursor        string
-	selected      int
-	starts        []int
-	ends          []int
-	loading       bool
-	loadingMore   bool
-	refreshing    bool
 	help          bool
 	altText       bool
 	altTextScroll int
-	expanded      bool
 	zoom          bool
 	action        Action
 	clipboardOK   bool
 	toast         string
 	toastSeq      int
-	err           error
 	liking        map[string]bool
 	previews      map[string]previewState
 	spinner       spinner.Model
-	viewport      viewport.Model
-	wezFrameKey   string
+	columns       []column
+	focus         int
+	nextColID     int
 
 	mode              mode
-	feedSelected      int
-	threadRootID      string
-	threadPosts       []api.ConversationPost
-	threadCursor      string
-	threadLoading     bool
-	threadMore        bool
-	threadErr         error
-	threadSeq         int
 	replyReturn       mode
 	replyEditor       textarea.Model
 	replyPost         api.TimelinePost
@@ -133,10 +111,11 @@ type Model struct {
 }
 
 type pageMsg struct {
-	page *api.TimelinePage
-	err  error
-	more bool
-	seq  int
+	page  *api.TimelinePage
+	err   error
+	more  bool
+	seq   int
+	colID int
 }
 
 type actionMsg struct {
@@ -158,6 +137,7 @@ type replyResultMsg struct {
 type threadMsg struct {
 	rootID string
 	seq    int
+	colID  int
 	page   *api.ConversationPage
 	err    error
 	more   bool
@@ -197,6 +177,7 @@ type previewState struct {
 
 type previewMsg struct {
 	postID     string
+	colID      int
 	content    string
 	nativePath string
 	nativeData string
@@ -227,9 +208,10 @@ func NewWithImageMode(requested string) Model {
 	mode, note := resolveImageMode(requested)
 	return Model{
 		ctx:   context.Background(),
-		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
+		width: 80, height: 24, imageMode: mode, imageNote: note,
 		liking: map[string]bool{}, previews: map[string]previewState{},
-		spinner: s, viewport: vp, replyEditor: editor, searchInput: search,
+		spinner: s, columns: []column{{id: 0, loading: true, viewport: vp}},
+		nextColID: 1, replyEditor: editor, searchInput: search,
 	}
 }
 
@@ -243,29 +225,30 @@ func (m Model) requestContext() context.Context {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.feed == FeedSearch && m.searchQuery == "" {
+	c := m.cur()
+	if c.feed == FeedSearch && c.searchQuery == "" {
 		return tea.Batch(m.searchInput.Focus(), clockTick())
 	}
 	if m.mode == modeListPicker {
 		return tea.Batch(m.spinner.Tick, fetchListsCmd(m.requestContext()), clockTick())
 	}
-	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, "", false, m.feedSeq), clockTick())
+	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id), clockTick())
 }
 
 func Run(ctx context.Context, images string, feed FeedKind, query, listID string) (Action, error) {
 	m := NewWithImageMode(images)
 	m.ctx = ctx
-	m.feed = feed
-	m.searchQuery = query
-	m.listID = listID
+	m.cur().feed = feed
+	m.cur().searchQuery = query
+	m.cur().listID = listID
 	if feed == FeedSearch && query == "" {
-		m.loading = false
+		m.cur().loading = false
 		m.beginSearch()
 	}
 	if feed == FeedList {
-		m.listName = listID
+		m.cur().listName = listID
 		if listID == "" {
-			m.loading = false
+			m.cur().loading = false
 			m.beginListPicker()
 		}
 	}
@@ -298,15 +281,15 @@ func Run(ctx context.Context, images string, feed FeedKind, query, listID string
 	return Action{}, err
 }
 
-func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, cursor string, more bool, seq int) tea.Cmd {
+func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, cursor string, more bool, seq, colID int) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
-			return pageMsg{err: err, more: more, seq: seq}
+			return pageMsg{err: err, more: more, seq: seq, colID: colID}
 		}
 		cfg, err := mgr.Load()
 		if err != nil {
-			return pageMsg{err: err, more: more, seq: seq}
+			return pageMsg{err: err, more: more, seq: seq, colID: colID}
 		}
 		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
@@ -332,7 +315,7 @@ func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, cursor s
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.Save(cfg)
 		}
-		return pageMsg{page: page, err: err, more: more, seq: seq}
+		return pageMsg{page: page, err: err, more: more, seq: seq, colID: colID}
 	}
 }
 
@@ -378,8 +361,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// rows whose text did not change. Clearing forces a full repaint, but
 		// doing it on every keystroke made iTerm2 flicker constantly, so it
 		// only happens when the frame's layout actually moved.
-		if key := m.imageFrameKey(); key != m.wezFrameKey {
-			m.wezFrameKey = key
+		if key := m.imageFrameKey(); key != m.cur().wezFrameKey {
+			m.cur().wezFrameKey = key
 			return m, func() tea.Msg { return tea.ClearScreen() }
 		}
 		return m, nil
@@ -457,7 +440,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
-		if m.loading || m.loadingMore || m.refreshing || m.zoomLoading() {
+		if m.cur().loading || m.cur().loadingMore || m.cur().refreshing || m.zoomLoading() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -483,8 +466,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		if m.expanded {
-			m.expanded = false
+		if m.cur().expanded {
+			m.cur().expanded = false
 			m.syncViewport()
 			m.ensureSelectedVisible()
 			return m, m.imageRepaint()
@@ -494,22 +477,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help = true
 		return m, m.imageRepaint()
 	case "j", "down":
-		m.moveSelection(m.selected + 1)
+		m.moveSelection(m.cur().selected + 1)
 		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMore())
 	case "k", "up":
-		m.moveSelection(m.selected - 1)
+		m.moveSelection(m.cur().selected - 1)
 		return m, m.imageRepaint(m.requestPreviews())
 	case "ctrl+d":
-		m.moveSelection(m.selected + 5)
+		m.moveSelection(m.cur().selected + 5)
 		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMore())
 	case "ctrl+u":
-		m.moveSelection(m.selected - 5)
+		m.moveSelection(m.cur().selected - 5)
 		return m, m.imageRepaint(m.requestPreviews())
 	case "g", "home":
 		m.moveSelection(0)
 		return m, m.imageRepaint(m.requestPreviews())
 	case "G", "end":
-		m.moveSelection(len(m.posts) - 1)
+		m.moveSelection(len(m.cur().posts) - 1)
 		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMore())
 	case "ctrl+l":
 		m.syncViewport()
@@ -517,7 +500,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "f":
 		return m, m.switchFeed()
 	case "b":
-		if m.feed == FeedBookmarks {
+		if m.cur().feed == FeedBookmarks {
 			return m, m.setFeed(FeedForYou)
 		}
 		return m, m.setFeed(FeedBookmarks)
@@ -526,19 +509,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "L":
 		return m, m.beginListPicker()
 	case "R", "ctrl+r":
-		if len(m.posts) == 0 {
-			m.loading = true
+		c := m.cur()
+		if len(c.posts) == 0 {
+			c.loading = true
 		} else {
-			m.refreshing = true
+			c.refreshing = true
 		}
-		m.err = nil
-		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, "", false, m.feedSeq)))
+		c.err = nil
+		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(
+			m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
+		)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
 		}
 	case "a":
-		if errors.Is(m.err, api.ErrSessionExpired) {
+		if errors.Is(m.cur().err, api.ErrSessionExpired) {
 			m.action = Action{Kind: ActionAuthenticate}
 			return m, tea.Quit
 		}
@@ -547,22 +533,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "enter":
 		if post, ok := m.currentPost(); ok {
-			m.feedSelected = m.selected
+			m.cur().feedSelected = m.cur().selected
 			m.mode = modeThread
-			m.threadRootID = post.ID
-			m.threadPosts = []api.ConversationPost{{TimelinePost: post}}
-			m.threadCursor = ""
-			m.threadLoading = true
-			m.threadErr = nil
-			m.selected = 0
-			m.expanded = false
-			m.viewport.YOffset = 0
+			m.cur().threadRootID = post.ID
+			m.cur().threadPosts = []api.ConversationPost{{TimelinePost: post}}
+			m.cur().threadCursor = ""
+			m.cur().threadLoading = true
+			m.cur().threadErr = nil
+			m.cur().selected = 0
+			m.cur().expanded = false
+			m.cur().viewport.YOffset = 0
 			m.syncViewport()
 			return m, m.imageRepaint(tea.Batch(m.spinner.Tick, m.requestThread("", false), m.requestPreviews()))
 		}
 	case " ", "e":
-		if len(m.posts) > 0 {
-			m.expanded = !m.expanded
+		if len(m.cur().posts) > 0 {
+			m.cur().expanded = !m.cur().expanded
 			m.syncViewport()
 			m.ensureSelectedVisible()
 			return m, m.imageRepaint()
@@ -609,16 +595,27 @@ func (m *Model) applyLikeResult(msg likeMsg) tea.Cmd {
 	return cmd
 }
 
-func (m *Model) storePreview(msg previewMsg) {
+func (m *Model) storePreview(msg previewMsg) *column {
+	c := m.columnByID(msg.colID)
+	if c == nil {
+		return nil
+	}
 	m.previews[msg.postID] = previewState{
 		content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
 		columns: msg.columns, rows: msg.rows, err: msg.err,
 	}
+	return c
 }
 
 func (m *Model) applyPreview(msg previewMsg) tea.Cmd {
-	m.storePreview(msg)
+	c := m.storePreview(msg)
+	if c == nil {
+		return nil
+	}
 	m.evictDistantPreviews()
+	if c != m.cur() {
+		return nil
+	}
 	m.syncViewport()
 	m.ensureSelectedVisible()
 	return m.imageRepaint()
@@ -687,13 +684,13 @@ func (m *Model) moveAltText(delta int) {
 }
 
 func (m *Model) moveSelection(target int) {
-	if len(m.posts) == 0 {
+	if len(m.cur().posts) == 0 {
 		return
 	}
-	target = max(0, min(len(m.posts)-1, target))
-	if target != m.selected {
-		m.selected = target
-		m.expanded = false
+	target = max(0, min(len(m.cur().posts)-1, target))
+	if target != m.cur().selected {
+		m.cur().selected = target
+		m.cur().expanded = false
 	}
 	m.toast = ""
 	m.syncViewport()
@@ -702,70 +699,78 @@ func (m *Model) moveSelection(target int) {
 
 // setFeed resets feed state and kicks off a fresh first page for kind.
 func (m *Model) setFeed(kind FeedKind) tea.Cmd {
-	m.feed = kind
-	m.feedSeq++
-	m.posts = nil
-	m.cursor = ""
-	m.selected = 0
-	m.expanded = false
-	m.loading = true
-	m.loadingMore = false
-	m.refreshing = false
-	m.err = nil
-	m.viewport.YOffset = 0
+	c := m.cur()
+	c.feed = kind
+	c.feedSeq++
+	c.posts = nil
+	c.cursor = ""
+	c.selected = 0
+	c.expanded = false
+	c.loading = true
+	c.loadingMore = false
+	c.refreshing = false
+	c.err = nil
+	c.viewport.YOffset = 0
 	m.syncViewport()
-	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, "", false, m.feedSeq)))
+	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(
+		m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
+	)))
 }
 
 // switchFeed keeps the f-key semantics: toggle For You <-> Following.
 // From any other feed kind it returns to For You.
 func (m *Model) switchFeed() tea.Cmd {
-	if m.feed == FeedForYou {
+	if m.cur().feed == FeedForYou {
 		return m.setFeed(FeedFollowing)
 	}
 	return m.setFeed(FeedForYou)
 }
 
 func (m *Model) maybeLoadMore() tea.Cmd {
-	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
-		m.loadingMore = true
-		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, m.cursor, true, m.feedSeq))
+	c := m.cur()
+	if len(c.posts) > 0 && c.selected >= len(c.posts)-5 && c.cursor != "" && !c.loadingMore {
+		c.loadingMore = true
+		return tea.Batch(m.spinner.Tick, fetchPageSeq(
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.cursor, true, c.feedSeq, c.id,
+		))
 	}
 	return nil
 }
 
 func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
-	if msg.seq != m.feedSeq {
+	c := m.columnByID(msg.colID)
+	if c == nil || msg.seq != c.feedSeq {
 		// A page from before the last feed switch; the wrong feed's posts
 		// must not leak into the current one.
 		return m, nil
 	}
-	m.loading = false
-	m.loadingMore = false
-	m.refreshing = false
+	c.loading = false
+	c.loadingMore = false
+	c.refreshing = false
 	if msg.err != nil {
-		m.err = msg.err
+		c.err = msg.err
 		return m, nil
 	}
-	m.err = nil
-	threadContext := m.mode == modeThread ||
+	c.err = nil
+	focused := c == m.cur()
+	threadContext := focused && (m.mode == modeThread ||
 		(m.mode == modeReply && m.replyReturn == modeThread) ||
 		(m.mode == modeSearch && m.searchReturn == modeThread) ||
-		(m.mode == modeListPicker && m.listReturn == modeThread)
-	feedIndex := m.selected
+		(m.mode == modeListPicker && m.listReturn == modeThread))
+	feedIndex := c.selected
 	if threadContext {
-		feedIndex = m.feedSelected
+		feedIndex = c.feedSelected
 	}
 	selectedID := ""
-	if feedIndex >= 0 && feedIndex < len(m.posts) {
-		selectedID = m.posts[feedIndex].ID
+	if feedIndex >= 0 && feedIndex < len(c.posts) {
+		selectedID = c.posts[feedIndex].ID
 	}
-	seen := make(map[string]bool, len(m.posts))
-	for _, post := range m.posts {
+	seen := make(map[string]bool, len(c.posts))
+	for _, post := range c.posts {
 		seen[post.ID] = true
 	}
 	var toast tea.Cmd
-	if !msg.more && len(m.posts) > 0 {
+	if !msg.more && len(c.posts) > 0 {
 		var fresh []api.TimelinePost
 		for _, post := range msg.page.Posts {
 			if !seen[post.ID] {
@@ -773,7 +778,7 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if len(fresh) > 0 {
-			m.posts = append(fresh, m.posts...)
+			c.posts = append(fresh, c.posts...)
 			feedIndex += len(fresh)
 			label := "posts"
 			if len(fresh) == 1 {
@@ -786,23 +791,23 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 	} else {
 		for _, post := range msg.page.Posts {
 			if !seen[post.ID] {
-				m.posts = append(m.posts, post)
+				c.posts = append(c.posts, post)
 				seen[post.ID] = true
 			}
 		}
-		m.cursor = msg.page.Cursor
-		feedIndex = indexOfPost(m.posts, selectedID)
+		c.cursor = msg.page.Cursor
+		feedIndex = indexOfPost(c.posts, selectedID)
 		if feedIndex < 0 {
 			feedIndex = 0
 		}
 		m.toast = ""
 	}
 	if threadContext {
-		m.feedSelected = feedIndex
+		c.feedSelected = feedIndex
 	} else {
-		m.selected = feedIndex
+		c.selected = feedIndex
 	}
-	if m.mode == modeReply {
+	if !focused || m.mode == modeReply {
 		return m, toast
 	}
 	m.syncViewport()
@@ -836,13 +841,13 @@ func (m Model) imageRepaint(cmds ...tea.Cmd) tea.Cmd {
 func (m Model) imageFrameKey() string {
 	hash := fnv.New64a()
 	fmt.Fprintf(hash, "%d|%d|%d|%d|%v|%v|%v|%v|%v|",
-		m.viewport.YOffset, m.viewport.Width, m.viewport.Height,
-		m.mode, m.help, m.altText, m.zoom, m.expanded, m.loading)
-	for _, start := range m.starts {
+		m.cur().viewport.YOffset, m.cur().viewport.Width, m.cur().viewport.Height,
+		m.mode, m.help, m.altText, m.zoom, m.cur().expanded, m.cur().loading)
+	for _, start := range m.cur().starts {
 		fmt.Fprintf(hash, "%d,", start)
 	}
-	if len(m.ends) > 0 {
-		fmt.Fprintf(hash, "|%d", m.ends[len(m.ends)-1])
+	if len(m.cur().ends) > 0 {
+		fmt.Fprintf(hash, "|%d", m.cur().ends[len(m.cur().ends)-1])
 	}
 	return fmt.Sprintf("%x", hash.Sum64())
 }
@@ -853,8 +858,8 @@ func (m *Model) resize() {
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
-	m.viewport.Width = w
-	m.viewport.Height = viewportHeight
+	m.cur().viewport.Width = w
+	m.cur().viewport.Height = viewportHeight
 	m.replyEditor.SetWidth(max(20, w-6))
 	m.replyEditor.SetHeight(min(7, max(3, m.height-16)))
 	m.searchInput.Width = max(10, w-16)
@@ -871,56 +876,56 @@ func (m *Model) syncViewport() {
 	} else {
 		content, starts, ends = m.renderFeedContent()
 	}
-	m.starts = starts
-	m.ends = ends
-	m.viewport.SetContent(content)
+	m.cur().starts = starts
+	m.cur().ends = ends
+	m.cur().viewport.SetContent(content)
 }
 
 func (m *Model) ensureSelectedVisible() {
-	if m.selected < 0 || m.selected >= len(m.starts) {
+	if m.cur().selected < 0 || m.cur().selected >= len(m.cur().starts) {
 		return
 	}
 	// Keep a small margin above and below the selection so movement never
 	// pins it to the viewport edge (vim's scrolloff).
 	const margin = 2
-	start := m.starts[m.selected]
-	end := m.ends[m.selected]
-	top := m.viewport.YOffset
+	start := m.cur().starts[m.cur().selected]
+	end := m.cur().ends[m.cur().selected]
+	top := m.cur().viewport.YOffset
 	if start-margin < top {
 		top = max(0, start-margin)
-	} else if end+margin >= top+m.viewport.Height {
-		top = end + margin - m.viewport.Height + 1
+	} else if end+margin >= top+m.cur().viewport.Height {
+		top = end + margin - m.cur().viewport.Height + 1
 	}
 	// A post taller than the viewport anchors to its own first line.
 	if start < top {
 		top = start
 	}
-	maxTop := max(0, m.ends[len(m.ends)-1]+1-m.viewport.Height)
-	m.viewport.YOffset = max(0, min(top, maxTop))
+	maxTop := max(0, m.cur().ends[len(m.cur().ends)-1]+1-m.cur().viewport.Height)
+	m.cur().viewport.YOffset = max(0, min(top, maxTop))
 }
 
 func (m Model) activePosts() []api.TimelinePost {
 	if m.mode == modeThread {
-		posts := make([]api.TimelinePost, len(m.threadPosts))
-		for i := range m.threadPosts {
-			posts[i] = m.threadPosts[i].TimelinePost
+		posts := make([]api.TimelinePost, len(m.cur().threadPosts))
+		for i := range m.cur().threadPosts {
+			posts[i] = m.cur().threadPosts[i].TimelinePost
 		}
 		return posts
 	}
-	return m.posts
+	return m.cur().posts
 }
 
 func (m Model) currentPost() (api.TimelinePost, bool) {
 	if m.mode == modeThread {
-		if m.selected < 0 || m.selected >= len(m.threadPosts) {
+		if m.cur().selected < 0 || m.cur().selected >= len(m.cur().threadPosts) {
 			return api.TimelinePost{}, false
 		}
-		return m.threadPosts[m.selected].TimelinePost, true
+		return m.cur().threadPosts[m.cur().selected].TimelinePost, true
 	}
-	if m.selected < 0 || m.selected >= len(m.posts) {
+	if m.cur().selected < 0 || m.cur().selected >= len(m.cur().posts) {
 		return api.TimelinePost{}, false
 	}
-	return m.posts[m.selected], true
+	return m.cur().posts[m.cur().selected], true
 }
 
 func (m *Model) applyLike(id string, liked bool) {
@@ -935,11 +940,14 @@ func (m *Model) applyLike(id string, liked bool) {
 			post.LikeCount--
 		}
 	}
-	for i := range m.posts {
-		apply(&m.posts[i])
-	}
-	for i := range m.threadPosts {
-		apply(&m.threadPosts[i].TimelinePost)
+	for columnIndex := range m.columns {
+		c := &m.columns[columnIndex]
+		for i := range c.posts {
+			apply(&c.posts[i])
+		}
+		for i := range c.threadPosts {
+			apply(&c.threadPosts[i].TimelinePost)
+		}
 	}
 }
 

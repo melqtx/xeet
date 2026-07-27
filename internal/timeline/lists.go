@@ -79,7 +79,7 @@ func (m Model) updateListPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.storePreview(msg)
 		return m, nil
 	case spinner.TickMsg:
-		if m.listPickerLoading || m.loading || m.loadingMore || m.refreshing || m.threadLoading || m.threadMore {
+		if m.listPickerLoading || m.cur().loading || m.cur().loadingMore || m.cur().refreshing || m.cur().threadLoading || m.cur().threadMore {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -103,8 +103,8 @@ func (m Model) updateListPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		selected := m.listPicker[m.listPickerSel]
-		m.listID = selected.ID
-		m.listName = selected.Name
+		m.cur().listID = selected.ID
+		m.cur().listName = selected.Name
 		m.listPickerLoading = false
 		m.mode = modeFeed
 		return m, m.setFeed(FeedList)

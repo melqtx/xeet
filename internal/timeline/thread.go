@@ -17,15 +17,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq int) tea.Cmd {
+func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq, colID int) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
-			return threadMsg{rootID: tweetID, seq: seq, err: err, more: more}
+			return threadMsg{rootID: tweetID, seq: seq, colID: colID, err: err, more: more}
 		}
 		cfg, err := mgr.Load()
 		if err != nil {
-			return threadMsg{rootID: tweetID, seq: seq, err: err, more: more}
+			return threadMsg{rootID: tweetID, seq: seq, colID: colID, err: err, more: more}
 		}
 		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
@@ -34,39 +34,41 @@ func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq 
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.Save(cfg)
 		}
-		return threadMsg{rootID: tweetID, seq: seq, page: page, err: err, more: more}
+		return threadMsg{rootID: tweetID, seq: seq, colID: colID, page: page, err: err, more: more}
 	}
 }
 
 func (m *Model) requestThread(cursor string, more bool) tea.Cmd {
-	m.threadSeq++
-	return fetchThread(m.requestContext(), m.threadRootID, cursor, more, m.threadSeq)
+	c := m.cur()
+	c.threadSeq++
+	return fetchThread(m.requestContext(), c.threadRootID, cursor, more, c.threadSeq, c.id)
 }
 
 func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd) {
-	if msg.rootID != m.threadRootID || msg.seq != m.threadSeq {
+	c := m.columnByID(msg.colID)
+	if c == nil || msg.rootID != c.threadRootID || msg.seq != c.threadSeq {
 		return m, nil
 	}
-	m.threadLoading = false
-	m.threadMore = false
+	c.threadLoading = false
+	c.threadMore = false
 	if msg.err != nil {
-		m.threadErr = msg.err
+		c.threadErr = msg.err
 		return m, nil
 	}
-	m.threadErr = nil
+	c.threadErr = nil
 	selectedID := ""
-	if m.selected >= 0 && m.selected < len(m.threadPosts) {
-		selectedID = m.threadPosts[m.selected].ID
+	if c.selected >= 0 && c.selected < len(c.threadPosts) {
+		selectedID = c.threadPosts[c.selected].ID
 	}
 	seen := map[string]bool{}
 	var merged []api.ConversationPost
 	if msg.more {
-		merged = append(merged, m.threadPosts...)
+		merged = append(merged, c.threadPosts...)
 		for _, post := range merged {
 			seen[post.ID] = true
 		}
 	}
-	for _, post := range m.resolveConversationPosts(msg.page) {
+	for _, post := range c.resolveConversationPosts(msg.page) {
 		if !seen[post.ID] {
 			merged = append(merged, post)
 			seen[post.ID] = true
@@ -75,19 +77,19 @@ func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd)
 	// X can omit the focal post from a refresh while still returning replies.
 	// The conversation must always keep its root: without it a refresh would
 	// silently turn the thread into a list of orphaned replies.
-	if !seen[m.threadRootID] {
-		if root, ok := m.threadRootPost(); ok {
+	if !seen[c.threadRootID] {
+		if root, ok := c.threadRootPost(); ok {
 			merged = append([]api.ConversationPost{root}, merged...)
 		}
 	}
-	m.threadPosts = merged
-	m.normalizeThreadDepths()
-	m.threadCursor = msg.page.Cursor
-	m.selected = indexOfConversationPost(m.threadPosts, selectedID)
-	if m.selected < 0 {
-		m.selected = 0
+	c.threadPosts = merged
+	c.normalizeThreadDepths()
+	c.threadCursor = msg.page.Cursor
+	c.selected = indexOfConversationPost(c.threadPosts, selectedID)
+	if c.selected < 0 {
+		c.selected = 0
 	}
-	if repaint {
+	if repaint && c == m.cur() {
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		return m, m.imageRepaint(m.requestPreviews())
@@ -95,9 +97,9 @@ func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd)
 	return m, nil
 }
 
-func (m Model) threadRootPost() (api.ConversationPost, bool) {
-	for _, post := range m.threadPosts {
-		if post.ID == m.threadRootID {
+func (c *column) threadRootPost() (api.ConversationPost, bool) {
+	for _, post := range c.threadPosts {
+		if post.ID == c.threadRootID {
 			post.Depth = 0
 			return post, true
 		}
@@ -105,10 +107,10 @@ func (m Model) threadRootPost() (api.ConversationPost, bool) {
 	return api.ConversationPost{}, false
 }
 
-func (m Model) resolveConversationPosts(page *api.ConversationPage) []api.ConversationPost {
+func (c *column) resolveConversationPosts(page *api.ConversationPage) []api.ConversationPost {
 	resolved := append([]api.ConversationPost(nil), page.Posts...)
-	depths := make(map[string]int, len(m.threadPosts)+len(resolved))
-	for _, post := range m.threadPosts {
+	depths := make(map[string]int, len(c.threadPosts)+len(resolved))
+	for _, post := range c.threadPosts {
 		depths[post.ID] = post.Depth
 	}
 	for _, post := range resolved {
@@ -137,20 +139,20 @@ func (m Model) resolveConversationPosts(page *api.ConversationPage) []api.Conver
 	return resolved
 }
 
-func (m *Model) normalizeThreadDepths() {
-	byID := make(map[string]api.ConversationPost, len(m.threadPosts))
-	for _, post := range m.threadPosts {
+func (c *column) normalizeThreadDepths() {
+	byID := make(map[string]api.ConversationPost, len(c.threadPosts))
+	for _, post := range c.threadPosts {
 		byID[post.ID] = post
 	}
-	for i := range m.threadPosts {
-		if m.threadPosts[i].ID == m.threadRootID {
-			m.threadPosts[i].Depth = 0
+	for i := range c.threadPosts {
+		if c.threadPosts[i].ID == c.threadRootID {
+			c.threadPosts[i].Depth = 0
 			continue
 		}
 		depth := 1
-		parent := m.threadPosts[i].InReplyToID
-		visited := map[string]bool{m.threadPosts[i].ID: true}
-		for parent != "" && parent != m.threadRootID && !visited[parent] {
+		parent := c.threadPosts[i].InReplyToID
+		visited := map[string]bool{c.threadPosts[i].ID: true}
+		for parent != "" && parent != c.threadRootID && !visited[parent] {
 			visited[parent] = true
 			ancestor, ok := byID[parent]
 			if !ok {
@@ -159,14 +161,14 @@ func (m *Model) normalizeThreadDepths() {
 			parent = ancestor.InReplyToID
 			depth++
 		}
-		m.threadPosts[i].Depth = depth
+		c.threadPosts[i].Depth = depth
 	}
 }
 
 func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
-		if m.threadLoading || m.threadMore || m.zoomLoading() {
+		if m.cur().threadLoading || m.cur().threadMore || m.zoomLoading() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -195,23 +197,23 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		m.mode = modeFeed
-		m.selected = m.feedSelected
-		m.threadSeq++
-		m.threadRootID = ""
-		m.expanded = false
-		m.threadLoading = false
-		m.threadMore = false
+		m.cur().selected = m.cur().feedSelected
+		m.cur().threadSeq++
+		m.cur().threadRootID = ""
+		m.cur().expanded = false
+		m.cur().threadLoading = false
+		m.cur().threadMore = false
 		// An expired session affects every request, not just this thread.
 		// Hand the error to the feed so its reconnect flow stays reachable.
-		if errors.Is(m.threadErr, api.ErrSessionExpired) {
-			m.err = m.threadErr
+		if errors.Is(m.cur().threadErr, api.ErrSessionExpired) {
+			m.cur().err = m.cur().threadErr
 		}
-		m.threadErr = nil
+		m.cur().threadErr = nil
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		return m, m.imageRepaint()
 	case "a":
-		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+		if errors.Is(m.cur().threadErr, api.ErrSessionExpired) {
 			m.action = Action{Kind: ActionAuthenticate}
 			return m, tea.Quit
 		}
@@ -222,27 +224,27 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help = true
 		return m, m.imageRepaint()
 	case "j", "down":
-		m.moveThreadSelection(m.selected + 1)
+		m.moveThreadSelection(m.cur().selected + 1)
 		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMoreThread())
 	case "k", "up":
-		m.moveThreadSelection(m.selected - 1)
+		m.moveThreadSelection(m.cur().selected - 1)
 		return m, m.imageRepaint(m.requestPreviews())
 	case "ctrl+d":
-		m.moveThreadSelection(m.selected + 5)
+		m.moveThreadSelection(m.cur().selected + 5)
 		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMoreThread())
 	case "ctrl+u":
-		m.moveThreadSelection(m.selected - 5)
+		m.moveThreadSelection(m.cur().selected - 5)
 		return m, m.imageRepaint(m.requestPreviews())
 	case "g", "home":
 		m.moveThreadSelection(0)
 		return m, m.imageRepaint(m.requestPreviews())
 	case "G", "end":
-		m.moveThreadSelection(len(m.threadPosts) - 1)
+		m.moveThreadSelection(len(m.cur().threadPosts) - 1)
 		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMoreThread())
 	case "R", "ctrl+r":
-		m.threadLoading = true
-		m.threadMore = false
-		m.threadErr = nil
+		m.cur().threadLoading = true
+		m.cur().threadMore = false
+		m.cur().threadErr = nil
 		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, m.requestThread("", false)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
@@ -251,7 +253,7 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "/":
 		return m, m.beginSearch()
 	case "enter", " ", "e":
-		m.expanded = !m.expanded
+		m.cur().expanded = !m.cur().expanded
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		return m, m.imageRepaint()
@@ -270,20 +272,20 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) moveThreadSelection(target int) {
-	if len(m.threadPosts) == 0 {
+	if len(m.cur().threadPosts) == 0 {
 		return
 	}
-	m.selected = max(0, min(len(m.threadPosts)-1, target))
-	m.expanded = false
+	m.cur().selected = max(0, min(len(m.cur().threadPosts)-1, target))
+	m.cur().expanded = false
 	m.toast = ""
 	m.syncViewport()
 	m.ensureSelectedVisible()
 }
 
 func (m *Model) maybeLoadMoreThread() tea.Cmd {
-	if len(m.threadPosts) > 0 && m.selected >= len(m.threadPosts)-5 && m.threadCursor != "" && !m.threadLoading && !m.threadMore {
-		m.threadMore = true
-		return tea.Batch(m.spinner.Tick, m.requestThread(m.threadCursor, true))
+	if len(m.cur().threadPosts) > 0 && m.cur().selected >= len(m.cur().threadPosts)-5 && m.cur().threadCursor != "" && !m.cur().threadLoading && !m.cur().threadMore {
+		m.cur().threadMore = true
+		return tea.Batch(m.spinner.Tick, m.requestThread(m.cur().threadCursor, true))
 	}
 	return nil
 }

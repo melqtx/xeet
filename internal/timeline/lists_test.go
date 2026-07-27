@@ -14,8 +14,8 @@ import (
 
 func TestListPickerOpensOnCapitalLAndClosesOnEsc(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.loading = false
-	m.feed = FeedFollowing
+	m.cur().loading = false
+	m.cur().feed = FeedFollowing
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
 	m = next.(Model)
@@ -23,24 +23,24 @@ func TestListPickerOpensOnCapitalLAndClosesOnEsc(t *testing.T) {
 	if cmd == nil || m.mode != modeListPicker || m.listReturn != modeFeed {
 		t.Fatalf("list picker did not open from feed: mode=%v return=%v cmd=%v", m.mode, m.listReturn, cmd)
 	}
-	if !m.listPickerLoading || m.feed != FeedFollowing {
-		t.Fatalf("opening picker changed the feed or skipped loading: feed=%v loading=%v", m.feed, m.listPickerLoading)
+	if !m.listPickerLoading || m.cur().feed != FeedFollowing {
+		t.Fatalf("opening picker changed the feed or skipped loading: feed=%v loading=%v", m.cur().feed, m.listPickerLoading)
 	}
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.mode != modeFeed || m.feed != FeedFollowing || m.listPickerLoading {
-		t.Fatalf("esc did not restore the feed: mode=%v feed=%v loading=%v", m.mode, m.feed, m.listPickerLoading)
+	if m.mode != modeFeed || m.cur().feed != FeedFollowing || m.listPickerLoading {
+		t.Fatalf("esc did not restore the feed: mode=%v feed=%v loading=%v", m.mode, m.cur().feed, m.listPickerLoading)
 	}
 }
 
 func TestListPickerSelectionSwitchesFeedAndResetsState(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.loading = false
-	m.feed = FeedBookmarks
-	m.feedSeq = 7
-	m.posts = []api.TimelinePost{{ID: "old", Text: "old"}}
-	m.cursor = "old-cursor"
-	m.selected = 1
+	m.cur().loading = false
+	m.cur().feed = FeedBookmarks
+	m.cur().feedSeq = 7
+	m.cur().posts = []api.TimelinePost{{ID: "old", Text: "old"}}
+	m.cur().cursor = "old-cursor"
+	m.cur().selected = 1
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
 	m = update(t, m, listsMsg{lists: []api.ListInfo{
@@ -51,24 +51,24 @@ func TestListPickerSelectionSwitchesFeedAndResetsState(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)
 
-	if cmd == nil || m.mode != modeFeed || m.feed != FeedList {
-		t.Fatalf("list selection did not become a feed: mode=%v feed=%v cmd=%v", m.mode, m.feed, cmd)
+	if cmd == nil || m.mode != modeFeed || m.cur().feed != FeedList {
+		t.Fatalf("list selection did not become a feed: mode=%v feed=%v cmd=%v", m.mode, m.cur().feed, cmd)
 	}
-	if m.listID != "200" || m.listName != "Second" || m.feedSeq != 8 {
-		t.Fatalf("selected list or stale-page sequence is wrong: id=%q name=%q seq=%d", m.listID, m.listName, m.feedSeq)
+	if m.cur().listID != "200" || m.cur().listName != "Second" || m.cur().feedSeq != 8 {
+		t.Fatalf("selected list or stale-page sequence is wrong: id=%q name=%q seq=%d", m.cur().listID, m.cur().listName, m.cur().feedSeq)
 	}
-	if len(m.posts) != 0 || m.cursor != "" || m.selected != 0 || !m.loading {
+	if len(m.cur().posts) != 0 || m.cur().cursor != "" || m.cur().selected != 0 || !m.cur().loading {
 		t.Fatalf("list feed did not reset for its first page: posts=%d cursor=%q selected=%d loading=%v",
-			len(m.posts), m.cursor, m.selected, m.loading)
+			len(m.cur().posts), m.cur().cursor, m.cur().selected, m.cur().loading)
 	}
 }
 
 func TestListFeedHeaderShowsListNameWithinWidth(t *testing.T) {
 	m := NewWithImageMode("off")
 	m.width = 42
-	m.loading = false
-	m.feed = FeedList
-	m.listName = strings.Repeat("very long list name ", 8)
+	m.cur().loading = false
+	m.cur().feed = FeedList
+	m.cur().listName = strings.Repeat("very long list name ", 8)
 
 	header := m.header(m.contentWidth())
 	if !strings.Contains(header, "List:") {
@@ -81,9 +81,9 @@ func TestListFeedHeaderShowsListNameWithinWidth(t *testing.T) {
 
 func TestStalePageFromPreviousFeedIsDroppedAfterListSwitch(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.loading = false
-	m.feed = FeedForYou
-	m.feedSeq = 3
+	m.cur().loading = false
+	m.cur().feed = FeedForYou
+	m.cur().feedSeq = 3
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
 	m = update(t, m, listsMsg{lists: []api.ListInfo{{ID: "100", Name: "Cats"}}})
@@ -93,8 +93,8 @@ func TestStalePageFromPreviousFeedIsDroppedAfterListSwitch(t *testing.T) {
 		page: &api.TimelinePage{Posts: []api.TimelinePost{{ID: "stale", Text: "old feed"}}},
 	})
 
-	if m.feed != FeedList || m.feedSeq != 4 || len(m.posts) != 0 {
-		t.Fatalf("stale page leaked after list switch: feed=%v seq=%d posts=%v", m.feed, m.feedSeq, m.posts)
+	if m.cur().feed != FeedList || m.cur().feedSeq != 4 || len(m.cur().posts) != 0 {
+		t.Fatalf("stale page leaked after list switch: feed=%v seq=%d posts=%v", m.cur().feed, m.cur().feedSeq, m.cur().posts)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestListPickerRendersLoadingAndErrorStates(t *testing.T) {
 	m := NewWithImageMode("off")
 	m.width = 60
 	m.height = 20
-	m.loading = false
+	m.cur().loading = false
 	m.beginListPicker()
 
 	if view := m.View(); !strings.Contains(view, "loading lists") {
@@ -123,25 +123,25 @@ func TestListPickerRendersLoadingAndErrorStates(t *testing.T) {
 
 func TestListPickerKeepsBackgroundFeedPagesFlowing(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.loading = false
+	m.cur().loading = false
 	m.beginListPicker()
 
 	m = update(t, m, pageMsg{
 		page: &api.TimelinePage{Posts: []api.TimelinePost{{ID: "fresh", Text: "fresh"}}},
 	})
 
-	if m.mode != modeListPicker || len(m.posts) != 1 || m.posts[0].ID != "fresh" {
-		t.Fatalf("background feed page did not flow through picker: mode=%v posts=%v", m.mode, m.posts)
+	if m.mode != modeListPicker || len(m.cur().posts) != 1 || m.cur().posts[0].ID != "fresh" {
+		t.Fatalf("background feed page did not flow through picker: mode=%v posts=%v", m.mode, m.cur().posts)
 	}
 }
 
 func TestListPickerKeepsBackgroundThreadPagesFlowing(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.loading = false
+	m.cur().loading = false
 	m.mode = modeThread
-	m.threadRootID = "root"
-	m.threadSeq = 4
-	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m.cur().threadRootID = "root"
+	m.cur().threadSeq = 4
+	m.cur().threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
 	m.beginListPicker()
 
 	m = update(t, m, threadMsg{
@@ -153,15 +153,15 @@ func TestListPickerKeepsBackgroundThreadPagesFlowing(t *testing.T) {
 		}}},
 	})
 
-	if m.mode != modeListPicker || len(m.threadPosts) != 2 {
-		t.Fatalf("background thread page did not flow through picker: mode=%v posts=%v", m.mode, m.threadPosts)
+	if m.mode != modeListPicker || len(m.cur().threadPosts) != 2 {
+		t.Fatalf("background thread page did not flow through picker: mode=%v posts=%v", m.mode, m.cur().threadPosts)
 	}
 }
 
 func TestListPickerKeepsLikePreviewAndSpinnerResultsFlowing(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.loading = false
-	m.posts = []api.TimelinePost{{ID: "post", Liked: true}}
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "post", Liked: true}}
 	m.liking["post"] = true
 	m.beginListPicker()
 

@@ -113,8 +113,8 @@ func TestKittyPlaceholderBlockClampsToDiacriticsTable(t *testing.T) {
 
 func TestZoomOpensFetchesAndCloses(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(2)
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(2)
 	m.syncViewport()
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
@@ -129,7 +129,7 @@ func TestZoomOpensFetchesAndCloses(t *testing.T) {
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = next.(Model)
-	if m.selected != 0 {
+	if m.cur().selected != 0 {
 		t.Fatal("feed keys leaked through the zoom view")
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -146,8 +146,8 @@ func TestZoomOpensFetchesAndCloses(t *testing.T) {
 
 func TestZoomWithoutMediaIsIgnored(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{{ID: "1", Text: "text only", Handle: "cat"}}
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "1", Text: "text only", Handle: "cat"}}
 	m.syncViewport()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
@@ -238,8 +238,8 @@ func TestDownscaleForCellsKeepsSmallImages(t *testing.T) {
 func TestWezRepaintClearsOnlyWhenFrameMoves(t *testing.T) {
 	m := New()
 	m.imageMode = imageModeWezTerm
-	m.loading = false
-	m.posts = mediaPosts(6)
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(6)
 	m.width, m.height = 80, 24
 	m.resize()
 
@@ -254,7 +254,7 @@ func TestWezRepaintClearsOnlyWhenFrameMoves(t *testing.T) {
 		t.Fatal("unmoved frame still cleared the screen (iTerm2 flicker)")
 	}
 
-	m.viewport.YOffset += 3
+	m.cur().viewport.YOffset += 3
 	next, cmd = m.Update(wezRepaintMsg{})
 	m = next.(Model)
 	if cmd == nil {
@@ -275,8 +275,8 @@ func TestWezRepaintIgnoredOutsideWezTermMode(t *testing.T) {
 func TestWezTermTimelineFrameKeepsStableHeight(t *testing.T) {
 	m := New()
 	m.imageMode = imageModeWezTerm
-	m.loading = false
-	m.posts = []api.TimelinePost{{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{
 		ID: "1", AuthorName: "Alice", Handle: "alice", Text: "image post",
 		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/a"}},
 	}}
@@ -294,8 +294,8 @@ func TestWezTermTimelineFrameKeepsStableHeight(t *testing.T) {
 
 func TestNativeFrameDoesNotDeleteCachedImages(t *testing.T) {
 	m := NewWithImageMode("native")
-	m.loading = false
-	m.posts = []api.TimelinePost{{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{
 		ID: "1", AuthorName: "Alice", Handle: "alice", Text: "image post",
 		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/a"}},
 	}}
@@ -314,9 +314,9 @@ func TestNativeFrameDoesNotDeleteCachedImages(t *testing.T) {
 func TestNativeCachedPreviewStaysRenderedAwayFromSelection(t *testing.T) {
 	m := NewWithImageMode("native")
 	m.imageMode = imageModeNative
-	m.loading = false
-	m.posts = mediaPosts(inlineImageRadius + 3)
-	m.selected = len(m.posts) - 1
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(inlineImageRadius + 3)
+	m.cur().selected = len(m.cur().posts) - 1
 	m.previews["p0"] = previewState{nativePath: "/tmp/image.png", imageID: 7, columns: 20, rows: 4}
 	content, _, _ := m.renderFeedContent()
 	if !strings.Contains(content, "\x1b_Ga=t") {
@@ -336,8 +336,8 @@ func TestBubbleTeaTruncationPreservesNativePlacement(t *testing.T) {
 
 func TestSelectedPostRequestsInlinePreview(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{
 		ID: "123", Text: "photo",
 		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/abc", Type: "photo"}},
 	}}
@@ -346,7 +346,7 @@ func TestSelectedPostRequestsInlinePreview(t *testing.T) {
 	if cmd == nil || !m.previews["123"].loading {
 		t.Fatal("inline preview was not requested")
 	}
-	if !strings.Contains(m.viewport.View(), "loading image") {
+	if !strings.Contains(m.cur().viewport.View(), "loading image") {
 		t.Fatal("loading state is not rendered in the timeline")
 	}
 }
@@ -364,14 +364,14 @@ func mediaPosts(count int) []api.TimelinePost {
 
 func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(20)
-	m.selected = 5
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(20)
+	m.cur().selected = 5
 	m.syncViewport()
 	if cmd := m.requestPreviews(); cmd == nil {
 		t.Fatal("prefetch requested nothing")
 	}
-	for i := m.selected - prefetchBehind; i <= m.selected+prefetchAhead; i++ {
+	for i := m.cur().selected - prefetchBehind; i <= m.cur().selected+prefetchAhead; i++ {
 		if !m.previews[fmt.Sprintf("p%d", i)].loading {
 			t.Fatalf("post %d was not prefetched", i)
 		}
@@ -387,11 +387,11 @@ func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 
 func TestThreadRefetchesAPreviewTooWideForItsRail(t *testing.T) {
 	m := NewWithImageMode("ansi")
-	m.loading = false
+	m.cur().loading = false
 	m.mode = modeThread
-	m.threadRootID = "root"
-	m.threadPosts = []api.ConversationPost{{TimelinePost: mediaPosts(1)[0]}}
-	m.threadPosts[0].ID = "root"
+	m.cur().threadRootID = "root"
+	m.cur().threadPosts = []api.ConversationPost{{TimelinePost: mediaPosts(1)[0]}}
+	m.cur().threadPosts[0].ID = "root"
 	m.syncViewport()
 
 	// A preview cached at the feed's full width cannot fit a thread, where
@@ -410,10 +410,10 @@ func TestThreadRefetchesAPreviewTooWideForItsRail(t *testing.T) {
 
 func TestThreadSelectionRequestsInlinePreview(t *testing.T) {
 	m := NewWithImageMode("ansi")
-	m.loading = false
+	m.cur().loading = false
 	m.mode = modeThread
-	m.threadRootID = "root"
-	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{
+	m.cur().threadRootID = "root"
+	m.cur().threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{
 		ID: "root", Text: "photo", Media: []api.TimelineMedia{{URL: "https://example.com/photo.jpg"}},
 	}}}
 	m.syncViewport()
@@ -425,12 +425,12 @@ func TestThreadSelectionRequestsInlinePreview(t *testing.T) {
 func TestNativePrefetchIncludesVisiblePosts(t *testing.T) {
 	m := NewWithImageMode("native")
 	m.imageMode = imageModeNative
-	m.loading = false
-	m.posts = mediaPosts(20)
-	m.selected = 10
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(20)
+	m.cur().selected = 10
 	m.syncViewport()
-	m.viewport.YOffset = 0
-	m.viewport.Height = m.ends[4] + 1
+	m.cur().viewport.YOffset = 0
+	m.cur().viewport.Height = m.cur().ends[4] + 1
 	if cmd := m.requestPreviews(); cmd == nil {
 		t.Fatal("native visible prefetch requested nothing")
 	}
@@ -441,9 +441,9 @@ func TestNativePrefetchIncludesVisiblePosts(t *testing.T) {
 
 func TestFailedPreviewRetriesOnlyWhenSelected(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(3)
-	m.selected = 0
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(3)
+	m.cur().selected = 0
 	m.syncViewport()
 	m.previews["p0"] = previewState{err: fmt.Errorf("boom")}
 	m.previews["p1"] = previewState{err: fmt.Errorf("boom")}
@@ -460,9 +460,9 @@ func TestFailedPreviewRetriesOnlyWhenSelected(t *testing.T) {
 
 func TestPreviewCacheEvictsDistantEntries(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(80)
-	m.selected = 70
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(80)
+	m.cur().selected = 70
 	for i := 0; i < 80; i++ {
 		m.previews[fmt.Sprintf("p%d", i)] = previewState{content: "img"}
 	}
@@ -471,7 +471,7 @@ func TestPreviewCacheEvictsDistantEntries(t *testing.T) {
 	if len(m.previews) > maxCachedPreviews {
 		t.Fatalf("cache holds %d entries", len(m.previews))
 	}
-	for i := m.selected - previewKeepRadius; i <= 79; i++ {
+	for i := m.cur().selected - previewKeepRadius; i <= 79; i++ {
 		if _, ok := m.previews[fmt.Sprintf("p%d", i)]; !ok {
 			t.Fatalf("evicted preview %d near the selection", i)
 		}
