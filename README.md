@@ -104,6 +104,7 @@ then just:
 xeet                                  # browse your timeline, images and all
 xeet --following                      # start on the following feed
 xeet --bookmarks                      # start on your bookmarks
+xeet search "go tui"                  # search posts and browse results
 xeet --barebones                      # text-only feed
 xeet --compose                        # skip the feed, open the composer
 xeet post "hello from my shell"       # one-shot post
@@ -158,6 +159,7 @@ come back next time.
 | `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
 | `f` | switch between the for you and following feeds |
 | `b` | switch between bookmarks and the for you feed |
+| `/` | search posts |
 | `enter` | open the post's replies |
 | `e` / `space` | read a truncated post in full |
 | `i` | zoom the post's image to the whole terminal |
@@ -170,9 +172,11 @@ come back next time.
 | `R` | refresh in place, new posts stack on top, you keep your spot |
 | `?` | key guide + which image renderer is active and why |
 
-more posts load automatically near the bottom. inside a conversation,
-`j`/`k` moves through replies, `r` replies to the selected item, `R`
-reloads, and `esc` drops you back exactly where you were in the timeline.
+more posts load automatically near the bottom; search results are just
+another feed, so like, reply, and thread all work there too. inside a
+conversation, `j`/`k` moves through replies, `r` replies to the selected
+item, `R` reloads, and `esc` drops you back exactly where you were in the
+timeline.
 
 **themes**
 
