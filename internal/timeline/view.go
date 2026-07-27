@@ -37,6 +37,9 @@ func (m Model) View() string {
 	if m.mode == modeThread {
 		return m.viewThread()
 	}
+	if len(m.columns) > 1 {
+		return m.viewColumns()
+	}
 
 	footer := m.footer()
 	if m.cur().loading && len(m.cur().posts) == 0 {
@@ -74,8 +77,47 @@ func (m Model) View() string {
 	return m.shell(m.cur().viewport.View(), footer)
 }
 
+func (m Model) viewColumns() string {
+	first, count := m.visibleColumnRange()
+	width := columnContentWidth(m.width, count)
+	blocks := make([]string, 0, count)
+	for index := first; index < first+count; index++ {
+		c := &m.columns[index]
+		center := c.viewport.View()
+		switch {
+		case c.loading && len(c.posts) == 0:
+			center = lipgloss.Place(width, c.viewport.Height, lipgloss.Center, lipgloss.Center,
+				lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View()+" gathering xeets…"))
+		case c.err != nil && len(c.posts) == 0:
+			center = lipgloss.Place(width, c.viewport.Height, lipgloss.Center, lipgloss.Center,
+				lipgloss.NewStyle().Foreground(red).Width(max(20, width-8)).Align(lipgloss.Center).
+					Render("the cat lost the timeline\n\n"+c.err.Error()))
+		}
+		block := m.columnHeader(c, width, index == m.focus) + "\n\n" + center
+		if index < first+count-1 {
+			block = lipgloss.NewStyle().PaddingRight(columnGutter).Render(block)
+		}
+		blocks = append(blocks, block)
+	}
+
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, blocks...)
+	totalWidth := width*count + columnGutter*(count-1)
+	hidden := len(m.columns) - count
+	footer := m.footerAtWidth(width)
+	if hidden > 0 {
+		footer = m.footerWithHiddenColumns(width, hidden, footer)
+	}
+	body := joined + "\n" +
+		lipgloss.NewStyle().Foreground(muted).Width(totalWidth).Align(lipgloss.Center).Render(footer)
+	left := max(0, (m.width-totalWidth)/2)
+	return lipgloss.NewStyle().MarginLeft(left).Render(body)
+}
+
 func (m Model) shell(center, footer string) string {
 	w := m.contentWidth()
+	if m.mode != modeFeed {
+		w = columnContentWidth(m.width, 1)
+	}
 	body := m.header(w) + "\n\n" + center + "\n" +
 		lipgloss.NewStyle().Foreground(muted).Width(w).Align(lipgloss.Center).Render(footer)
 	// Keep two columns clear on the right. Filling the terminal's final column
@@ -84,20 +126,44 @@ func (m Model) shell(center, footer string) string {
 	return lipgloss.NewStyle().MarginLeft(left).Render(body)
 }
 
+const columnGutter = 2
+
+// columnContentWidth keeps feed panes equal-width; the shared preview cache
+// relies on that invariant once multi-column previews arrive in C3.
+func columnContentWidth(totalWidth, ncols int) int {
+	ncols = max(1, ncols)
+	usable := totalWidth - 4
+	width := (usable - columnGutter*(ncols-1)) / ncols
+	return min(76, max(30, width))
+}
+
 func (m Model) contentWidth() int {
-	w := m.width - 4
-	if w > 76 {
-		w = 76
+	return columnContentWidth(m.width, len(m.columns))
+}
+
+func (m Model) visibleColumnRange() (int, int) {
+	configured := len(m.columns)
+	if configured == 0 {
+		return 0, 0
 	}
-	if w < 30 {
-		w = 30
-	}
-	return w
+	usable := max(0, m.width-4)
+	count := min(configured, max(1, usable/32))
+	first := min(max(0, m.focus-count+1), configured-count)
+	return first, count
+}
+
+func (m Model) visibleColumnWidth() int {
+	_, count := m.visibleColumnRange()
+	return columnContentWidth(m.width, count)
 }
 
 func (m Model) header(width int) string {
+	return m.columnHeader(m.cur(), width, true)
+}
+
+func (m Model) columnHeader(c *column, width int, focused bool) string {
 	status := "for you"
-	switch m.cur().feed {
+	switch c.feed {
 	case FeedForYou:
 		status = "for you"
 	case FeedFollowing:
@@ -105,35 +171,45 @@ func (m Model) header(width int) string {
 	case FeedBookmarks:
 		status = "bookmarks"
 	case FeedSearch:
-		status = ansi.Truncate("search · “"+m.cur().searchQuery+"”", max(9, width-12), "…")
+		status = ansi.Truncate("search · “"+c.searchQuery+"”", max(9, width-12), "…")
 	case FeedList:
-		status = ansi.Truncate("list · "+m.cur().listName, max(9, width-12), "…")
+		status = ansi.Truncate("list · "+c.listName, max(9, width-12), "…")
 	}
 	if m.mode == modeThread {
 		status = "replies"
-		if root, ok := m.cur().threadRootPost(); ok && root.Handle != "" {
+		if root, ok := c.threadRootPost(); ok && root.Handle != "" {
 			status = truncateRunes("replies to @"+root.Handle, max(9, width-12))
 		}
 	}
-	if m.mode == modeThread && (m.cur().threadLoading || m.cur().threadMore) {
+	if m.mode == modeThread && (c.threadLoading || c.threadMore) {
 		status = m.spinner.View() + " loading replies"
-	} else if m.cur().refreshing {
+	} else if c.refreshing {
 		status = m.spinner.View() + " refreshing"
-	} else if m.cur().loadingMore {
+	} else if c.loadingMore {
 		status = m.spinner.View() + " loading more"
 	}
 	face := "( o.o )"
-	if m.cur().err != nil || (m.mode == modeThread && m.cur().threadErr != nil) {
+	if c.err != nil || (m.mode == modeThread && c.threadErr != nil) {
 		face = "( >.< )"
 	}
-	cat := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
-		lipgloss.NewStyle().Foreground(blue).Bold(true).Render("   xeet") + "\n" +
-		lipgloss.NewStyle().Foreground(pink).Render(face) +
+	catColor := pink
+	titleColor := blue
+	if !focused {
+		catColor = muted
+		titleColor = muted
+	}
+	cat := lipgloss.NewStyle().Foreground(catColor).Render(" /\\_/\\") +
+		lipgloss.NewStyle().Foreground(titleColor).Bold(true).Render("   xeet") + "\n" +
+		lipgloss.NewStyle().Foreground(catColor).Render(face) +
 		lipgloss.NewStyle().Foreground(muted).Render("   "+status)
 	return lipgloss.NewStyle().Width(width).Render(cat)
 }
 
 func (m Model) footer() string {
+	return m.footerAtWidth(m.contentWidth())
+}
+
+func (m Model) footerAtWidth(width int) string {
 	if m.toast != "" {
 		return m.toast
 	}
@@ -154,18 +230,34 @@ func (m Model) footer() string {
 		} else {
 			footer = fmt.Sprintf("%d/%d · / edit search · R refresh · enter replies · ? help", position, len(m.cur().posts))
 		}
-		if ansi.StringWidth(footer) > m.contentWidth() {
+		if ansi.StringWidth(footer) > width {
 			return fmt.Sprintf("%d/%d · / edit · ? help", position, len(m.cur().posts))
 		}
 		return footer
 	}
-	if m.contentWidth() < 50 || len(m.cur().posts) == 0 {
+	if width < 50 || len(m.cur().posts) == 0 {
 		return fmt.Sprintf("%d/%d  ·  ? help", position, len(m.cur().posts))
 	}
 	if m.cur().expanded {
 		return fmt.Sprintf("%d/%d · e collapse · o browser · ? help", position, len(m.cur().posts))
 	}
 	return fmt.Sprintf("%d/%d · enter replies · e read · r reply · ? help", position, len(m.cur().posts))
+}
+
+func (m Model) footerWithHiddenColumns(width, hidden int, base string) string {
+	note := fmt.Sprintf("+%d more (widen terminal)", hidden)
+	if lipgloss.Width(base)+3+lipgloss.Width(note) <= width {
+		return base + " · " + note
+	}
+	position := 0
+	if len(m.cur().posts) > 0 {
+		position = m.cur().selected + 1
+	}
+	compact := fmt.Sprintf("%d/%d · %s", position, len(m.cur().posts), note)
+	if lipgloss.Width(compact) <= width {
+		return compact
+	}
+	return note
 }
 
 func (m Model) errorFooter(includeQuit bool) string {
@@ -241,8 +333,9 @@ func (m Model) threadFooter() string {
 }
 
 func (m Model) renderThreadContent() (string, []int, []int) {
+	width := columnContentWidth(m.width, 1)
 	if len(m.cur().threadPosts) == 0 {
-		return lipgloss.NewStyle().Foreground(muted).Width(m.contentWidth()).Align(lipgloss.Center).Render("no replies yet · press r to start one"), nil, nil
+		return lipgloss.NewStyle().Foreground(muted).Width(width).Align(lipgloss.Center).Render("no replies yet · press r to start one"), nil, nil
 	}
 	handles := make(map[string]string, len(m.cur().threadPosts))
 	for _, item := range m.cur().threadPosts {
@@ -259,7 +352,7 @@ func (m Model) renderThreadContent() (string, []int, []int) {
 			pieces = append(pieces, threadSpacer(item.Depth))
 			line++
 		}
-		block := m.renderPost(item.TimelinePost, i == m.cur().selected, true, item.Depth)
+		block := m.renderPostForColumn(m.cur(), item.TimelinePost, i == m.cur().selected, true, item.Depth, width, true)
 		if context := m.replyContext(i, handles); context != "" {
 			block = context + "\n" + block
 		}
@@ -340,39 +433,43 @@ func (m Model) replyContext(index int, handles map[string]string) string {
 }
 
 func (m Model) renderFeedContent() (string, []int, []int) {
-	if len(m.cur().posts) == 0 {
-		return lipgloss.NewStyle().Foreground(muted).Width(m.contentWidth()).Align(lipgloss.Center).Render("the timeline is quiet"), nil, nil
+	return m.renderFeedColumnContent(m.cur(), m.contentWidth(), true)
+}
+
+func (m Model) renderFeedColumnContent(c *column, width int, focused bool) (string, []int, []int) {
+	if len(c.posts) == 0 {
+		return lipgloss.NewStyle().Foreground(muted).Width(width).Align(lipgloss.Center).Render("the timeline is quiet"), nil, nil
 	}
-	blocks := make([]string, 0, len(m.cur().posts))
-	starts := make([]int, 0, len(m.cur().posts))
-	ends := make([]int, 0, len(m.cur().posts))
+	blocks := make([]string, 0, len(c.posts))
+	starts := make([]int, 0, len(c.posts))
+	ends := make([]int, 0, len(c.posts))
 	line := 0
-	for i, post := range m.cur().posts {
-		showImage := abs(i-m.cur().selected) <= inlineImageRadius
+	for i, post := range c.posts {
+		showImage := abs(i-c.selected) <= inlineImageRadius
 		if m.imageMode == imageModeNative || m.imageMode == imageModeWezTerm {
 			// Native previews are cheap escape sequences rather than large ANSI
 			// mosaics. Keep cached images in the feed so they do not disappear as
 			// soon as the selection moves away from their post.
 			showImage = true
 		}
-		block := m.renderPost(post, i == m.cur().selected, showImage, feedDepth)
+		block := m.renderPostForColumn(c, post, i == c.selected, showImage, feedDepth, width, focused)
 		height := lipgloss.Height(block)
 		starts = append(starts, line)
 		ends = append(ends, line+height-1)
 		blocks = append(blocks, block)
 		line += height
-		if i < len(m.cur().posts)-1 {
+		if i < len(c.posts)-1 {
 			line++
 		}
 	}
 	return strings.Join(blocks, "\n\n"), starts, ends
 }
 
-// renderPost draws one post. depth is its place in a conversation: feedDepth in
-// the timeline, zero for a thread's focal post, and deeper for each reply level,
-// which shifts the whole block right behind its rail.
-func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, depth int) string {
-	width := m.contentWidth()
+// renderPostForColumn draws one post at the given width. depth is its place in a
+// conversation: feedDepth in the timeline, zero for a thread's focal post, and
+// deeper for each reply level, which shifts the whole block right behind its
+// rail. focused dims the post when it belongs to a column that is not in focus.
+func (m Model) renderPostForColumn(c *column, post api.TimelinePost, selected, nearSelection bool, depth, width int, focused bool) string {
 	name := post.AuthorName
 	if name == "" {
 		name = "someone"
@@ -387,6 +484,13 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 		nameColor = bright
 		textColor = bright
 		handleColor = selectionAccent(depth)
+	}
+	if selected && !focused {
+		nameColor = muted
+		textColor = dim
+		handleColor = muted
+		gutter = strings.Repeat(railBar(), railLevels(depth)) +
+			lipgloss.NewStyle().Foreground(muted).Render("▎") + " "
 	}
 	header := gutter +
 		lipgloss.NewStyle().Foreground(nameColor).Bold(true).Render(name) + "  " +
@@ -408,7 +512,7 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 	if body != "" {
 		wrapped := lipgloss.NewStyle().Width(max(12, width-pad)).Render(highlightEntities(body, textColor))
 		textLines := strings.Split(wrapped, "\n")
-		if !(selected && m.cur().expanded) && len(textLines) > 4 {
+		if !(selected && c.expanded) && len(textLines) > 4 {
 			textLines = textLines[:4]
 			textLines[3] = ansi.Truncate(textLines[3], max(2, width-pad-2), "…")
 		}
@@ -587,7 +691,7 @@ func compactCount(value, unit int, suffix string) string {
 }
 
 func (m Model) viewReply() string {
-	w := m.contentWidth()
+	w := columnContentWidth(m.width, 1)
 	title := "replying to @" + m.replyPost.Handle
 	original := lipgloss.NewStyle().Foreground(muted).Width(max(20, w-8)).Render(cleanText(m.replyPost.Text))
 	originalLines := strings.Split(original, "\n")
@@ -635,7 +739,7 @@ func (m Model) viewReply() string {
 }
 
 func (m Model) viewSearch() string {
-	w := m.contentWidth()
+	w := columnContentWidth(m.width, 1)
 	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("search posts")
 	description := "find words, accounts, or exact phrases"
 	if m.width < 48 {
@@ -703,7 +807,7 @@ func (m Model) searchBackShortLabel() string {
 }
 
 func (m Model) viewListPicker() string {
-	w := m.contentWidth()
+	w := columnContentWidth(m.width, 1)
 	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("lists")
 	var body string
 	switch {
@@ -860,7 +964,7 @@ func (m Model) viewAltText() string {
 }
 
 func (m Model) viewHelp() string {
-	w := m.contentWidth()
+	w := columnContentWidth(m.width, 1)
 	if w > 54 {
 		w = 54
 	}

@@ -20,7 +20,7 @@ var listsCmd = &cobra.Command{
 		if err := applyConfiguredTheme(listsTheme); err != nil {
 			return err
 		}
-		return runTimeline(cmd.Context(), listsImageMode, timeline.FeedList, "", "")
+		return runTimeline(cmd.Context(), listsImageMode, timeline.FeedList, "", "", 1)
 	},
 }
 

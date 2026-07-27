@@ -52,3 +52,36 @@ func (m *Model) columnByID(id int) *column {
 	}
 	return nil
 }
+
+func newColumn(id int) column {
+	return column{
+		id:       id,
+		loading:  true,
+		viewport: viewport.New(72, 18),
+	}
+}
+
+func (m *Model) configureColumns(count int, feed FeedKind, query, listID string) {
+	count = max(1, count)
+	firstID := m.nextColID
+	if len(m.columns) > 0 {
+		firstID = m.columns[0].id
+	} else {
+		m.nextColID++
+	}
+	m.columns = []column{newColumn(firstID)}
+	for len(m.columns) < count {
+		m.columns = append(m.columns, newColumn(m.nextColID))
+		m.nextColID++
+	}
+	for index := range m.columns {
+		c := &m.columns[index]
+		c.feed = feed
+		c.searchQuery = query
+		c.listID = listID
+		if feed == FeedList {
+			c.listName = listID
+		}
+	}
+	m.focus = 0
+}

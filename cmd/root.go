@@ -22,6 +22,7 @@ var (
 	rootFollowing bool
 	rootBookmarks bool
 	rootListID    string
+	rootColumns   int
 	rootTheme     string
 )
 
@@ -32,6 +33,7 @@ var rootCmd = &cobra.Command{
   xeet --following             # the Following feed instead of For You
   xeet --bookmarks             # your saved posts
   xeet --list 123              # a list by id
+  xeet --columns 2             # two copies of the selected feed
   xeet --compose               # just the composer
   xeet post "hello, terminal"  # post without opening anything
   xeet theme                   # pick a color theme, with a preview`,
@@ -93,6 +95,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&rootFollowing, "following", false, "start on the Following feed instead of For You")
 	rootCmd.Flags().BoolVar(&rootBookmarks, "bookmarks", false, "start on your bookmarks feed")
 	rootCmd.Flags().StringVar(&rootListID, "list", "", "start on the given list id")
+	rootCmd.Flags().IntVar(&rootColumns, "columns", 1, "number of side-by-side columns (1-4)")
 	rootCmd.Flags().StringVar(&rootTheme, "theme", "", "color theme for this run (see 'xeet theme')")
 	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
 	rootCmd.MarkFlagsMutuallyExclusive("compose", "following")
@@ -102,6 +105,9 @@ func init() {
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
+	if err := validateColumnCount(rootColumns); err != nil {
+		return err
+	}
 	configMgr, err := config.NewConfigManager()
 	if err != nil {
 		return err
@@ -138,7 +144,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if rootListID != "" {
 		feed = timeline.FeedList
 	}
-	return runTimeline(cmd.Context(), imageMode, feed, "", rootListID)
+	return runTimeline(cmd.Context(), imageMode, feed, "", rootListID, rootColumns)
 }
 
 // printFirstRun greets someone who has not connected an account yet. It is the

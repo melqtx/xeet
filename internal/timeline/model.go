@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -194,7 +193,6 @@ func New() Model {
 func NewWithImageMode(requested string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	vp := viewport.New(72, 18)
 	editor := textarea.New()
 	editor.Prompt = ""
 	editor.Placeholder = "write your reply…"
@@ -210,7 +208,7 @@ func NewWithImageMode(requested string) Model {
 		ctx:   context.Background(),
 		width: 80, height: 24, imageMode: mode, imageNote: note,
 		liking: map[string]bool{}, previews: map[string]previewState{},
-		spinner: s, columns: []column{{id: 0, loading: true, viewport: vp}},
+		spinner: s, columns: []column{newColumn(0)},
 		nextColID: 1, replyEditor: editor, searchInput: search,
 	}
 }
@@ -232,21 +230,26 @@ func (m Model) Init() tea.Cmd {
 	if m.mode == modeListPicker {
 		return tea.Batch(m.spinner.Tick, fetchListsCmd(m.requestContext()), clockTick())
 	}
-	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id), clockTick())
+	cmds := []tea.Cmd{m.spinner.Tick}
+	for i := range m.columns {
+		c := &m.columns[i]
+		cmds = append(cmds, fetchPageSeq(
+			m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
+		))
+	}
+	cmds = append(cmds, clockTick())
+	return tea.Batch(cmds...)
 }
 
-func Run(ctx context.Context, images string, feed FeedKind, query, listID string) (Action, error) {
+func Run(ctx context.Context, images string, feed FeedKind, query, listID string, columnCount int) (Action, error) {
 	m := NewWithImageMode(images)
 	m.ctx = ctx
-	m.cur().feed = feed
-	m.cur().searchQuery = query
-	m.cur().listID = listID
+	m.configureColumns(columnCount, feed, query, listID)
 	if feed == FeedSearch && query == "" {
 		m.cur().loading = false
 		m.beginSearch()
 	}
 	if feed == FeedList {
-		m.cur().listName = listID
 		if listID == "" {
 			m.cur().loading = false
 			m.beginListPicker()
@@ -440,7 +443,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
-		if m.cur().loading || m.cur().loadingMore || m.cur().refreshing || m.zoomLoading() {
+		if m.columnsLoading() || m.zoomLoading() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -463,6 +466,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key.String() {
+	case "tab", "]":
+		m.cycleFocus(1)
+		return m, m.imageRepaint()
+	case "shift+tab", "[":
+		m.cycleFocus(-1)
+		return m, m.imageRepaint()
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc":
@@ -697,6 +706,24 @@ func (m *Model) moveSelection(target int) {
 	m.ensureSelectedVisible()
 }
 
+func (m *Model) cycleFocus(delta int) {
+	if len(m.columns) <= 1 {
+		return
+	}
+	m.focus = (m.focus + delta + len(m.columns)) % len(m.columns)
+	m.resize()
+}
+
+func (m Model) columnsLoading() bool {
+	for i := range m.columns {
+		c := &m.columns[i]
+		if c.loading || c.loadingMore || c.refreshing {
+			return true
+		}
+	}
+	return false
+}
+
 // setFeed resets feed state and kicks off a fresh first page for kind.
 func (m *Model) setFeed(kind FeedKind) tea.Cmd {
 	c := m.cur()
@@ -807,6 +834,15 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 	} else {
 		c.selected = feedIndex
 	}
+	if !focused {
+		first, count := m.visibleColumnRange()
+		for index := first; index < first+count; index++ {
+			if &m.columns[index] == c {
+				m.syncFeedColumn(c, columnContentWidth(m.width, count), false)
+				break
+			}
+		}
+	}
 	if !focused || m.mode == modeReply {
 		return m, toast
 	}
@@ -853,32 +889,51 @@ func (m Model) imageFrameKey() string {
 }
 
 func (m *Model) resize() {
-	w := m.contentWidth()
 	viewportHeight := m.height - 4
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
-	m.cur().viewport.Width = w
-	m.cur().viewport.Height = viewportHeight
-	m.replyEditor.SetWidth(max(20, w-6))
+	if m.mode == modeThread {
+		m.cur().viewport.Width = columnContentWidth(m.width, 1)
+		m.cur().viewport.Height = viewportHeight
+		m.syncViewport()
+	} else {
+		first, count := m.visibleColumnRange()
+		width := columnContentWidth(m.width, count)
+		for index := first; index < first+count; index++ {
+			c := &m.columns[index]
+			c.viewport.Width = width
+			c.viewport.Height = viewportHeight
+			m.syncFeedColumn(c, width, index == m.focus)
+		}
+	}
+	overlayWidth := columnContentWidth(m.width, 1)
+	m.replyEditor.SetWidth(max(20, overlayWidth-6))
 	m.replyEditor.SetHeight(min(7, max(3, m.height-16)))
-	m.searchInput.Width = max(10, w-16)
+	m.searchInput.Width = max(10, overlayWidth-16)
 	m.searchInput.SetCursor(m.searchInput.Position())
-	m.syncViewport()
 	m.ensureSelectedVisible()
 }
 
 func (m *Model) syncViewport() {
-	var content string
-	var starts, ends []int
 	if m.mode == modeThread {
-		content, starts, ends = m.renderThreadContent()
-	} else {
-		content, starts, ends = m.renderFeedContent()
+		m.cur().viewport.Width = columnContentWidth(m.width, 1)
+		content, starts, ends := m.renderThreadContent()
+		m.cur().starts = starts
+		m.cur().ends = ends
+		m.cur().viewport.SetContent(content)
+		return
 	}
-	m.cur().starts = starts
-	m.cur().ends = ends
-	m.cur().viewport.SetContent(content)
+	width := m.visibleColumnWidth()
+	m.cur().viewport.Width = width
+	m.syncFeedColumn(m.cur(), width, true)
+}
+
+func (m *Model) syncFeedColumn(c *column, width int, focused bool) {
+	content, starts, ends := m.renderFeedColumnContent(c, width, focused)
+	c.starts = starts
+	c.ends = ends
+	c.viewport.SetContent(content)
 }
 
 func (m *Model) ensureSelectedVisible() {
