@@ -45,6 +45,26 @@ func TestFindOperationQID(t *testing.T) {
 	}
 }
 
+func TestOperationHintSelectsTheBundleForEachOperationFamily(t *testing.T) {
+	tests := []struct {
+		operation string
+		want      string
+	}{
+		{operation: "TweetDetail", want: "TweetDetail"},
+		{operation: "HomeTimeline", want: "HomeTimeline"},
+		{operation: "CreateTweet", want: "Compose"},
+		{operation: "SearchTimeline", want: "SearchTimeline"},
+		{operation: "Bookmarks", want: "Bookmarks"},
+	}
+	for _, test := range tests {
+		t.Run(test.operation, func(t *testing.T) {
+			if got := operationHint(test.operation); got != test.want {
+				t.Fatalf("operationHint(%q) = %q, want %q", test.operation, got, test.want)
+			}
+		})
+	}
+}
+
 func TestWebpackChunkURLs(t *testing.T) {
 	runtime := `69195:"bundle.HomeTimeline",73796:"shared~bundle.LoggedInMain~bundle.HomeTimeline",69195:"0f610dc",73796:"e992705"`
 	urls := webpackChunkURLs(runtime, "HomeTimeline")

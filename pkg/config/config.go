@@ -27,6 +27,7 @@ type Config struct {
 	HomeTimelineQID       string    `yaml:"home_timeline_qid,omitempty"`
 	HomeLatestTimelineQID string    `yaml:"home_latest_timeline_qid,omitempty"`
 	BookmarksQID          string    `yaml:"bookmarks_qid,omitempty"`
+	SearchTimelineQID     string    `yaml:"search_timeline_qid,omitempty"`
 	FavoriteTweetQID      string    `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID    string    `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID             string    `yaml:"viewer_qid,omitempty"`
@@ -100,6 +101,7 @@ type fileConfig struct {
 	HomeTimelineQID       string `yaml:"home_timeline_qid,omitempty"`
 	HomeLatestTimelineQID string `yaml:"home_latest_timeline_qid,omitempty"`
 	BookmarksQID          string `yaml:"bookmarks_qid,omitempty"`
+	SearchTimelineQID     string `yaml:"search_timeline_qid,omitempty"`
 	FavoriteTweetQID      string `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID    string `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID             string `yaml:"viewer_qid,omitempty"`
@@ -145,6 +147,7 @@ func (cm *ConfigManager) Load() (*Config, error) {
 		HomeTimelineQID:       fc.HomeTimelineQID,
 		HomeLatestTimelineQID: fc.HomeLatestTimelineQID,
 		BookmarksQID:          fc.BookmarksQID,
+		SearchTimelineQID:     fc.SearchTimelineQID,
 		FavoriteTweetQID:      fc.FavoriteTweetQID,
 		UnfavoriteTweetQID:    fc.UnfavoriteTweetQID,
 		ViewerQID:             fc.ViewerQID,
@@ -247,6 +250,7 @@ func (cm *ConfigManager) Save(config *Config) error {
 			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
 			HomeLatestTimelineQID: config.HomeLatestTimelineQID,
 			BookmarksQID:          config.BookmarksQID,
+			SearchTimelineQID:     config.SearchTimelineQID,
 			FavoriteTweetQID:      config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
 			ViewerQID: config.ViewerQID, TweetDetailQID: config.TweetDetailQID,
 			Theme: config.Theme,
@@ -286,6 +290,7 @@ func fileConfigFor(config *Config) *fileConfig {
 		HomeTimelineQID:       config.HomeTimelineQID,
 		HomeLatestTimelineQID: config.HomeLatestTimelineQID,
 		BookmarksQID:          config.BookmarksQID,
+		SearchTimelineQID:     config.SearchTimelineQID,
 		FavoriteTweetQID:      config.FavoriteTweetQID,
 		UnfavoriteTweetQID:    config.UnfavoriteTweetQID,
 		ViewerQID:             config.ViewerQID,
