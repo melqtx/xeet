@@ -33,7 +33,11 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := loadAccountSelection(manager, whoamiAccount)
+	selector, err := accountSelectorFrom(cmd, whoamiAccount)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadAccountSelection(manager, selector)
 	if err != nil {
 		return err
 	}

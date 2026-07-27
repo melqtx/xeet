@@ -127,6 +127,21 @@ type selectedAccountStore interface {
 	LoadAccount(string) (*config.Config, error)
 }
 
+// accountSelectorFrom reads --account as the caller actually passed it. An
+// omitted flag means the active account, which is the documented default. A
+// flag passed with an empty value means the caller built the selector from
+// something that came out blank, and that is the one case where falling
+// through to the active account would post as an account nobody named.
+func accountSelectorFrom(cmd *cobra.Command, value string) (string, error) {
+	if !cmd.Flags().Changed("account") {
+		return "", nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("--account was given an empty value; omit the flag to use the active account")
+	}
+	return value, nil
+}
+
 // loadAccountSelection resolves --account inside the one invocation that uses
 // it. Switching the active account and then acting is not equivalent: anything
 // else on the machine can move `active` in between, so a caller that meant one

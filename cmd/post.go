@@ -90,7 +90,11 @@ func runPost(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := loadAccountSelection(configMgr, postAccount)
+	selector, err := accountSelectorFrom(cmd, postAccount)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadAccountSelection(configMgr, selector)
 	if err != nil {
 		return err
 	}

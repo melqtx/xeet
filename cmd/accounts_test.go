@@ -252,3 +252,39 @@ func TestAccountSelectorRejectsUnknownAndSessionlessAccounts(t *testing.T) {
 		t.Fatalf("sessionless account error lacks the recovery step: %v", err)
 	}
 }
+
+func accountFlagCommand(value *string) *cobra.Command {
+	cmd := &cobra.Command{Use: "stub", RunE: func(*cobra.Command, []string) error { return nil }}
+	cmd.Flags().StringVar(value, "account", "", "saved account")
+	return cmd
+}
+
+func TestBlankAccountFlagIsRejectedRatherThanFallingBack(t *testing.T) {
+	for _, blank := range []string{"", "   "} {
+		var value string
+		cmd := accountFlagCommand(&value)
+		if err := cmd.ParseFlags([]string{"--account", blank}); err != nil {
+			t.Fatal(err)
+		}
+		selector, err := accountSelectorFrom(cmd, value)
+		if err == nil {
+			t.Fatalf("--account %q resolved to %q instead of failing; a caller whose "+
+				"selector came out blank would act as the active account", blank, selector)
+		}
+		if !strings.Contains(err.Error(), "omit the flag") {
+			t.Fatalf("blank --account error does not say how to mean the active account: %v", err)
+		}
+	}
+}
+
+func TestOmittedAccountFlagStillMeansTheActiveAccount(t *testing.T) {
+	var value string
+	cmd := accountFlagCommand(&value)
+	if err := cmd.ParseFlags(nil); err != nil {
+		t.Fatal(err)
+	}
+	selector, err := accountSelectorFrom(cmd, value)
+	if err != nil || selector != "" {
+		t.Fatalf("omitted --account gave (%q, %v), want the active-account fallthrough", selector, err)
+	}
+}
