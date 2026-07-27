@@ -34,6 +34,7 @@ var rootCmd = &cobra.Command{
   xeet --bookmarks             # your saved posts
   xeet --list 123              # a list by id
   xeet --columns 2             # two copies of the selected feed
+  xeet --columns @alice:foryou,@bob:following
   xeet --compose               # just the composer
   xeet post "hello, terminal"  # post without opening anything
   xeet theme                   # pick a color theme, with a preview`,
@@ -95,7 +96,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&rootFollowing, "following", false, "start on the Following feed instead of For You")
 	rootCmd.Flags().BoolVar(&rootBookmarks, "bookmarks", false, "start on your bookmarks feed")
 	rootCmd.Flags().StringVar(&rootListID, "list", "", "start on the given list id")
-	rootCmd.Flags().StringVar(&rootColumns, "columns", "1", "column count (1-4) or feeds: foryou,following,bookmarks,list:<id>,search:<query>")
+	rootCmd.Flags().StringVar(&rootColumns, "columns", "1", "column count (1-4) or feeds, optionally prefixed with @handle:")
 	rootCmd.Flags().StringVar(&rootTheme, "theme", "", "color theme for this run (see 'xeet theme')")
 	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
 	rootCmd.MarkFlagsMutuallyExclusive("compose", "following")
@@ -118,19 +119,22 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	base := columnSpecForFeed(feed, "", rootListID)
 	singleFeedFlag := cmd.Flags().Changed("following") ||
 		cmd.Flags().Changed("bookmarks") || cmd.Flags().Changed("list")
+	configMgr, err := config.NewConfigManager()
+	if err != nil {
+		return err
+	}
+	accounts, err := configMgr.Accounts()
+	if err != nil {
+		return err
+	}
 	var specs []timeline.ColumnSpec
 	if cmd.Flags().Changed("columns") {
-		var err error
-		specs, err = resolveColumnSpecs(rootColumns, true, nil, base, singleFeedFlag)
+		specs, err = resolveColumnSpecs(rootColumns, true, nil, base, singleFeedFlag, accounts)
 		if err != nil {
 			return err
 		}
 	}
 
-	configMgr, err := config.NewConfigManager()
-	if err != nil {
-		return err
-	}
 	// A load failure here (an incomplete keyring pair, an unreadable config)
 	// carries its own recovery advice. Falling through to the timeline would
 	// bury it under a generic fetch error.
@@ -154,7 +158,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		imageMode = "off"
 	}
 	if specs == nil {
-		specs, err = resolveColumnSpecs(rootColumns, false, cfg.Columns, base, singleFeedFlag)
+		specs, err = resolveColumnSpecs(rootColumns, false, cfg.Columns, base, singleFeedFlag, accounts)
 		if err != nil {
 			return err
 		}

@@ -11,19 +11,18 @@ import (
 	"time"
 
 	"github.com/melqtx/xeet/pkg/api"
-	"github.com/melqtx/xeet/pkg/config"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq, colID int) tea.Cmd {
+func fetchThread(parent context.Context, accountID, tweetID, cursor string, more bool, seq, colID int) tea.Cmd {
 	return func() tea.Msg {
-		mgr, err := config.NewConfigManager()
+		mgr, err := openRequestConfigManager()
 		if err != nil {
 			return threadMsg{rootID: tweetID, seq: seq, colID: colID, err: err, more: more}
 		}
-		cfg, err := mgr.Load()
+		cfg, err := loadRequestConfig(mgr, accountID)
 		if err != nil {
 			return threadMsg{rootID: tweetID, seq: seq, colID: colID, err: err, more: more}
 		}
@@ -41,7 +40,7 @@ func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq,
 func (m *Model) requestThread(cursor string, more bool) tea.Cmd {
 	c := m.cur()
 	c.threadSeq++
-	return fetchThread(m.requestContext(), c.threadRootID, cursor, more, c.threadSeq, c.id)
+	return fetchThread(m.requestContext(), c.accountID, c.threadRootID, cursor, more, c.threadSeq, c.id)
 }
 
 func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd) {

@@ -176,7 +176,7 @@ func TestLikeFansOutToDuplicatePostAcrossColumns(t *testing.T) {
 	m.columns[0].posts[0].ID = "shared"
 	m.columns[1].posts[0].ID = "shared"
 
-	m.applyLike("shared", true)
+	m.applyLike("", "shared", true)
 
 	for index := range m.columns {
 		post := m.columns[index].posts[0]

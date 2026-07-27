@@ -12,6 +12,7 @@ import (
 type column struct {
 	id          int // stable identity for message routing; never reused
 	feed        FeedKind
+	accountID   string
 	searchQuery string
 	listID      string
 	listName    string
@@ -79,6 +80,7 @@ func (m *Model) configureColumns(specs []ColumnSpec) {
 	for index, spec := range specs {
 		c := &m.columns[index]
 		c.feed = spec.Kind
+		c.accountID = spec.AccountID
 		c.searchQuery = spec.Query
 		c.listID = spec.ListID
 		if spec.Kind == FeedList {
@@ -102,14 +104,14 @@ func (m *Model) namesPendingForListColumns() bool {
 	return false
 }
 
-func (m *Model) nameListColumns(lists []api.ListInfo) {
+func (m *Model) nameListColumns(accountID string, lists []api.ListInfo) {
 	byID := make(map[string]string, len(lists))
 	for _, l := range lists {
 		byID[l.ID] = l.Name
 	}
 	for i := range m.columns {
 		c := &m.columns[i]
-		if c.feed != FeedList {
+		if c.feed != FeedList || c.accountID != accountID {
 			continue
 		}
 		// Only fill the placeholder: a name the picker already resolved is

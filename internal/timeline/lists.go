@@ -5,26 +5,27 @@ import (
 	"time"
 
 	"github.com/melqtx/xeet/pkg/api"
-	"github.com/melqtx/xeet/pkg/config"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 type listsMsg struct {
-	lists []api.ListInfo
-	err   error
+	lists     []api.ListInfo
+	accountID string
+	picker    bool
+	err       error
 }
 
-func fetchListsCmd(parent context.Context) tea.Cmd {
+func fetchListsCmd(parent context.Context, accountID string, picker bool) tea.Cmd {
 	return func() tea.Msg {
-		mgr, err := config.NewConfigManager()
+		mgr, err := openRequestConfigManager()
 		if err != nil {
-			return listsMsg{err: err}
+			return listsMsg{accountID: accountID, picker: picker, err: err}
 		}
-		cfg, err := mgr.Load()
+		cfg, err := loadRequestConfig(mgr, accountID)
 		if err != nil {
-			return listsMsg{err: err}
+			return listsMsg{accountID: accountID, picker: picker, err: err}
 		}
 		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
@@ -33,7 +34,7 @@ func fetchListsCmd(parent context.Context) tea.Cmd {
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.SaveQueryIDs(cfg)
 		}
-		return listsMsg{lists: lists, err: err}
+		return listsMsg{lists: lists, accountID: accountID, picker: picker, err: err}
 	}
 }
 
@@ -44,7 +45,9 @@ func (m *Model) beginListPicker() tea.Cmd {
 	m.listPickerErr = nil
 	m.listPickerLoading = true
 	m.mode = modeListPicker
-	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchListsCmd(m.requestContext())))
+	return m.imageRepaint(tea.Batch(
+		m.spinner.Tick, fetchListsCmd(m.requestContext(), m.cur().accountID, true),
+	))
 }
 
 func (m Model) cancelListPicker() (tea.Model, tea.Cmd) {
@@ -58,6 +61,15 @@ func (m Model) cancelListPicker() (tea.Model, tea.Cmd) {
 func (m Model) updateListPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case listsMsg:
+		if !msg.picker {
+			if msg.err == nil {
+				m.nameListColumns(msg.accountID, msg.lists)
+			}
+			return m, nil
+		}
+		if msg.accountID != m.cur().accountID {
+			return m, nil
+		}
 		m.listPickerLoading = false
 		m.listPickerErr = msg.err
 		if msg.err == nil {

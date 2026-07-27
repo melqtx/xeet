@@ -149,13 +149,13 @@ func TestAltTextPanelProcessesBackgroundResults(t *testing.T) {
 	m.cur().loading = false
 	m.altText = true
 	m.cur().posts = []api.TimelinePost{{ID: "1", Liked: true, LikeCount: 1, Media: []api.TimelineMedia{{}}}}
-	m.liking["1"] = true
+	m.liking[likeKey("", "1")] = true
 	next, _ := m.Update(likeMsg{id: "1", liked: true, err: errors.New("rejected")})
 	m = next.(Model)
 	if !m.altText {
 		t.Fatal("background result unexpectedly closed alt text")
 	}
-	if m.liking["1"] || m.cur().posts[0].Liked || m.cur().posts[0].LikeCount != 0 {
+	if m.liking[likeKey("", "1")] || m.cur().posts[0].Liked || m.cur().posts[0].LikeCount != 0 {
 		t.Fatalf("like result was dropped: liking=%v post=%+v", m.liking, m.cur().posts[0])
 	}
 }
@@ -165,13 +165,13 @@ func TestHelpProcessesBackgroundResults(t *testing.T) {
 	m.cur().loading = false
 	m.help = true
 	m.cur().posts = []api.TimelinePost{{ID: "1", Liked: true, LikeCount: 1}}
-	m.liking["1"] = true
+	m.liking[likeKey("", "1")] = true
 	next, _ := m.Update(likeMsg{id: "1", liked: true, err: errors.New("rejected")})
 	m = next.(Model)
 	if !m.help {
 		t.Fatal("background result unexpectedly closed help")
 	}
-	if m.liking["1"] || m.cur().posts[0].Liked || m.cur().posts[0].LikeCount != 0 {
+	if m.liking[likeKey("", "1")] || m.cur().posts[0].Liked || m.cur().posts[0].LikeCount != 0 {
 		t.Fatalf("like result was dropped: liking=%v post=%+v", m.liking, m.cur().posts[0])
 	}
 }

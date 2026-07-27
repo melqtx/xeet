@@ -31,6 +31,7 @@ var timelineCmd = &cobra.Command{
   xeet timeline --list 123     # a list by id
   xeet timeline --columns 2    # two copies of the selected feed
   xeet timeline --columns foryou,bookmarks
+  xeet timeline --columns @alice:foryou,@bob:following
   xeet timeline --images off   # text only, no previews`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := applyConfiguredTheme(timelineTheme); err != nil {
@@ -62,7 +63,7 @@ func init() {
 	timelineCmd.Flags().BoolVar(&timelineFollowing, "following", false, "start on the Following feed instead of For You")
 	timelineCmd.Flags().BoolVar(&timelineBookmarks, "bookmarks", false, "start on your bookmarks feed")
 	timelineCmd.Flags().StringVar(&timelineListID, "list", "", "start on the given list id")
-	timelineCmd.Flags().StringVar(&timelineColumns, "columns", "1", "column count (1-4) or feeds: foryou,following,bookmarks,list:<id>,search:<query>")
+	timelineCmd.Flags().StringVar(&timelineColumns, "columns", "1", "column count (1-4) or feeds, optionally prefixed with @handle:")
 	timelineCmd.Flags().StringVar(&timelineTheme, "theme", "", "color theme for this run (see 'xeet theme')")
 	timelineCmd.MarkFlagsMutuallyExclusive("following", "bookmarks", "list")
 	rootCmd.AddCommand(timelineCmd)
@@ -122,8 +123,16 @@ func columnSpecsForTimelineCommand(
 	base timeline.ColumnSpec,
 	singleFeedFlag bool,
 ) ([]timeline.ColumnSpec, error) {
+	mgr, err := config.NewConfigManager()
+	if err != nil {
+		return nil, err
+	}
+	accounts, err := mgr.Accounts()
+	if err != nil {
+		return nil, err
+	}
 	if cmd.Flags().Changed("columns") {
-		specs, ownsFeeds, err := parseColumnsFlag(value, base)
+		specs, ownsFeeds, err := parseColumnsFlag(value, base, accounts)
 		if err != nil {
 			return nil, err
 		}
@@ -135,15 +144,11 @@ func columnSpecsForTimelineCommand(
 	if singleFeedFlag {
 		return []timeline.ColumnSpec{base}, nil
 	}
-	mgr, err := config.NewConfigManager()
-	if err != nil {
-		return nil, err
-	}
 	saved, err := mgr.Columns()
 	if err != nil {
 		return nil, err
 	}
-	return resolveColumnSpecs(value, false, saved, base, false)
+	return resolveColumnSpecs(value, false, saved, base, false, accounts)
 }
 
 func resolveColumnSpecs(
@@ -152,9 +157,10 @@ func resolveColumnSpecs(
 	saved []string,
 	base timeline.ColumnSpec,
 	singleFeedFlag bool,
+	accounts []config.AccountInfo,
 ) ([]timeline.ColumnSpec, error) {
 	if flagSet {
-		specs, ownsFeeds, err := parseColumnsFlag(value, base)
+		specs, ownsFeeds, err := parseColumnsFlag(value, base, accounts)
 		if err != nil {
 			return nil, err
 		}
@@ -166,14 +172,14 @@ func resolveColumnSpecs(
 	if singleFeedFlag || len(saved) == 0 {
 		return []timeline.ColumnSpec{base}, nil
 	}
-	specs, _, err := parseColumnSpecList(strings.Join(saved, ","))
+	specs, _, err := parseColumnSpecList(strings.Join(saved, ","), accounts)
 	if err != nil {
 		return nil, fmt.Errorf("invalid columns config: %w", err)
 	}
 	return specs, nil
 }
 
-func parseColumnsFlag(value string, base timeline.ColumnSpec) ([]timeline.ColumnSpec, bool, error) {
+func parseColumnsFlag(value string, base timeline.ColumnSpec, accounts []config.AccountInfo) ([]timeline.ColumnSpec, bool, error) {
 	value = strings.TrimSpace(value)
 	if isDigits(value) {
 		count, err := strconv.Atoi(value)
@@ -186,14 +192,14 @@ func parseColumnsFlag(value string, base timeline.ColumnSpec) ([]timeline.Column
 		}
 		return specs, false, nil
 	}
-	specs, _, err := parseColumnSpecList(value)
+	specs, _, err := parseColumnSpecList(value, accounts)
 	if err != nil {
 		return nil, true, fmt.Errorf("invalid --columns value %q (%v)", value, err)
 	}
 	return specs, true, nil
 }
 
-func parseColumnSpecList(value string) ([]timeline.ColumnSpec, []string, error) {
+func parseColumnSpecList(value string, accounts []config.AccountInfo) ([]timeline.ColumnSpec, []string, error) {
 	raw := strings.Split(value, ",")
 	if len(raw) < 1 || len(raw) > 4 {
 		return nil, nil, fmt.Errorf("use between 1 and 4 column specs")
@@ -203,6 +209,21 @@ func parseColumnSpecList(value string) ([]timeline.ColumnSpec, []string, error) 
 	for _, item := range raw {
 		item = strings.TrimSpace(item)
 		spec := timeline.ColumnSpec{}
+		prefix := ""
+		if strings.HasPrefix(item, "@") {
+			separator := strings.IndexByte(item, ':')
+			if separator < 2 {
+				return nil, nil, fmt.Errorf("account-prefixed specs use @handle:<feed>")
+			}
+			handle := strings.TrimSpace(item[1:separator])
+			account, err := resolveColumnAccount(handle, accounts)
+			if err != nil {
+				return nil, nil, err
+			}
+			spec.AccountID = account.UserID
+			prefix = "@" + account.Handle + ":"
+			item = strings.TrimSpace(item[separator+1:])
+		}
 		switch {
 		case item == "foryou":
 			spec.Kind = timeline.FeedForYou
@@ -230,9 +251,32 @@ func parseColumnSpecList(value string) ([]timeline.ColumnSpec, []string, error) 
 			return nil, nil, fmt.Errorf("use foryou, following, bookmarks, list:<id>, or search:<query>")
 		}
 		specs = append(specs, spec)
-		canonical = append(canonical, item)
+		canonical = append(canonical, prefix+item)
 	}
 	return specs, canonical, nil
+}
+
+func resolveColumnAccount(handle string, accounts []config.AccountInfo) (config.AccountInfo, error) {
+	for _, account := range accounts {
+		if account.Handle != "" && strings.EqualFold(account.Handle, handle) {
+			return account, nil
+		}
+	}
+	known := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		if account.Handle != "" {
+			known = append(known, "@"+account.Handle)
+		} else {
+			known = append(known, account.UserID)
+		}
+	}
+	if len(known) == 0 {
+		known = append(known, "none")
+	}
+	return config.AccountInfo{}, fmt.Errorf(
+		"unknown column account @%s (known accounts: %s)",
+		handle, strings.Join(known, ", "),
+	)
 }
 
 func validateColumnSpecs(specs []timeline.ColumnSpec) error {

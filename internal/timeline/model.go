@@ -61,9 +61,10 @@ const (
 )
 
 type ColumnSpec struct {
-	Kind   FeedKind
-	Query  string
-	ListID string
+	Kind      FeedKind
+	AccountID string
+	Query     string
+	ListID    string
 }
 
 type mode int
@@ -107,6 +108,7 @@ type Model struct {
 	replyReturn       mode
 	replyEditor       textarea.Model
 	replyPost         api.TimelinePost
+	replyAccountID    string
 	replyPosting      bool
 	replyErr          error
 	replyNotice       string
@@ -133,9 +135,10 @@ type actionMsg struct {
 }
 
 type likeMsg struct {
-	id    string
-	liked bool
-	err   error
+	id        string
+	accountID string
+	liked     bool
+	err       error
 }
 
 type replyResultMsg struct {
@@ -238,19 +241,32 @@ func (m Model) Init() tea.Cmd {
 		return tea.Batch(m.searchInput.Focus(), loadAccountsCmd(), clockTick())
 	}
 	if m.mode == modeListPicker {
-		return tea.Batch(m.spinner.Tick, fetchListsCmd(m.requestContext()), loadAccountsCmd(), clockTick())
+		return tea.Batch(
+			m.spinner.Tick,
+			fetchListsCmd(m.requestContext(), c.accountID, true),
+			loadAccountsCmd(),
+			clockTick(),
+		)
 	}
 	cmds := []tea.Cmd{m.spinner.Tick, loadAccountsCmd()}
 	for i := range m.columns {
 		c := &m.columns[i]
 		cmds = append(cmds, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
 		))
 	}
-	// Columns built from --columns or a saved layout carry only a list id, and
-	// one enumeration names all of them.
+	// List names are account-scoped, so one global enumeration could label a
+	// different account's column with metadata it cannot access.
 	if m.namesPendingForListColumns() {
-		cmds = append(cmds, fetchListsCmd(m.requestContext()))
+		requested := make(map[string]bool)
+		for i := range m.columns {
+			c := &m.columns[i]
+			if c.feed != FeedList || c.listName != c.listID || requested[c.accountID] {
+				continue
+			}
+			requested[c.accountID] = true
+			cmds = append(cmds, fetchListsCmd(m.requestContext(), c.accountID, false))
+		}
 	}
 	cmds = append(cmds, clockTick())
 	return tea.Batch(cmds...)
@@ -297,13 +313,30 @@ func Run(ctx context.Context, images string, specs []ColumnSpec) (Action, error)
 	return Action{}, err
 }
 
-func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, cursor string, more bool, seq, colID int) tea.Cmd {
+type requestConfigManager interface {
+	Load() (*config.Config, error)
+	LoadAccount(string) (*config.Config, error)
+	SaveQueryIDs(*config.Config) error
+}
+
+var openRequestConfigManager = func() (requestConfigManager, error) {
+	return config.NewConfigManager()
+}
+
+func loadRequestConfig(mgr requestConfigManager, accountID string) (*config.Config, error) {
+	if accountID == "" {
+		return mgr.Load()
+	}
+	return mgr.LoadAccount(accountID)
+}
+
+func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, accountID, cursor string, more bool, seq, colID int) tea.Cmd {
 	return func() tea.Msg {
-		mgr, err := config.NewConfigManager()
+		mgr, err := openRequestConfigManager()
 		if err != nil {
 			return pageMsg{err: err, more: more, seq: seq, colID: colID}
 		}
-		cfg, err := mgr.Load()
+		cfg, err := loadRequestConfig(mgr, accountID)
 		if err != nil {
 			return pageMsg{err: err, more: more, seq: seq, colID: colID}
 		}
@@ -335,15 +368,15 @@ func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, cursor s
 	}
 }
 
-func setLike(parent context.Context, tweetID string, liked bool) tea.Cmd {
+func setLike(parent context.Context, selectedAccountID, actingAccountID, tweetID string, liked bool) tea.Cmd {
 	return func() tea.Msg {
-		mgr, err := config.NewConfigManager()
+		mgr, err := openRequestConfigManager()
 		if err != nil {
-			return likeMsg{id: tweetID, liked: liked, err: err}
+			return likeMsg{id: tweetID, accountID: actingAccountID, liked: liked, err: err}
 		}
-		cfg, err := mgr.Load()
+		cfg, err := loadRequestConfig(mgr, selectedAccountID)
 		if err != nil {
-			return likeMsg{id: tweetID, liked: liked, err: err}
+			return likeMsg{id: tweetID, accountID: actingAccountID, liked: liked, err: err}
 		}
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
@@ -352,7 +385,7 @@ func setLike(parent context.Context, tweetID string, liked bool) tea.Cmd {
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.SaveQueryIDs(cfg)
 		}
-		return likeMsg{id: tweetID, liked: liked, err: err}
+		return likeMsg{id: tweetID, accountID: actingAccountID, liked: liked, err: err}
 	}
 }
 
@@ -491,8 +524,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case listsMsg:
 		// Outside the picker this only ever arrives from Init's backfill, and a
 		// failure just leaves the ids on screen — the feeds themselves loaded.
-		if msg.err == nil {
-			m.nameListColumns(msg.lists)
+		if !msg.picker && msg.err == nil {
+			m.nameListColumns(msg.accountID, msg.lists)
 		}
 		return m, nil
 	}
@@ -564,7 +597,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		c.err = nil
 		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
 		)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
@@ -621,9 +654,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // settleLike clears the in-flight marker and rolls an optimistic like back if
 // the request failed.
 func (m *Model) settleLike(msg likeMsg) {
-	delete(m.liking, msg.id)
+	delete(m.liking, likeKey(msg.accountID, msg.id))
 	if msg.err != nil {
-		m.applyLike(msg.id, !msg.liked)
+		m.applyLike(msg.accountID, msg.id, !msg.liked)
 	}
 }
 
@@ -716,15 +749,21 @@ func (m *Model) zoomSelected() tea.Cmd {
 
 func (m *Model) toggleSelectedLike() tea.Cmd {
 	post, ok := m.currentPost()
-	if !ok || m.liking[post.ID] {
+	if !ok {
+		return nil
+	}
+	c := m.cur()
+	accountID := m.columnAccountID(c)
+	key := likeKey(accountID, post.ID)
+	if m.liking[key] {
 		return nil
 	}
 	liked := !post.Liked
-	m.liking[post.ID] = true
-	m.applyLike(post.ID, liked)
+	m.liking[key] = true
+	m.applyLike(accountID, post.ID, liked)
 	m.syncViewport()
 	m.ensureSelectedVisible()
-	return setLike(m.requestContext(), post.ID, liked)
+	return setLike(m.requestContext(), c.accountID, accountID, post.ID, liked)
 }
 
 func (m *Model) copySelectedLink() tea.Cmd {
@@ -801,7 +840,7 @@ func (m *Model) resetColumnFeed(c *column, kind FeedKind) tea.Cmd {
 	c.viewport.YOffset = 0
 	c.viewport.SetContent("")
 	return fetchPageSeq(
-		m.requestContext(), c.feed, c.searchQuery, c.listID, "", false, c.feedSeq, c.id,
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
 	)
 }
 
@@ -830,7 +869,7 @@ func (m *Model) maybeLoadMore() tea.Cmd {
 	if len(c.posts) > 0 && c.selected >= len(c.posts)-5 && c.cursor != "" && !c.loadingMore {
 		c.loadingMore = true
 		return tea.Batch(m.spinner.Tick, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, c.cursor, true, c.feedSeq, c.id,
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, c.cursor, true, c.feedSeq, c.id,
 		))
 	}
 	return nil
@@ -1058,7 +1097,23 @@ func (m Model) currentPost() (api.TimelinePost, bool) {
 	return m.cur().posts[m.cur().selected], true
 }
 
-func (m *Model) applyLike(id string, liked bool) {
+func likeKey(accountID, postID string) string {
+	return accountID + ":" + postID
+}
+
+func (m Model) columnAccountID(c *column) string {
+	if c.accountID != "" {
+		return c.accountID
+	}
+	for _, account := range m.accounts {
+		if account.Active {
+			return account.UserID
+		}
+	}
+	return ""
+}
+
+func (m *Model) applyLike(accountID, id string, liked bool) {
 	apply := func(post *api.TimelinePost) {
 		if post.ID != id || post.Liked == liked {
 			return
@@ -1072,6 +1127,9 @@ func (m *Model) applyLike(id string, liked bool) {
 	}
 	for columnIndex := range m.columns {
 		c := &m.columns[columnIndex]
+		if m.columnAccountID(c) != accountID {
+			continue
+		}
 		for i := range c.posts {
 			apply(&c.posts[i])
 		}

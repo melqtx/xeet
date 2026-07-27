@@ -150,6 +150,12 @@ func NewConfigManager() (*ConfigManager, error) {
 	return newConfigManagerAt(homeDir, systemKeyring{}), nil
 }
 
+// NewConfigManagerAt keeps callers that provide storage off the process home
+// directory and OS keyring.
+func NewConfigManagerAt(dir string, secrets SecretStore) *ConfigManager {
+	return newConfigManagerAt(dir, secrets)
+}
+
 func newConfigManagerAt(dir string, secrets SecretStore) *ConfigManager {
 	return &ConfigManager{
 		configPath:    filepath.Join(dir, ".xeet.yaml"),

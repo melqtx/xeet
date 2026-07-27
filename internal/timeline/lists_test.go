@@ -43,7 +43,7 @@ func TestListPickerSelectionSwitchesFeedAndResetsState(t *testing.T) {
 	m.cur().selected = 1
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
-	m = update(t, m, listsMsg{lists: []api.ListInfo{
+	m = update(t, m, listsMsg{picker: true, lists: []api.ListInfo{
 		{ID: "100", Name: "First"},
 		{ID: "200", Name: "Second", MemberCount: 12, IsPrivate: true},
 	}})
@@ -86,7 +86,7 @@ func TestStalePageFromPreviousFeedIsDroppedAfterListSwitch(t *testing.T) {
 	m.cur().feedSeq = 3
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
-	m = update(t, m, listsMsg{lists: []api.ListInfo{{ID: "100", Name: "Cats"}}})
+	m = update(t, m, listsMsg{picker: true, lists: []api.ListInfo{{ID: "100", Name: "Cats"}}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = update(t, m, pageMsg{
 		seq:  3,
@@ -109,7 +109,7 @@ func TestListPickerRendersLoadingAndErrorStates(t *testing.T) {
 		t.Fatalf("loading state is not visible:\n%s", view)
 	}
 
-	m = update(t, m, listsMsg{err: errors.New("offline")})
+	m = update(t, m, listsMsg{picker: true, err: errors.New("offline")})
 	view := m.View()
 	for _, want := range []string{"couldn't load lists", "offline", "esc cancel"} {
 		if !strings.Contains(view, want) {
@@ -162,7 +162,7 @@ func TestListPickerKeepsLikePreviewAndSpinnerResultsFlowing(t *testing.T) {
 	m := NewWithImageMode("off")
 	m.cur().loading = false
 	m.cur().posts = []api.TimelinePost{{ID: "post", Liked: true}}
-	m.liking["post"] = true
+	m.liking[likeKey("", "post")] = true
 	m.beginListPicker()
 
 	m = update(t, m, likeMsg{id: "post", liked: true})
@@ -170,7 +170,7 @@ func TestListPickerKeepsLikePreviewAndSpinnerResultsFlowing(t *testing.T) {
 	next, cmd := m.Update(spinner.TickMsg{Time: time.Now()})
 	m = next.(Model)
 
-	if m.liking["post"] {
+	if m.liking[likeKey("", "post")] {
 		t.Fatal("like result did not settle while picker was open")
 	}
 	if got := m.previews["post"].content; got != "preview" {

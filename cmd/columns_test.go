@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/melqtx/xeet/internal/timeline"
+	"github.com/melqtx/xeet/pkg/config"
 )
 
 func TestColumnsFlagRegisteredSeparatelyOnRootAndTimeline(t *testing.T) {
@@ -57,7 +58,7 @@ func TestColumnsFlagAcceptsCountsAndFeedSpecs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ownsFeeds, err := parseColumnsFlag(tt.value, tt.base)
+			got, ownsFeeds, err := parseColumnsFlag(tt.value, tt.base, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,16 +71,48 @@ func TestColumnsFlagAcceptsCountsAndFeedSpecs(t *testing.T) {
 
 func TestColumnsFlagRejectsUnknownKindsAndMoreThanFour(t *testing.T) {
 	for _, value := range []string{"0", "5", "nonsense", "search:", "list:not-a-number", "foryou,following,bookmarks,list:1,search:go"} {
-		_, _, err := parseColumnsFlag(value, timeline.ColumnSpec{Kind: timeline.FeedForYou})
+		_, _, err := parseColumnsFlag(value, timeline.ColumnSpec{Kind: timeline.FeedForYou}, nil)
 		if err == nil || !strings.Contains(err.Error(), "invalid --columns value") {
 			t.Fatalf("--columns %q returned %v", value, err)
 		}
 	}
 }
 
+func TestColumnsFlagParsesAccountPrefixes(t *testing.T) {
+	accounts := []config.AccountInfo{
+		{UserID: "42", Handle: "alice"},
+		{UserID: "84", Handle: "bob"},
+	}
+	got, ownsFeeds, err := parseColumnsFlag(
+		"@alice:foryou,@bob:following",
+		timeline.ColumnSpec{Kind: timeline.FeedForYou},
+		accounts,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []timeline.ColumnSpec{
+		{Kind: timeline.FeedForYou, AccountID: "42"},
+		{Kind: timeline.FeedFollowing, AccountID: "84"},
+	}
+	if !ownsFeeds || !reflect.DeepEqual(got, want) {
+		t.Fatalf("account-prefixed columns = %v, %v; want %v, true", got, ownsFeeds, want)
+	}
+
+	_, _, err = parseColumnsFlag(
+		"@carol:foryou",
+		timeline.ColumnSpec{Kind: timeline.FeedForYou},
+		accounts,
+	)
+	if err == nil || !strings.Contains(err.Error(), "unknown column account @carol") ||
+		!strings.Contains(err.Error(), "@alice, @bob") {
+		t.Fatalf("unknown account error did not list known accounts: %v", err)
+	}
+}
+
 func TestColumnsFeedSpecsAreExclusiveWithSingleFeedFlagsButCountsAreNot(t *testing.T) {
 	base := timeline.ColumnSpec{Kind: timeline.FeedBookmarks}
-	specs, err := resolveColumnSpecs("2", true, nil, base, true)
+	specs, err := resolveColumnSpecs("2", true, nil, base, true, nil)
 	if err != nil {
 		t.Fatalf("--columns 2 --bookmarks returned %v", err)
 	}
@@ -87,7 +120,7 @@ func TestColumnsFeedSpecsAreExclusiveWithSingleFeedFlagsButCountsAreNot(t *testi
 		t.Fatalf("--columns 2 --bookmarks = %v", specs)
 	}
 
-	if _, err := resolveColumnSpecs("foryou,bookmarks", true, nil, base, true); err == nil ||
+	if _, err := resolveColumnSpecs("foryou,bookmarks", true, nil, base, true, nil); err == nil ||
 		!strings.Contains(err.Error(), "cannot be used") {
 		t.Fatalf("feed specs with --bookmarks returned %v", err)
 	}
@@ -101,6 +134,7 @@ func TestColumnsConfigKeyIsUsedWhenFlagAbsent(t *testing.T) {
 		[]string{"following", "search:golang"},
 		base,
 		false,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +156,7 @@ func TestExplicitSingleFeedFlagOverridesSavedColumns(t *testing.T) {
 		[]string{"foryou", "following"},
 		base,
 		true,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)

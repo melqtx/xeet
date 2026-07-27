@@ -19,13 +19,17 @@ var columnsSaveCmd = &cobra.Command{
 	Example: `  xeet columns save "foryou,list:123"`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, canonical, err := parseColumnSpecList(args[0])
-		if err != nil {
-			return fmt.Errorf("invalid columns layout %q (%v)", args[0], err)
-		}
 		mgr, err := config.NewConfigManager()
 		if err != nil {
 			return err
+		}
+		accounts, err := mgr.Accounts()
+		if err != nil {
+			return err
+		}
+		_, canonical, err := parseColumnSpecList(args[0], accounts)
+		if err != nil {
+			return fmt.Errorf("invalid columns layout %q (%v)", args[0], err)
 		}
 		if err := mgr.SaveColumns(canonical); err != nil {
 			return err

@@ -10,19 +10,18 @@ import (
 	"time"
 
 	"github.com/melqtx/xeet/pkg/api"
-	"github.com/melqtx/xeet/pkg/config"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func sendReply(parent context.Context, tweetID, text string) tea.Cmd {
+func sendReply(parent context.Context, accountID, tweetID, text string) tea.Cmd {
 	return func() tea.Msg {
-		mgr, err := config.NewConfigManager()
+		mgr, err := openRequestConfigManager()
 		if err != nil {
 			return replyResultMsg{err: err}
 		}
-		cfg, err := mgr.Load()
+		cfg, err := loadRequestConfig(mgr, accountID)
 		if err != nil {
 			return replyResultMsg{err: err}
 		}
@@ -41,6 +40,7 @@ func (m Model) beginReply(post api.TimelinePost) (tea.Model, tea.Cmd) {
 	m.replyReturn = m.mode
 	m.mode = modeReply
 	m.replyPost = post
+	m.replyAccountID = m.cur().accountID
 	m.replyErr = nil
 	m.replyNotice = ""
 	m.replyEditor.Reset()
@@ -126,7 +126,9 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replyErr = nil
 			m.replyNotice = ""
 			m.replyEditor.Blur()
-			return m, tea.Batch(m.spinner.Tick, sendReply(m.requestContext(), m.replyPost.ID, m.replyEditor.Value()))
+			return m, tea.Batch(m.spinner.Tick, sendReply(
+				m.requestContext(), m.replyAccountID, m.replyPost.ID, m.replyEditor.Value(),
+			))
 		case "alt+enter", "ctrl+j":
 			m.replyEditor.InsertString("\n")
 			return m, nil
