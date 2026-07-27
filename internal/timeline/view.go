@@ -28,6 +28,9 @@ func (m Model) View() string {
 	if m.mode == modeSearch {
 		return m.viewSearch()
 	}
+	if m.mode == modeListPicker {
+		return m.viewListPicker()
+	}
 	if m.mode == modeReply {
 		return m.viewReply()
 	}
@@ -103,6 +106,8 @@ func (m Model) header(width int) string {
 		status = "bookmarks"
 	case FeedSearch:
 		status = ansi.Truncate("search · “"+m.searchQuery+"”", max(9, width-12), "…")
+	case FeedList:
+		status = ansi.Truncate("list · "+m.listName, max(9, width-12), "…")
 	}
 	if m.mode == modeThread {
 		status = "replies"
@@ -697,6 +702,56 @@ func (m Model) searchBackShortLabel() string {
 	}
 }
 
+func (m Model) viewListPicker() string {
+	w := m.contentWidth()
+	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("lists")
+	var body string
+	switch {
+	case m.listPickerLoading:
+		body = lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View() + " loading lists…")
+	case m.listPickerErr != nil:
+		body = lipgloss.NewStyle().Foreground(red).Width(max(20, w-8)).Align(lipgloss.Center).
+			Render("couldn't load lists\n\n" + m.listPickerErr.Error())
+	case len(m.listPicker) == 0:
+		body = lipgloss.NewStyle().Foreground(muted).Render("no lists found")
+	default:
+		visible := min(len(m.listPicker), max(1, m.height-9))
+		start := max(0, m.listPickerSel-visible/2)
+		start = min(start, len(m.listPicker)-visible)
+		rows := make([]string, 0, visible)
+		for index := start; index < start+visible; index++ {
+			list := m.listPicker[index]
+			marker := "  "
+			nameStyle := lipgloss.NewStyle().Foreground(bright)
+			if index == m.listPickerSel {
+				marker = "› "
+				nameStyle = nameStyle.Foreground(blue).Bold(true)
+			}
+			members := fmt.Sprintf("%d members", list.MemberCount)
+			if list.MemberCount == 1 {
+				members = "1 member"
+			}
+			privacy := "public"
+			if list.IsPrivate {
+				privacy = "private"
+			}
+			row := marker + nameStyle.Render(list.Name) +
+				lipgloss.NewStyle().Foreground(muted).Render(" · "+members+" · "+privacy)
+			rows = append(rows, ansi.Truncate(row, max(10, w-8), "…"))
+		}
+		body = strings.Join(rows, "\n")
+	}
+	panel := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(blue).
+		Padding(0, 1).Width(w - 4).Render(body)
+	hintText := "j/k move · enter select · esc cancel"
+	if len(m.listPicker) > max(1, m.height-9) {
+		hintText = fmt.Sprintf("%d/%d · %s", m.listPickerSel+1, len(m.listPicker), hintText)
+	}
+	hint := lipgloss.NewStyle().Foreground(muted).Render(hintText)
+	content := title + "\n\n" + panel + "\n\n" + hint
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
 func (m Model) viewZoom() string {
 	post, ok := m.currentPost()
 	if !ok || len(post.Media) == 0 {
@@ -809,12 +864,12 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n/           search\nL           lists\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
 		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · ^L redraw\nb bookmarks · q quit"
+		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · ^L redraw\nL lists · b saved · q quit"
 		if m.mode == modeThread {
 			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
 		}

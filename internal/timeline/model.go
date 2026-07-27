@@ -58,6 +58,7 @@ const (
 	FeedFollowing
 	FeedBookmarks
 	FeedSearch
+	FeedList
 )
 
 type mode int
@@ -67,6 +68,7 @@ const (
 	modeThread
 	modeReply
 	modeSearch
+	modeListPicker
 )
 
 type Model struct {
@@ -79,6 +81,8 @@ type Model struct {
 	imageNote     string
 	feed          FeedKind
 	searchQuery   string
+	listID        string
+	listName      string
 	feedSeq       int
 	posts         []api.TimelinePost
 	cursor        string
@@ -104,23 +108,28 @@ type Model struct {
 	viewport      viewport.Model
 	wezFrameKey   string
 
-	mode          mode
-	feedSelected  int
-	threadRootID  string
-	threadPosts   []api.ConversationPost
-	threadCursor  string
-	threadLoading bool
-	threadMore    bool
-	threadErr     error
-	threadSeq     int
-	replyReturn   mode
-	replyEditor   textarea.Model
-	replyPost     api.TimelinePost
-	replyPosting  bool
-	replyErr      error
-	replyNotice   string
-	searchInput   textinput.Model
-	searchReturn  mode
+	mode              mode
+	feedSelected      int
+	threadRootID      string
+	threadPosts       []api.ConversationPost
+	threadCursor      string
+	threadLoading     bool
+	threadMore        bool
+	threadErr         error
+	threadSeq         int
+	replyReturn       mode
+	replyEditor       textarea.Model
+	replyPost         api.TimelinePost
+	replyPosting      bool
+	replyErr          error
+	replyNotice       string
+	searchInput       textinput.Model
+	searchReturn      mode
+	listPicker        []api.ListInfo
+	listPickerSel     int
+	listPickerErr     error
+	listPickerLoading bool
+	listReturn        mode
 }
 
 type pageMsg struct {
@@ -237,7 +246,7 @@ func (m Model) Init() tea.Cmd {
 	if m.feed == FeedSearch && m.searchQuery == "" {
 		return tea.Batch(m.searchInput.Focus(), clockTick())
 	}
-	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq), clockTick())
+	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, "", false, m.feedSeq), clockTick())
 }
 
 func Run(ctx context.Context, images string, feed FeedKind, query string) (Action, error) {
@@ -278,7 +287,7 @@ func Run(ctx context.Context, images string, feed FeedKind, query string) (Actio
 	return Action{}, err
 }
 
-func fetchPageSeq(parent context.Context, feed FeedKind, query, cursor string, more bool, seq int) tea.Cmd {
+func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, cursor string, more bool, seq int) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
@@ -301,6 +310,11 @@ func fetchPageSeq(parent context.Context, feed FeedKind, query, cursor string, m
 			q := query
 			fetch = func(ctx context.Context, cursor string, count int) (*api.TimelinePage, error) {
 				return client.FetchSearchTimeline(ctx, q, cursor, count)
+			}
+		case FeedList:
+			id := listID
+			fetch = func(ctx context.Context, cursor string, count int) (*api.TimelinePage, error) {
+				return client.FetchListTimeline(ctx, id, cursor, count)
 			}
 		}
 		page, err := fetch(ctx, cursor, 30)
@@ -424,6 +438,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateReply(msg)
 	case modeSearch:
 		return m.updateSearch(msg)
+	case modeListPicker:
+		return m.updateListPicker(msg)
 	case modeThread:
 		return m.updateThread(msg)
 	}
@@ -496,6 +512,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.setFeed(FeedBookmarks)
 	case "/":
 		return m, m.beginSearch()
+	case "L":
+		return m, m.beginListPicker()
 	case "R", "ctrl+r":
 		if len(m.posts) == 0 {
 			m.loading = true
@@ -503,7 +521,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshing = true
 		}
 		m.err = nil
-		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq)))
+		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, "", false, m.feedSeq)))
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
@@ -685,7 +703,7 @@ func (m *Model) setFeed(kind FeedKind) tea.Cmd {
 	m.err = nil
 	m.viewport.YOffset = 0
 	m.syncViewport()
-	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq)))
+	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, "", false, m.feedSeq)))
 }
 
 // switchFeed keeps the f-key semantics: toggle For You <-> Following.
@@ -700,7 +718,7 @@ func (m *Model) switchFeed() tea.Cmd {
 func (m *Model) maybeLoadMore() tea.Cmd {
 	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
 		m.loadingMore = true
-		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.cursor, true, m.feedSeq))
+		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.listID, m.cursor, true, m.feedSeq))
 	}
 	return nil
 }
@@ -721,7 +739,8 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 	m.err = nil
 	threadContext := m.mode == modeThread ||
 		(m.mode == modeReply && m.replyReturn == modeThread) ||
-		(m.mode == modeSearch && m.searchReturn == modeThread)
+		(m.mode == modeSearch && m.searchReturn == modeThread) ||
+		(m.mode == modeListPicker && m.listReturn == modeThread)
 	feedIndex := m.selected
 	if threadContext {
 		feedIndex = m.feedSelected
