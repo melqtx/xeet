@@ -167,3 +167,50 @@ func TestVerifyAndSaveFailsClosedWhenViewerUnidentifiable(t *testing.T) {
 		t.Fatalf("SaveAccount called %d times without a viewer id", store.saveAccountCalls)
 	}
 }
+
+func TestScriptedAuthNamesTheProfilesInsteadOfChoosingOne(t *testing.T) {
+	sessions := []api.LoginResult{
+		{Profile: "Default", AuthToken: "a", CT0: "b"},
+		{Profile: "Profile 8", AuthToken: "c", CT0: "d"},
+	}
+	_, err := pickScriptedSession(sessions, "Chrome", "")
+	if err == nil {
+		t.Fatal("several signed-in profiles must not be resolved silently; that is how a second account disappears")
+	}
+	for _, want := range []string{"--profile", "Default", "Profile 8"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not tell the user about %q", err, want)
+		}
+	}
+}
+
+func TestScriptedAuthSelectsTheNamedProfileCaseInsensitively(t *testing.T) {
+	sessions := []api.LoginResult{
+		{Profile: "Default", AuthToken: "a", CT0: "b"},
+		{Profile: "Profile 8", AuthToken: "c", CT0: "d"},
+	}
+	got, err := pickScriptedSession(sessions, "Chrome", "profile 8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AuthToken != "c" {
+		t.Fatalf("selected %+v, want the Profile 8 session", got)
+	}
+}
+
+func TestScriptedAuthUsesTheOnlyProfileWithoutBeingAsked(t *testing.T) {
+	got, err := pickScriptedSession([]api.LoginResult{{Profile: "Default", AuthToken: "a"}}, "Chrome", "")
+	if err != nil {
+		t.Fatalf("a single profile needs no --profile: %v", err)
+	}
+	if got.AuthToken != "a" {
+		t.Fatalf("selected %+v", got)
+	}
+}
+
+func TestScriptedAuthReportsAnUnknownProfileWithWhatExists(t *testing.T) {
+	_, err := pickScriptedSession([]api.LoginResult{{Profile: "Default"}}, "Chrome", "Profile 9")
+	if err == nil || !strings.Contains(err.Error(), "Default") {
+		t.Fatalf("error = %v; it should name the profiles that do have sessions", err)
+	}
+}
