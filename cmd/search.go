@@ -25,7 +25,9 @@ var searchCmd = &cobra.Command{
 		if len(args) == 1 {
 			query = args[0]
 		}
-		return runTimeline(cmd.Context(), searchImageMode, timeline.FeedSearch, query, "", 1)
+		return runTimeline(cmd.Context(), searchImageMode, []timeline.ColumnSpec{{
+			Kind: timeline.FeedSearch, Query: query,
+		}})
 	},
 }
 

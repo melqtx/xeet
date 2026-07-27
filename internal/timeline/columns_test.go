@@ -7,6 +7,7 @@ import (
 	"github.com/melqtx/xeet/pkg/api"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestColumnContentWidths(t *testing.T) {
@@ -31,7 +32,7 @@ func TestColumnContentWidths(t *testing.T) {
 
 	m := New()
 	m.width = 100
-	m.configureColumns(2, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
 	if got := m.contentWidth(); got != 47 {
 		t.Fatalf("contentWidth()=%d, want delegated two-column width 47", got)
 	}
@@ -39,7 +40,7 @@ func TestColumnContentWidths(t *testing.T) {
 
 func TestConfiguredColumnsStartOnTheSameSelectedFeed(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.configureColumns(4, FeedList, "", "123")
+	m.configureColumns(repeatedColumnSpecs(4, FeedList, "", "123"))
 
 	for index := range m.columns {
 		c := m.columns[index]
@@ -54,7 +55,7 @@ func TestConfiguredColumnsStartOnTheSameSelectedFeed(t *testing.T) {
 
 func TestInitSchedulesAFirstPageForEveryColumn(t *testing.T) {
 	m := NewWithImageMode("off")
-	m.configureColumns(3, FeedFollowing, "", "")
+	m.configureColumns(repeatedColumnSpecs(3, FeedFollowing, "", ""))
 
 	msg := m.Init()()
 	batch, ok := msg.(tea.BatchMsg)
@@ -63,6 +64,57 @@ func TestInitSchedulesAFirstPageForEveryColumn(t *testing.T) {
 	}
 	if len(batch) != 5 {
 		t.Fatalf("Init scheduled %d commands, want spinner + 3 fetches + clock", len(batch))
+	}
+}
+
+func TestConfiguredColumnSpecsKeepIndependentFeedParameters(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.configureColumns([]ColumnSpec{
+		{Kind: FeedForYou},
+		{Kind: FeedFollowing},
+		{Kind: FeedBookmarks},
+		{Kind: FeedSearch, Query: "golang"},
+	})
+
+	if m.columns[0].feed != FeedForYou ||
+		m.columns[1].feed != FeedFollowing ||
+		m.columns[2].feed != FeedBookmarks ||
+		m.columns[3].feed != FeedSearch ||
+		m.columns[3].searchQuery != "golang" {
+		t.Fatalf("configured columns lost their feed specs: %+v", m.columns)
+	}
+}
+
+func TestMultiColumnHeaderShowsOneLogoAndAVisibleFocusBar(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.configureColumns([]ColumnSpec{
+		{Kind: FeedForYou},
+		{Kind: FeedFollowing},
+		{Kind: FeedBookmarks},
+		{Kind: FeedSearch, Query: "golang"},
+	})
+	for index := range m.columns {
+		m.columns[index].loading = false
+	}
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 24})
+
+	view := ansi.Strip(m.View())
+	if count := strings.Count(view, `/\_/\`); count != 1 {
+		t.Fatalf("multi-column view rendered %d cat logos, want one:\n%s", count, view)
+	}
+	for _, label := range []string{"for you", "following", "bookmarks", "search: golang"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("multi-column header omitted %q:\n%s", label, view)
+		}
+	}
+	if !strings.Contains(view, "▸ for you") || strings.Contains(view, "▸ following") {
+		t.Fatalf("focus marker did not identify the first column:\n%s", view)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "▸ following") || strings.Contains(view, "▸ for you") {
+		t.Fatalf("focus marker did not move with focus:\n%s", view)
 	}
 }
 
@@ -187,7 +239,7 @@ func TestThreadOverlayUsesFullTerminalWidthWithMultipleColumns(t *testing.T) {
 
 func modelWithNamedColumns(names ...string) Model {
 	m := NewWithImageMode("off")
-	m.configureColumns(len(names), FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(len(names), FeedForYou, "", ""))
 	for index, name := range names {
 		m.columns[index].loading = false
 		m.columns[index].posts = []api.TimelinePost{{
@@ -198,6 +250,14 @@ func modelWithNamedColumns(names ...string) Model {
 		}}
 	}
 	return m
+}
+
+func repeatedColumnSpecs(count int, kind FeedKind, query, listID string) []ColumnSpec {
+	specs := make([]ColumnSpec, count)
+	for index := range specs {
+		specs[index] = ColumnSpec{Kind: kind, Query: query, ListID: listID}
+	}
+	return specs
 }
 
 func lineContainsAll(value string, parts ...string) bool {

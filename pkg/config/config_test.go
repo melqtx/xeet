@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 		ListLatestTweetsTimelineQID: "listtimeline123", ListsManagementPageTimelineQID: "listsmanagement123",
 		FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123",
 		TweetDetailQID: "detail123",
+		Columns:        []string{"foryou", "bookmarks"},
 		SessionBrowser: "Firefox", SessionProfile: "default-release", SessionDomain: "x.com",
 		SessionExpires:  time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC),
 		SessionImported: time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC),
@@ -61,7 +63,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *out != *in {
+	if !reflect.DeepEqual(out, in) {
 		t.Fatalf("roundtrip mismatch: got %+v want %+v", out, in)
 	}
 }
@@ -167,7 +169,7 @@ func TestLoadMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *cfg != (Config{}) {
+	if !reflect.DeepEqual(cfg, &Config{}) {
 		t.Fatalf("expected zero config, got %+v", cfg)
 	}
 }
@@ -441,5 +443,63 @@ func TestThemeIsEmptyWithoutAConfigFile(t *testing.T) {
 	}
 	if name != "" {
 		t.Fatalf("Theme() = %q, want empty", name)
+	}
+}
+
+func TestColumnsReadTheFileWithoutTouchingTheKeyring(t *testing.T) {
+	dir := t.TempDir()
+	store := &countingStore{fakeStore: newFakeStore()}
+	cm := newConfigManagerAt(dir, store)
+	if err := cm.Save(&Config{
+		AuthToken: "auth",
+		CT0:       "ct0",
+		Columns:   []string{"foryou", "bookmarks"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.gets = 0
+
+	columns, err := cm.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(columns, []string{"foryou", "bookmarks"}) {
+		t.Fatalf("Columns() = %v", columns)
+	}
+	if store.gets != 0 {
+		t.Fatalf("Columns() made %d keyring reads", store.gets)
+	}
+}
+
+func TestSaveColumnsPatchesOnlyTheLayout(t *testing.T) {
+	dir := t.TempDir()
+	store := &countingStore{fakeStore: newFakeStore()}
+	cm := newConfigManagerAt(dir, store)
+	if err := cm.Save(&Config{
+		AuthToken:      "auth",
+		CT0:            "ct0",
+		CreateTweetQID: "qid",
+		Theme:          "nord",
+		Columns:        []string{"foryou"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.gets = 0
+
+	if err := cm.SaveColumns([]string{"following", "search:golang"}); err != nil {
+		t.Fatal(err)
+	}
+	if store.gets != 0 {
+		t.Fatalf("SaveColumns made %d keyring reads", store.gets)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".xeet.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	for _, want := range []string{"create_tweet_qid: qid", "theme: nord", "following", "search:golang"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("SaveColumns dropped %q:\n%s", want, body)
+		}
 	}
 }

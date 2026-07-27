@@ -35,6 +35,7 @@ type Config struct {
 	ViewerQID                      string    `yaml:"viewer_qid,omitempty"`
 	TweetDetailQID                 string    `yaml:"tweet_detail_qid,omitempty"`
 	Theme                          string    `yaml:"theme,omitempty"`
+	Columns                        []string  `yaml:"columns,omitempty"`
 	SessionBrowser                 string    `yaml:"session_browser,omitempty"`
 	SessionProfile                 string    `yaml:"session_profile,omitempty"`
 	SessionDomain                  string    `yaml:"session_domain,omitempty"`
@@ -97,25 +98,26 @@ func (systemKeyring) Delete(key string) error {
 // fileConfig is the on-disk shape. auth_token and ct0 are only read for
 // migration from the pre-keyring layout and are never written back.
 type fileConfig struct {
-	AuthToken                      string `yaml:"auth_token,omitempty"`
-	CT0                            string `yaml:"ct0,omitempty"`
-	CreateTweetQID                 string `yaml:"create_tweet_qid,omitempty"`
-	HomeTimelineQID                string `yaml:"home_timeline_qid,omitempty"`
-	HomeLatestTimelineQID          string `yaml:"home_latest_timeline_qid,omitempty"`
-	BookmarksQID                   string `yaml:"bookmarks_qid,omitempty"`
-	SearchTimelineQID              string `yaml:"search_timeline_qid,omitempty"`
-	ListLatestTweetsTimelineQID    string `yaml:"list_latest_tweets_timeline_qid,omitempty"`
-	ListsManagementPageTimelineQID string `yaml:"lists_management_page_timeline_qid,omitempty"`
-	FavoriteTweetQID               string `yaml:"favorite_tweet_qid,omitempty"`
-	UnfavoriteTweetQID             string `yaml:"unfavorite_tweet_qid,omitempty"`
-	ViewerQID                      string `yaml:"viewer_qid,omitempty"`
-	TweetDetailQID                 string `yaml:"tweet_detail_qid,omitempty"`
-	Theme                          string `yaml:"theme,omitempty"`
-	SessionBrowser                 string `yaml:"session_browser,omitempty"`
-	SessionProfile                 string `yaml:"session_profile,omitempty"`
-	SessionDomain                  string `yaml:"session_domain,omitempty"`
-	SessionExpires                 string `yaml:"session_expires,omitempty"`
-	SessionImported                string `yaml:"session_imported,omitempty"`
+	AuthToken                      string   `yaml:"auth_token,omitempty"`
+	CT0                            string   `yaml:"ct0,omitempty"`
+	CreateTweetQID                 string   `yaml:"create_tweet_qid,omitempty"`
+	HomeTimelineQID                string   `yaml:"home_timeline_qid,omitempty"`
+	HomeLatestTimelineQID          string   `yaml:"home_latest_timeline_qid,omitempty"`
+	BookmarksQID                   string   `yaml:"bookmarks_qid,omitempty"`
+	SearchTimelineQID              string   `yaml:"search_timeline_qid,omitempty"`
+	ListLatestTweetsTimelineQID    string   `yaml:"list_latest_tweets_timeline_qid,omitempty"`
+	ListsManagementPageTimelineQID string   `yaml:"lists_management_page_timeline_qid,omitempty"`
+	FavoriteTweetQID               string   `yaml:"favorite_tweet_qid,omitempty"`
+	UnfavoriteTweetQID             string   `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID                      string   `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID                 string   `yaml:"tweet_detail_qid,omitempty"`
+	Theme                          string   `yaml:"theme,omitempty"`
+	Columns                        []string `yaml:"columns,omitempty"`
+	SessionBrowser                 string   `yaml:"session_browser,omitempty"`
+	SessionProfile                 string   `yaml:"session_profile,omitempty"`
+	SessionDomain                  string   `yaml:"session_domain,omitempty"`
+	SessionExpires                 string   `yaml:"session_expires,omitempty"`
+	SessionImported                string   `yaml:"session_imported,omitempty"`
 }
 
 type ConfigManager struct {
@@ -159,6 +161,7 @@ func (cm *ConfigManager) Load() (*Config, error) {
 		ViewerQID:                      fc.ViewerQID,
 		TweetDetailQID:                 fc.TweetDetailQID,
 		Theme:                          fc.Theme,
+		Columns:                        append([]string(nil), fc.Columns...),
 		SessionBrowser:                 fc.SessionBrowser,
 		SessionProfile:                 fc.SessionProfile,
 		SessionDomain:                  fc.SessionDomain,
@@ -218,6 +221,27 @@ func (cm *ConfigManager) Theme() (string, error) {
 	return fc.Theme, nil
 }
 
+// Columns reads only the persisted layout. It skips the keyring so startup
+// layout resolution cannot provoke a keychain prompt before the TUI starts.
+func (cm *ConfigManager) Columns() ([]string, error) {
+	fc, err := cm.readFile()
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), fc.Columns...), nil
+}
+
+// SaveColumns patches only the explicit layout setting. Loading and saving a
+// full Config here could overwrite session metadata changed by another command.
+func (cm *ConfigManager) SaveColumns(columns []string) error {
+	fc, err := cm.readFile()
+	if err != nil {
+		return err
+	}
+	fc.Columns = append([]string(nil), columns...)
+	return cm.writeFile(fc)
+}
+
 // migrateLegacy moves tokens from the pre-keyring on-disk layout (AES-GCM
 // encrypted auth_token with the key sitting next to it in ~/.xeet.key, ct0 in
 // plaintext) into the OS keyring, rewrites the config file without them, and
@@ -261,7 +285,7 @@ func (cm *ConfigManager) Save(config *Config) error {
 			ListsManagementPageTimelineQID: config.ListsManagementPageTimelineQID,
 			FavoriteTweetQID:               config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
 			ViewerQID: config.ViewerQID, TweetDetailQID: config.TweetDetailQID,
-			Theme: config.Theme,
+			Theme: config.Theme, Columns: append([]string(nil), config.Columns...),
 		})
 	}
 
@@ -306,6 +330,7 @@ func fileConfigFor(config *Config) *fileConfig {
 		ViewerQID:                      config.ViewerQID,
 		TweetDetailQID:                 config.TweetDetailQID,
 		Theme:                          config.Theme,
+		Columns:                        append([]string(nil), config.Columns...),
 		SessionBrowser:                 config.SessionBrowser,
 		SessionProfile:                 config.SessionProfile,
 		SessionDomain:                  config.SessionDomain,

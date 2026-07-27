@@ -61,8 +61,10 @@ func newColumn(id int) column {
 	}
 }
 
-func (m *Model) configureColumns(count int, feed FeedKind, query, listID string) {
-	count = max(1, count)
+func (m *Model) configureColumns(specs []ColumnSpec) {
+	if len(specs) == 0 {
+		specs = []ColumnSpec{{Kind: FeedForYou}}
+	}
 	firstID := m.nextColID
 	if len(m.columns) > 0 {
 		firstID = m.columns[0].id
@@ -70,17 +72,17 @@ func (m *Model) configureColumns(count int, feed FeedKind, query, listID string)
 		m.nextColID++
 	}
 	m.columns = []column{newColumn(firstID)}
-	for len(m.columns) < count {
+	for len(m.columns) < len(specs) {
 		m.columns = append(m.columns, newColumn(m.nextColID))
 		m.nextColID++
 	}
-	for index := range m.columns {
+	for index, spec := range specs {
 		c := &m.columns[index]
-		c.feed = feed
-		c.searchQuery = query
-		c.listID = listID
-		if feed == FeedList {
-			c.listName = listID
+		c.feed = spec.Kind
+		c.searchQuery = spec.Query
+		c.listID = spec.ListID
+		if spec.Kind == FeedList {
+			c.listName = spec.ListID
 		}
 	}
 	m.focus = 0

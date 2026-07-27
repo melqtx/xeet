@@ -93,7 +93,7 @@ func (m Model) viewColumns() string {
 				lipgloss.NewStyle().Foreground(red).Width(max(20, width-8)).Align(lipgloss.Center).
 					Render("the cat lost the timeline\n\n"+c.err.Error()))
 		}
-		block := m.columnHeader(c, width, index == m.focus) + "\n\n" + center
+		block := m.columnHeader(c, width, index == m.focus) + "\n" + center
 		if index < first+count-1 {
 			block = lipgloss.NewStyle().PaddingRight(columnGutter).Render(block)
 		}
@@ -107,7 +107,7 @@ func (m Model) viewColumns() string {
 	if hidden > 0 {
 		footer = m.footerWithHiddenColumns(width, hidden, footer)
 	}
-	body := joined + "\n" +
+	body := m.screenHeader(totalWidth) + "\n" + joined + "\n" +
 		lipgloss.NewStyle().Foreground(muted).Width(totalWidth).Align(lipgloss.Center).Render(footer)
 	left := max(0, (m.width-totalWidth)/2)
 	return lipgloss.NewStyle().MarginLeft(left).Render(body)
@@ -159,10 +159,27 @@ func (m Model) visibleColumnWidth() int {
 }
 
 func (m Model) header(width int) string {
-	return m.columnHeader(m.cur(), width, true)
+	c := m.cur()
+	return m.catHeader(c, width, m.columnStatus(c, width))
 }
 
 func (m Model) columnHeader(c *column, width int, focused bool) string {
+	status := m.columnFeedLabel(c, width)
+	if focused {
+		return lipgloss.NewStyle().
+			Foreground(bright).
+			Background(blue).
+			Bold(true).
+			Width(width).
+			Render("▸ " + status)
+	}
+	return lipgloss.NewStyle().
+		Foreground(muted).
+		Width(width).
+		Render("  " + status)
+}
+
+func (m Model) columnFeedLabel(c *column, width int) string {
 	status := "for you"
 	switch c.feed {
 	case FeedForYou:
@@ -176,6 +193,11 @@ func (m Model) columnHeader(c *column, width int, focused bool) string {
 	case FeedList:
 		status = ansi.Truncate("list · "+c.listName, max(9, width-12), "…")
 	}
+	return status
+}
+
+func (m Model) columnStatus(c *column, width int) string {
+	status := m.columnFeedLabel(c, width)
 	if m.mode == modeThread {
 		status = "replies"
 		if root, ok := c.threadRootPost(); ok && root.Handle != "" {
@@ -189,20 +211,25 @@ func (m Model) columnHeader(c *column, width int, focused bool) string {
 	} else if c.loadingMore {
 		status = m.spinner.View() + " loading more"
 	}
+	return status
+}
+
+func (m Model) screenHeader(width int) string {
+	return m.catHeader(m.cur(), width, "")
+}
+
+func (m Model) catHeader(c *column, width int, status string) string {
 	face := "( o.o )"
 	if c.err != nil || (m.mode == modeThread && c.threadErr != nil) {
 		face = "( >.< )"
 	}
-	catColor := pink
-	titleColor := blue
-	if !focused {
-		catColor = muted
-		titleColor = muted
+	secondLine := lipgloss.NewStyle().Foreground(pink).Render(face)
+	if status != "" {
+		secondLine += lipgloss.NewStyle().Foreground(muted).Render("   " + status)
 	}
-	cat := lipgloss.NewStyle().Foreground(catColor).Render(" /\\_/\\") +
-		lipgloss.NewStyle().Foreground(titleColor).Bold(true).Render("   xeet") + "\n" +
-		lipgloss.NewStyle().Foreground(catColor).Render(face) +
-		lipgloss.NewStyle().Foreground(muted).Render("   "+status)
+	cat := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
+		lipgloss.NewStyle().Foreground(blue).Bold(true).Render("   xeet") + "\n" +
+		secondLine
 	return lipgloss.NewStyle().Width(width).Render(cat)
 }
 

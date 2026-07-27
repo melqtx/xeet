@@ -22,7 +22,7 @@ var (
 	rootFollowing bool
 	rootBookmarks bool
 	rootListID    string
-	rootColumns   int
+	rootColumns   string
 	rootTheme     string
 )
 
@@ -95,7 +95,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&rootFollowing, "following", false, "start on the Following feed instead of For You")
 	rootCmd.Flags().BoolVar(&rootBookmarks, "bookmarks", false, "start on your bookmarks feed")
 	rootCmd.Flags().StringVar(&rootListID, "list", "", "start on the given list id")
-	rootCmd.Flags().IntVar(&rootColumns, "columns", 1, "number of side-by-side columns (1-4)")
+	rootCmd.Flags().StringVar(&rootColumns, "columns", "1", "column count (1-4) or feeds: foryou,following,bookmarks,list:<id>,search:<query>")
 	rootCmd.Flags().StringVar(&rootTheme, "theme", "", "color theme for this run (see 'xeet theme')")
 	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
 	rootCmd.MarkFlagsMutuallyExclusive("compose", "following")
@@ -105,9 +105,28 @@ func init() {
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
-	if err := validateColumnCount(rootColumns); err != nil {
-		return err
+	feed := timeline.FeedForYou
+	if rootFollowing {
+		feed = timeline.FeedFollowing
 	}
+	if rootBookmarks {
+		feed = timeline.FeedBookmarks
+	}
+	if rootListID != "" {
+		feed = timeline.FeedList
+	}
+	base := columnSpecForFeed(feed, "", rootListID)
+	singleFeedFlag := cmd.Flags().Changed("following") ||
+		cmd.Flags().Changed("bookmarks") || cmd.Flags().Changed("list")
+	var specs []timeline.ColumnSpec
+	if cmd.Flags().Changed("columns") {
+		var err error
+		specs, err = resolveColumnSpecs(rootColumns, true, nil, base, singleFeedFlag)
+		if err != nil {
+			return err
+		}
+	}
+
 	configMgr, err := config.NewConfigManager()
 	if err != nil {
 		return err
@@ -134,17 +153,13 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if barebones {
 		imageMode = "off"
 	}
-	feed := timeline.FeedForYou
-	if rootFollowing {
-		feed = timeline.FeedFollowing
+	if specs == nil {
+		specs, err = resolveColumnSpecs(rootColumns, false, cfg.Columns, base, singleFeedFlag)
+		if err != nil {
+			return err
+		}
 	}
-	if rootBookmarks {
-		feed = timeline.FeedBookmarks
-	}
-	if rootListID != "" {
-		feed = timeline.FeedList
-	}
-	return runTimeline(cmd.Context(), imageMode, feed, "", rootListID, rootColumns)
+	return runTimeline(cmd.Context(), imageMode, specs)
 }
 
 // printFirstRun greets someone who has not connected an account yet. It is the

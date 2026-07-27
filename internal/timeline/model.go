@@ -60,6 +60,12 @@ const (
 	FeedList
 )
 
+type ColumnSpec struct {
+	Kind   FeedKind
+	Query  string
+	ListID string
+}
+
 type mode int
 
 const (
@@ -244,19 +250,17 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func Run(ctx context.Context, images string, feed FeedKind, query, listID string, columnCount int) (Action, error) {
+func Run(ctx context.Context, images string, specs []ColumnSpec) (Action, error) {
 	m := NewWithImageMode(images)
 	m.ctx = ctx
-	m.configureColumns(columnCount, feed, query, listID)
-	if feed == FeedSearch && query == "" {
+	m.configureColumns(specs)
+	if len(specs) == 1 && specs[0].Kind == FeedSearch && specs[0].Query == "" {
 		m.cur().loading = false
 		m.beginSearch()
 	}
-	if feed == FeedList {
-		if listID == "" {
-			m.cur().loading = false
-			m.beginListPicker()
-		}
+	if len(specs) == 1 && specs[0].Kind == FeedList && specs[0].ListID == "" {
+		m.cur().loading = false
+		m.beginListPicker()
 	}
 	// Auto-detected native mode is a claim, not a capability: multiplexers
 	// like cmux inherit ghostty's TERM without reliably rendering graphics.

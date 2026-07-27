@@ -32,7 +32,7 @@ func TestRootHelpListsEveryVisibleCommand(t *testing.T) {
 	}
 }
 
-func TestListsCommandAppearsWithTimelineAndSearch(t *testing.T) {
+func TestFeedCommandsAppearTogetherInEveryDayHelp(t *testing.T) {
 	for _, group := range groupCommands(rootCmd) {
 		if group.title != "every day" {
 			continue
@@ -41,7 +41,7 @@ func TestListsCommandAppearsWithTimelineAndSearch(t *testing.T) {
 		for _, command := range group.commands {
 			seen[command.Name()] = true
 		}
-		for _, want := range []string{"timeline", "lists", "search"} {
+		for _, want := range []string{"timeline", "lists", "search", "columns"} {
 			if !seen[want] {
 				t.Fatalf("%q is missing from the every day help group: %v", want, seen)
 			}

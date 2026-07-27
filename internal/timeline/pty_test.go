@@ -53,7 +53,7 @@ func TestTimelinePTYHelper(t *testing.T) {
 		return
 	}
 	m := New()
-	m.configureColumns(2, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
 	m.columns[0].loading = false
 	m.columns[0].posts = []api.TimelinePost{
 		{ID: "1", AuthorName: "Alice", Handle: "alice", Text: "hello from the PTY", LikeCount: 3},

@@ -76,7 +76,7 @@ func TestNativeModeDetection(t *testing.T) {
 func TestMultiColumnForcesANSIOnWezTermWithVisibleNote(t *testing.T) {
 	setWezTermEnvironment(t)
 	m := NewWithImageMode("native")
-	m.configureColumns(2, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
 	m.width, m.height = 120, 32
 	m.resize()
 	m.help = true
@@ -96,13 +96,13 @@ func TestMultiColumnForcesANSIOnWezTermWithVisibleNote(t *testing.T) {
 func TestWezTermPathNeverRunsMultiColumn(t *testing.T) {
 	setWezTermEnvironment(t)
 	m := NewWithImageMode("native")
-	m.configureColumns(1, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(1, FeedForYou, "", ""))
 	if m.imageMode != imageModeWezTerm {
 		t.Fatalf("single-column WezTerm mode=%q", m.imageMode)
 	}
 	_ = m.imageFrameKey()
 
-	m.configureColumns(2, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
 	if m.imageMode == imageModeWezTerm {
 		t.Fatal("iTerm2-protocol renderer survived multi-column configuration")
 	}
@@ -414,7 +414,7 @@ func TestSelectedPostRequestsInlinePreview(t *testing.T) {
 
 func TestPreviewRequestsCoverVisibleNonFocusedColumns(t *testing.T) {
 	m := NewWithImageMode("ansi")
-	m.configureColumns(2, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
 	m.width, m.height = 120, 30
 	for index, id := range []string{"left", "right"} {
 		c := &m.columns[index]
@@ -438,7 +438,7 @@ func TestPreviewRequestsCoverVisibleNonFocusedColumns(t *testing.T) {
 
 func TestPreviewArrivalRepaintsVisibleNonFocusedColumn(t *testing.T) {
 	m := NewWithImageMode("ansi")
-	m.configureColumns(2, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
 	m.width, m.height = 120, 30
 	right := &m.columns[1]
 	right.loading = false
@@ -587,7 +587,7 @@ func TestPreviewCacheEvictsDistantEntries(t *testing.T) {
 
 func TestEvictionKeepsPreviewsVisibleInNonFocusedColumns(t *testing.T) {
 	m := NewWithImageMode("ansi")
-	m.configureColumns(2, FeedForYou, "", "")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
 	m.width = 120
 	m.columns[0].posts = []api.TimelinePost{{ID: "focused"}}
 	m.columns[1].posts = []api.TimelinePost{{ID: "non-focused"}}

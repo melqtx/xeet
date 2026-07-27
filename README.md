@@ -108,6 +108,8 @@ xeet lists                            # pick a list and browse it
 xeet --list 1234567890                # start on a list by id
 xeet search "go tui"                  # search posts and browse results
 xeet --columns 2                      # show two side-by-side feeds
+xeet --columns foryou,bookmarks       # choose each column's feed
+xeet columns save "foryou,following"  # save the default layout
 xeet --barebones                      # text-only feed
 xeet --compose                        # skip the feed, open the composer
 xeet post "hello from my shell"       # one-shot post
@@ -185,10 +187,13 @@ timeline.
 
 ### multi-column
 
-`--columns 2` through `--columns 4` splits the timeline into equal-width
-feeds. `tab` / `shift+tab` (or `]` / `[`) moves focus; navigation and post
-actions apply to the focused column. if the terminal is too narrow, xeet
-shows only the columns that fit and tells you how many are hidden.
+`--columns 2` through `--columns 4` repeats the selected feed in equal-width
+columns. a comma-separated layout can mix `foryou`, `following`, `bookmarks`,
+`list:<id>`, and `search:<query>`. `xeet columns save "..."` writes that
+layout to `~/.xeet.yaml`; trying a layout never saves it implicitly.
+`tab` / `shift+tab` (or `]` / `[`) moves focus; navigation and post actions
+apply to the focused column. if the terminal is too narrow, xeet shows only
+the columns that fit and tells you how many are hidden.
 
 ansi previews and kitty/ghostty Unicode-placeholder images compose across
 columns. iterm2 and wezterm inline images rely on relative cursor movement,
