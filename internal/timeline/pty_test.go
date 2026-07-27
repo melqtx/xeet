@@ -66,7 +66,11 @@ func TestTimelinePTYHelper(t *testing.T) {
 
 func TestTimelinePTYNavigationResizeAndHelp(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestTimelinePTYHelper$")
-	cmd.Env = append(os.Environ(), "XEET_PTY_HELPER=1", "TERM=xterm-256color", "NO_COLOR=1")
+	// Bubble Tea checks the terminal background during package initialization,
+	// before TestMain can establish the helper's isolated terminal environment.
+	// Start with TERM=dumb to skip that interactive probe; TestMain restores
+	// xterm-256color before the helper test itself runs.
+	cmd.Env = append(os.Environ(), "XEET_PTY_HELPER=1", "TERM=dumb", "NO_COLOR=1")
 	terminal, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
@@ -85,9 +89,6 @@ func TestTimelinePTYNavigationResizeAndHelp(t *testing.T) {
 	}
 
 	time.Sleep(120 * time.Millisecond)
-	// Bubble Tea probes background color and cursor position during startup.
-	// A bare PTY has no terminal emulator, so provide the standard replies.
-	writeKey("\x1b]11;rgb:0000/0000/0000\x1b\\\x1b[1;1R")
 	writeKey("j")
 	if err := pty.Setsize(terminal, &pty.Winsize{Rows: 15, Cols: 42}); err != nil {
 		t.Fatal(err)
