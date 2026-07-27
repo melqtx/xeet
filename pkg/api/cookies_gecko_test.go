@@ -77,6 +77,40 @@ func TestGeckoBrowserFindsMultipleProfilesAndRoots(t *testing.T) {
 	}
 }
 
+func TestGeckoScanReturnsAllLoggedInProfiles(t *testing.T) {
+	root := t.TempDir()
+	for _, profile := range []string{"a.default", "b.work"} {
+		dir := filepath.Join(root, profile)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cookies.sqlite"), []byte("db"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	read := 0
+	browser := geckoBrowser{name: "Firefox", roots: []string{root}}
+	results, _, err := scanGeckoSessions(browser, func(string) ([]*kooky.Cookie, error) {
+		read++
+		suffix := string(rune('0' + read))
+		return []*kooky.Cookie{
+			{Cookie: http.Cookie{Name: "auth_token", Value: "auth-" + suffix, Domain: ".x.com"}},
+			{Cookie: http.Cookie{Name: "ct0", Value: "ct0-" + suffix, Domain: ".x.com"}},
+		}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("scan returned %d profiles, want 2", len(results))
+	}
+	profiles := map[string]bool{results[0].Profile: true, results[1].Profile: true}
+	if !profiles["a.default"] || !profiles["b.work"] {
+		t.Fatalf("profiles = %v, want both Firefox profiles", profiles)
+	}
+}
+
 func TestCopyDBAsCopiesWAL(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "cookies.sqlite")

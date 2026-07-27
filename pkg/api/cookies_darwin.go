@@ -102,16 +102,25 @@ func (b chromiumBrowser) hasXSession() bool {
 	return false
 }
 
-// ImportBrowserSession reads and decrypts the x.com session from a single named
-// browser (as returned by DetectBrowsers). It only touches that browser's
-// Keychain item, so the user sees at most one permission prompt.
+// ImportBrowserSession returns the best session from one browser.
 func ImportBrowserSession(name string) (*LoginResult, string, error) {
+	results, resolved, err := ImportBrowserSessions(name)
+	if err != nil {
+		return nil, "", err
+	}
+	return &results[0], resolved, nil
+}
+
+// ImportBrowserSessions reads every distinct x.com session from one browser.
+// It only touches that browser's Keychain item, so the user sees at most one
+// permission prompt.
+func ImportBrowserSessions(name string) ([]LoginResult, string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", err
 	}
 	if browser, ok := findGeckoBrowser(name, geckoBrowsers(home)); ok {
-		return importGeckoSession(browser)
+		return importGeckoSessions(browser)
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return nil, "", fmt.Errorf("the 'sqlite3' command isn't available (needed to read the cookie database)")
@@ -132,9 +141,20 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 		return nil, "", fmt.Errorf("couldn't read %s's Keychain key: %v", browser.name, err)
 	}
 
-	var best *LoginResult
+	results := scanChromiumSessions(browser, key, extractXCookies)
+	if len(results) > 0 {
+		return results, browser.name, nil
+	}
+	return nil, "", fmt.Errorf("no logged-in x.com session found in %s. Open x.com in it, log in, then try again", browser.name)
+}
+
+type chromiumCookieExtractor func(string, []byte) (*LoginResult, error)
+
+func scanChromiumSessions(browser chromiumBrowser, key []byte, extract chromiumCookieExtractor) []LoginResult {
+	var results []LoginResult
+	dbs := browser.cookieDBs()
 	for _, db := range dbs {
-		result, err := extractXCookies(db, key)
+		result, err := extract(db, key)
 		if err != nil {
 			continue
 		}
@@ -145,15 +165,10 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 					result.LastUsedAt = info.ModTime()
 				}
 			}
-			if betterLoginResult(result, best) {
-				best = result
-			}
+			results = append(results, *result)
 		}
 	}
-	if best != nil {
-		return best, browser.name, nil
-	}
-	return nil, "", fmt.Errorf("no logged-in x.com session found in %s. Open x.com in it, log in, then try again", browser.name)
+	return sortAndDeduplicateLoginResults(results)
 }
 
 func findChromiumBrowser(name string, browsers []chromiumBrowser) (chromiumBrowser, bool) {

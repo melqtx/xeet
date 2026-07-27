@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -86,5 +88,37 @@ func TestChromeCookieTime(t *testing.T) {
 	}
 	if got := chromeCookieTime(0); !got.IsZero() {
 		t.Fatalf("zero Chrome time converted to %v", got)
+	}
+}
+
+func TestDarwinScanReturnsAllLoggedInProfiles(t *testing.T) {
+	root := t.TempDir()
+	for _, profile := range []string{"Default", "Profile 8"} {
+		dir := filepath.Join(root, profile, "Network")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Cookies"), []byte("db"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now()
+	browser := chromiumBrowser{name: "Chrome", topDir: root}
+	results := scanChromiumSessions(browser, nil, func(path string, key []byte) (*LoginResult, error) {
+		profile := cookieProfile(path)
+		return &LoginResult{
+			AuthToken:    "auth-" + profile,
+			CT0:          "ct0-" + profile,
+			CookieDomain: "x.com",
+			LastUsedAt:   map[string]time.Time{"Default": now, "Profile 8": now.Add(time.Minute)}[profile],
+		}, nil
+	})
+
+	if len(results) != 2 {
+		t.Fatalf("scan returned %d profiles, want 2", len(results))
+	}
+	if results[0].Profile != "Profile 8" || results[1].Profile != "Default" {
+		t.Fatalf("profiles = %q, %q; want best-first Profile 8, Default", results[0].Profile, results[1].Profile)
 	}
 }

@@ -73,21 +73,27 @@ func readGeckoXCookies(path string) ([]*kooky.Cookie, error) {
 	)
 }
 
-func importGeckoSession(b geckoBrowser) (*LoginResult, string, error) {
+type geckoCookieReader func(string) ([]*kooky.Cookie, error)
+
+func importGeckoSessions(b geckoBrowser) ([]LoginResult, string, error) {
+	return scanGeckoSessions(b, readGeckoXCookies)
+}
+
+func scanGeckoSessions(b geckoBrowser, read geckoCookieReader) ([]LoginResult, string, error) {
 	dbs := b.cookieDBs()
 	if len(dbs) == 0 {
 		return nil, "", fmt.Errorf("%s has no cookie database; is it installed and set up?", b.name)
 	}
 
 	var lastErr error
-	var best *LoginResult
+	var results []LoginResult
 	for _, db := range dbs {
 		tmp, copied, err := copyDBAs(db, "cookies.sqlite")
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		cookies, readErr := readGeckoXCookies(copied)
+		cookies, readErr := read(copied)
 		os.RemoveAll(tmp)
 		if readErr != nil {
 			lastErr = readErr
@@ -100,13 +106,12 @@ func importGeckoSession(b geckoBrowser) (*LoginResult, string, error) {
 					result.LastUsedAt = info.ModTime()
 				}
 			}
-			if betterLoginResult(result, best) {
-				best = result
-			}
+			results = append(results, *result)
 		}
 	}
-	if best != nil {
-		return best, b.name, nil
+	results = sortAndDeduplicateLoginResults(results)
+	if len(results) > 0 {
+		return results, b.name, nil
 	}
 
 	if lastErr != nil {
@@ -170,23 +175,24 @@ func selectLoginResult(values []sessionCookieValue, now time.Time) *LoginResult 
 			}
 		}
 	}
-	var best *LoginResult
+	results := make([]LoginResult, 0, len(pairs))
 	for _, candidate := range pairs {
 		if candidate.auth == nil || candidate.ct0 == nil {
 			continue
 		}
-		result := &LoginResult{
+		results = append(results, LoginResult{
 			AuthToken:    candidate.auth.value,
 			CT0:          candidate.ct0.value,
 			CookieDomain: candidate.domain,
 			ExpiresAt:    earliestExpiry(candidate.auth.expires, candidate.ct0.expires),
 			LastUsedAt:   latestTime(candidate.auth.lastUsed, candidate.ct0.lastUsed),
-		}
-		if betterLoginResult(result, best) {
-			best = result
-		}
+		})
 	}
-	return best
+	results = sortAndDeduplicateLoginResults(results)
+	if len(results) == 0 {
+		return nil
+	}
+	return &results[0]
 }
 
 func usableSessionCookie(cookie *kooky.Cookie, now time.Time) bool {
@@ -258,6 +264,28 @@ func betterLoginResult(candidate, current *LoginResult) bool {
 		return candidate.ExpiresAt.After(current.ExpiresAt)
 	}
 	return candidate.Profile < current.Profile
+}
+
+func sortAndDeduplicateLoginResults(results []LoginResult) []LoginResult {
+	sort.SliceStable(results, func(i, j int) bool {
+		return betterLoginResult(&results[i], &results[j])
+	})
+
+	type cookiePair struct {
+		authToken string
+		ct0       string
+	}
+	seen := make(map[cookiePair]struct{}, len(results))
+	unique := results[:0]
+	for _, result := range results {
+		pair := cookiePair{authToken: result.AuthToken, ct0: result.CT0}
+		if _, exists := seen[pair]; exists {
+			continue
+		}
+		seen[pair] = struct{}{}
+		unique = append(unique, result)
+	}
+	return unique
 }
 
 func earliestExpiry(first, second time.Time) time.Time {

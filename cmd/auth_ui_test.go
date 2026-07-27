@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melqtx/xeet/internal/ui"
 	"github.com/melqtx/xeet/pkg/api"
@@ -101,7 +102,7 @@ func TestAuthPickerOffersAnotherBrowserAfterAFailure(t *testing.T) {
 	p := newTestAuthPicker(t, "")
 	p = updateAuth(t, p, browsersScannedMsg{})
 	p = updateAuth(t, p, key("enter"))
-	p = updateAuth(t, p, sessionImportedMsg{err: errors.New("no logged-in x.com session found in Chrome")})
+	p = updateAuth(t, p, sessionsImportedMsg{err: errors.New("no logged-in x.com session found in Chrome")})
 
 	if p.phase != authPhaseFail {
 		t.Fatalf("phase is %v, want fail", p.phase)
@@ -122,7 +123,7 @@ func TestAuthPickerOffersAnotherBrowserAfterAFailure(t *testing.T) {
 
 func TestAuthPickerVerifiesBeforeItCelebrates(t *testing.T) {
 	p := newTestAuthPicker(t, "Chrome")
-	p = updateAuth(t, p, sessionImportedMsg{result: &api.LoginResult{}, browser: "Chrome"})
+	p = updateAuth(t, p, sessionsImportedMsg{results: []api.LoginResult{{}}, browser: "Chrome"})
 	if p.phase != authPhaseVerify {
 		t.Fatalf("phase is %v, want verify after a successful import", p.phase)
 	}
@@ -134,6 +135,49 @@ func TestAuthPickerVerifiesBeforeItCelebrates(t *testing.T) {
 	}
 	if !strings.Contains(view, `Chrome profile "Default"`) {
 		t.Errorf("the success panel should say where the session came from:\n%s", view)
+	}
+}
+
+func TestAuthSkipsProfileChoiceWithSingleSession(t *testing.T) {
+	p := newTestAuthPicker(t, "Chrome")
+	p = updateAuth(t, p, sessionsImportedMsg{
+		results: []api.LoginResult{{Profile: "Default", CookieDomain: "x.com"}},
+		browser: "Chrome",
+	})
+
+	if p.phase != authPhaseVerify {
+		t.Fatalf("phase is %v, want verify without a one-row profile picker", p.phase)
+	}
+}
+
+func TestAuthProfileChoiceListsAllSessionsBestFirst(t *testing.T) {
+	now := time.Now()
+	p := newTestAuthPicker(t, "Chrome")
+	p = updateAuth(t, p, sessionsImportedMsg{
+		results: []api.LoginResult{
+			{Profile: "Profile 8", CookieDomain: "x.com", ExpiresAt: now.Add(2 * time.Hour)},
+			{Profile: "Default", CookieDomain: "x.com", ExpiresAt: now.Add(time.Hour)},
+		},
+		browser: "Chrome",
+	})
+
+	if p.phase != authPhaseChooseProfile {
+		t.Fatalf("phase is %v, want profile choice", p.phase)
+	}
+	view := p.View()
+	first := strings.Index(view, "Profile 8")
+	second := strings.Index(view, "Default")
+	if first < 0 || second < 0 || first >= second {
+		t.Fatalf("profile rows are not best-first:\n%s", view)
+	}
+	if !strings.Contains(view, "x.com") || !strings.Contains(view, "expires ") {
+		t.Fatalf("profile rows must show domain and expiry:\n%s", view)
+	}
+
+	p = updateAuth(t, p, key("down"))
+	p = updateAuth(t, p, key("enter"))
+	if p.phase != authPhaseVerify || p.profile != 1 {
+		t.Fatalf("selection did not advance to verification: phase=%v profile=%d", p.phase, p.profile)
 	}
 }
 

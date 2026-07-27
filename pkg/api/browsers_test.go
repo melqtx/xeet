@@ -25,3 +25,31 @@ func TestBetterLoginResultPrefersXDomainThenRecency(t *testing.T) {
 		t.Fatal("newer session was not preferred within the same domain")
 	}
 }
+
+func TestScanCollapsesOnlyByteIdenticalCookiePairs(t *testing.T) {
+	now := time.Now()
+	results := sortAndDeduplicateLoginResults([]LoginResult{
+		{
+			AuthToken: "same-auth", CT0: "same-ct0", Profile: "Copied",
+			CookieDomain: "x.com", LastUsedAt: now.Add(-time.Hour),
+		},
+		{
+			AuthToken: "same-auth", CT0: "same-ct0", Profile: "Fresh",
+			CookieDomain: "x.com", LastUsedAt: now,
+		},
+		{
+			AuthToken: "rotated-auth", CT0: "rotated-ct0", Profile: "Older cookies",
+			CookieDomain: "x.com", LastUsedAt: now.Add(-2 * time.Hour),
+		},
+	})
+
+	if len(results) != 2 {
+		t.Fatalf("scan returned %d sessions, want 2 distinct cookie pairs", len(results))
+	}
+	if results[0].Profile != "Fresh" {
+		t.Fatalf("first profile = %q, want freshest identical-cookie copy", results[0].Profile)
+	}
+	if results[1].Profile != "Older cookies" {
+		t.Fatalf("second profile = %q, want rotated cookie pair to remain selectable", results[1].Profile)
+	}
+}

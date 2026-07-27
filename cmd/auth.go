@@ -83,6 +83,19 @@ func (c connection) source() string {
 	return c.browser
 }
 
+type authConfigStore interface {
+	Load() (*config.Config, error)
+	RecordViewer(userID, handle string) error
+	SaveAccount(*config.Config) error
+	SaveQueryIDs(*config.Config) error
+}
+
+type authSessionClient interface {
+	Verify(context.Context) error
+	FetchViewer(context.Context) (*api.Account, error)
+	ApplyRefreshedQueryIDs(*config.Config) bool
+}
+
 // verifyAndSave checks the imported cookies against X before writing them.
 // Verifying first is what keeps a stale or wrong browser profile from
 // overwriting an existing working session.
@@ -91,39 +104,60 @@ func verifyAndSave(ctx context.Context, result *api.LoginResult, browser string)
 	if err != nil {
 		return connection{}, err
 	}
+	return verifyAndSaveWith(ctx, result, browser, configMgr, func(cfg *config.Config) authSessionClient {
+		return api.NewWebClient(cfg)
+	}, time.Now)
+}
+
+func verifyAndSaveWith(
+	ctx context.Context,
+	result *api.LoginResult,
+	browser string,
+	configMgr authConfigStore,
+	newClient func(*config.Config) authSessionClient,
+	now func() time.Time,
+) (connection, error) {
+	if result == nil {
+		return connection{}, fmt.Errorf("no browser session was imported")
+	}
 	cfg, err := configMgr.Load()
 	if err != nil {
 		cfg = &config.Config{}
 	}
-	candidate := *cfg
-	candidate.AuthToken = result.AuthToken
-	candidate.CT0 = result.CT0
-	candidate.SessionBrowser = browser
-	candidate.SessionProfile = result.Profile
-	candidate.SessionDomain = result.CookieDomain
-	candidate.SessionExpires = result.ExpiresAt
-	candidate.SessionImported = time.Now()
+	candidate := authCandidate(cfg, result, browser, now())
 
 	verifyCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	client := api.NewWebClient(&candidate)
+	client := newClient(&candidate)
 	if err := client.Verify(verifyCtx); err != nil {
+		cancel()
 		return connection{}, fmt.Errorf("session found in %s but X rejected verification: %w", browser, err)
 	}
+	cancel()
 	client.ApplyRefreshedQueryIDs(&candidate)
 
-	viewerCtx, cancelViewer := context.WithTimeout(ctx, 20*time.Second)
-	defer cancelViewer()
-	account, err := client.FetchViewer(viewerCtx)
-	if err != nil {
-		return connection{}, fmt.Errorf("session verified but xeet could not identify the account: %w", err)
+	var account *api.Account
+	var viewerErr error
+	for range 2 {
+		viewerCtx, cancelViewer := context.WithTimeout(ctx, 20*time.Second)
+		account, viewerErr = client.FetchViewer(viewerCtx)
+		cancelViewer()
+		if viewerErr == nil && account != nil && account.ID != "" {
+			break
+		}
+		if viewerErr == nil {
+			viewerErr = fmt.Errorf("x returned no account identity for this session")
+		}
 	}
-	if err := configMgr.RecordViewer(account.ID, account.Handle); err != nil {
-		return connection{}, err
+	if viewerErr != nil || account == nil || account.ID == "" {
+		return connection{}, fmt.Errorf("session verified but xeet could not identify the account; try again: %w", viewerErr)
 	}
+
 	candidate.UserID = account.ID
 	candidate.Handle = account.Handle
 	client.ApplyRefreshedQueryIDs(&candidate)
+	if err := configMgr.RecordViewer(account.ID, account.Handle); err != nil {
+		return connection{}, err
+	}
 	if err := configMgr.SaveAccount(&candidate); err != nil {
 		return connection{}, err
 	}
@@ -131,6 +165,31 @@ func verifyAndSave(ctx context.Context, result *api.LoginResult, browser string)
 		return connection{}, err
 	}
 	return connection{browser: browser, profile: result.Profile, handle: account.Handle}, nil
+}
+
+func authCandidate(global *config.Config, result *api.LoginResult, browser string, imported time.Time) config.Config {
+	return config.Config{
+		AuthToken:                      result.AuthToken,
+		CT0:                            result.CT0,
+		CreateTweetQID:                 global.CreateTweetQID,
+		HomeTimelineQID:                global.HomeTimelineQID,
+		HomeLatestTimelineQID:          global.HomeLatestTimelineQID,
+		BookmarksQID:                   global.BookmarksQID,
+		SearchTimelineQID:              global.SearchTimelineQID,
+		ListLatestTweetsTimelineQID:    global.ListLatestTweetsTimelineQID,
+		ListsManagementPageTimelineQID: global.ListsManagementPageTimelineQID,
+		FavoriteTweetQID:               global.FavoriteTweetQID,
+		UnfavoriteTweetQID:             global.UnfavoriteTweetQID,
+		ViewerQID:                      global.ViewerQID,
+		TweetDetailQID:                 global.TweetDetailQID,
+		Theme:                          global.Theme,
+		Columns:                        append([]string(nil), global.Columns...),
+		SessionBrowser:                 browser,
+		SessionProfile:                 result.Profile,
+		SessionDomain:                  result.CookieDomain,
+		SessionExpires:                 result.ExpiresAt,
+		SessionImported:                imported,
+	}
 }
 
 // runAuthPlain is the scripted path: no picker, no spinner, one line per step.
