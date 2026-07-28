@@ -31,6 +31,9 @@ func (m Model) View() string {
 	if m.mode == modeListPicker {
 		return m.viewListPicker()
 	}
+	if m.mode == modeChoicePicker {
+		return m.viewChoicePicker()
+	}
 	if m.mode == modeReply {
 		return m.viewReply()
 	}
@@ -801,6 +804,9 @@ func (m Model) viewSearch() string {
 }
 
 func (m Model) searchBackLabel() string {
+	if m.searchFor == targetNewColumn {
+		return "cancel"
+	}
 	if m.searchReturn == modeThread {
 		return "back to replies"
 	}
@@ -820,6 +826,9 @@ func (m Model) searchBackLabel() string {
 }
 
 func (m Model) searchBackShortLabel() string {
+	if m.searchFor == targetNewColumn {
+		return "cancel"
+	}
 	if m.searchReturn == modeThread {
 		return "replies"
 	}
@@ -882,6 +891,44 @@ func (m Model) viewListPicker() string {
 	hintText := "j/k move · enter select · esc cancel"
 	if len(m.listPicker) > max(1, m.height-9) {
 		hintText = fmt.Sprintf("%d/%d · %s", m.listPickerSel+1, len(m.listPicker), hintText)
+	}
+	hint := lipgloss.NewStyle().Foreground(muted).Render(hintText)
+	content := title + "\n\n" + panel + "\n\n" + hint
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func (m Model) viewChoicePicker() string {
+	w := columnContentWidth(m.width, 1)
+	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render(m.picker.title)
+	var body string
+	if len(m.picker.items) == 0 {
+		body = lipgloss.NewStyle().Foreground(muted).Render("nothing to choose from")
+	} else {
+		visible := min(len(m.picker.items), max(1, m.height-9))
+		start := max(0, m.picker.sel-visible/2)
+		start = min(start, len(m.picker.items)-visible)
+		rows := make([]string, 0, visible)
+		for index := start; index < start+visible; index++ {
+			item := m.picker.items[index]
+			marker := "  "
+			nameStyle := lipgloss.NewStyle().Foreground(bright)
+			if index == m.picker.sel {
+				marker = "› "
+				nameStyle = nameStyle.Foreground(blue).Bold(true)
+			}
+			row := marker + nameStyle.Render(item.label)
+			if item.hint != "" {
+				row += lipgloss.NewStyle().Foreground(muted).Render(" · " + item.hint)
+			}
+			rows = append(rows, ansi.Truncate(row, max(10, w-8), "…"))
+		}
+		body = strings.Join(rows, "\n")
+	}
+	panel := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(blue).
+		Padding(0, 1).Width(w - 4).Render(body)
+	hintText := "j/k move · enter select · esc cancel"
+	if len(m.picker.items) > max(1, m.height-9) {
+		hintText = fmt.Sprintf("%d/%d · %s", m.picker.sel+1, len(m.picker.items), hintText)
 	}
 	hint := lipgloss.NewStyle().Foreground(muted).Render(hintText)
 	content := title + "\n\n" + panel + "\n\n" + hint
@@ -1000,12 +1047,12 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
 		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · @ account\nL lists · b saved · q quit"
+		keys = "\n\nj/k move · g/G ends · f feed\nb saved · L lists · / search\nl like · r reply · y copy\nenter open · e read · i zoom\nA alt · o open · R reload\nP post · @ acct · q quit\nn/x col± · s acct · I/T img"
 		if m.mode == modeThread {
 			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
 		}

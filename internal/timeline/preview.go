@@ -327,16 +327,16 @@ func fetchPreview(parent context.Context, postID string, media api.TimelineMedia
 	return func() tea.Msg {
 		parsed, err := url.Parse(previewMediaURL(media.URL, mode))
 		if err != nil {
-			return previewMsg{postID: postID, colID: colID, err: err}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: err}
 		}
 		if err := validateMediaURL(parsed); err != nil {
-			return previewMsg{postID: postID, colID: colID, err: err}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: err}
 		}
 		ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 		if err != nil {
-			return previewMsg{postID: postID, colID: colID, err: err}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: err}
 		}
 		req.Header.Set("User-Agent", "github.com/melqtx/xeet/terminal-image-preview")
 		client := &http.Client{
@@ -350,38 +350,38 @@ func fetchPreview(parent context.Context, postID string, media api.TimelineMedia
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("load image: %w", err)}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: fmt.Errorf("load image: %w", err)}
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("load image: HTTP %d", resp.StatusCode)}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: fmt.Errorf("load image: HTTP %d", resp.StatusCode)}
 		}
 		if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "image/") {
-			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("media is not an image")}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: fmt.Errorf("media is not an image")}
 		}
 		imageData, err := io.ReadAll(io.LimitReader(resp.Body, maxPreviewBytes+1))
 		if err != nil {
-			return previewMsg{postID: postID, colID: colID, err: err}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: err}
 		}
 		if len(imageData) > maxPreviewBytes {
-			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("image is too large to preview")}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: fmt.Errorf("image is too large to preview")}
 		}
 		config, _, err := image.DecodeConfig(bytes.NewReader(imageData))
 		if err != nil {
-			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("decode image: %w", err)}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: fmt.Errorf("decode image: %w", err)}
 		}
 		if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 50_000_000 {
-			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("image dimensions are too large to preview")}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: fmt.Errorf("image dimensions are too large to preview")}
 		}
 		decoded, _, err := image.Decode(bytes.NewReader(imageData))
 		if err != nil {
-			return previewMsg{postID: postID, colID: colID, err: fmt.Errorf("decode image: %w", err)}
+			return previewMsg{postID: postID, colID: colID, mode: mode, err: fmt.Errorf("decode image: %w", err)}
 		}
 		if mode == imageModeNative {
 			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
 			path, err := writePreviewPNG(downscaleForCells(decoded, columns, rows))
 			if err != nil {
-				return previewMsg{postID: postID, colID: colID, err: err}
+				return previewMsg{postID: postID, colID: colID, mode: mode, err: err}
 			}
 			return previewMsg{
 				postID: postID, colID: colID, nativePath: path, imageID: previewImageID(postID),
@@ -392,11 +392,11 @@ func fetchPreview(parent context.Context, postID string, media api.TimelineMedia
 			columns, rows := nativeCellSize(decoded.Bounds(), width, maxRows)
 			encoded, err := encodePreviewPNG(downscaleForCells(decoded, columns, rows))
 			if err != nil {
-				return previewMsg{postID: postID, colID: colID, err: err}
+				return previewMsg{postID: postID, colID: colID, mode: mode, err: err}
 			}
-			return previewMsg{postID: postID, colID: colID, nativeData: encoded, columns: columns, rows: rows}
+			return previewMsg{postID: postID, colID: colID, mode: mode, nativeData: encoded, columns: columns, rows: rows}
 		}
-		return previewMsg{postID: postID, colID: colID, content: renderANSIImage(decoded, width, maxRows)}
+		return previewMsg{postID: postID, colID: colID, mode: mode, content: renderANSIImage(decoded, width, maxRows)}
 	}
 }
 

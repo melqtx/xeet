@@ -45,13 +45,25 @@ func (m *Model) beginListPicker() tea.Cmd {
 	m.listPickerErr = nil
 	m.listPickerLoading = true
 	m.mode = modeListPicker
+	// In the add-column flow the account is chosen afterwards, so the lists
+	// come from the active account.
+	accountID := m.cur().accountID
+	if m.listFor == targetNewColumn {
+		accountID = ""
+	}
 	return m.imageRepaint(tea.Batch(
-		m.spinner.Tick, fetchListsCmd(m.requestContext(), m.cur().accountID, true),
+		m.spinner.Tick, fetchListsCmd(m.requestContext(), accountID, true),
 	))
 }
 
 func (m Model) cancelListPicker() (tea.Model, tea.Cmd) {
-	m.mode = m.listReturn
+	if m.listFor == targetNewColumn {
+		m.listFor = targetFocusedColumn
+		m.columnDraft = ColumnSpec{}
+		m.mode = modeFeed
+	} else {
+		m.mode = m.listReturn
+	}
 	m.listPickerLoading = false
 	m.syncViewport()
 	m.ensureSelectedVisible()
@@ -67,7 +79,11 @@ func (m Model) updateListPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if msg.accountID != m.cur().accountID {
+		expected := m.cur().accountID
+		if m.listFor == targetNewColumn {
+			expected = ""
+		}
+		if msg.accountID != expected {
 			return m, nil
 		}
 		m.listPickerLoading = false
@@ -115,6 +131,12 @@ func (m Model) updateListPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		selected := m.listPicker[m.listPickerSel]
+		if m.listFor == targetNewColumn {
+			m.columnDraft = ColumnSpec{Kind: FeedList, ListID: selected.ID}
+			m.listFor = targetFocusedColumn
+			m.listPickerLoading = false
+			return m, m.beginAccountPicker("new column · account", intentColumnAccount)
+		}
 		m.cur().listID = selected.ID
 		m.cur().listName = selected.Name
 		m.listPickerLoading = false

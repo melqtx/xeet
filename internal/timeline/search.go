@@ -9,13 +9,27 @@ import (
 
 func (m *Model) beginSearch() tea.Cmd {
 	m.searchReturn = m.mode
-	m.searchInput.SetValue(m.cur().searchQuery)
+	if m.searchFor == targetNewColumn {
+		m.searchInput.SetValue(m.columnDraft.Query)
+	} else {
+		m.searchInput.SetValue(m.cur().searchQuery)
+	}
 	m.mode = modeSearch
 	return m.imageRepaint(m.searchInput.Focus())
 }
 
 func (m Model) cancelSearch() (tea.Model, tea.Cmd) {
 	m.searchInput.Blur()
+	if m.searchFor == targetNewColumn {
+		// Escape abandons the whole add-column draft; it never quits, unlike
+		// the direct `xeet search` prompt below.
+		m.searchFor = targetFocusedColumn
+		m.columnDraft = ColumnSpec{}
+		m.mode = modeFeed
+		m.syncViewport()
+		m.ensureSelectedVisible()
+		return m, m.imageRepaint(m.requestPreviews())
+	}
 	// `xeet search` starts directly in an empty prompt. There is no previous
 	// feed to reveal in that case, so escape should leave instead of exposing
 	// an empty search-results screen.
@@ -59,6 +73,13 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			query := strings.TrimSpace(m.searchInput.Value())
 			if query == "" {
 				return m.cancelSearch()
+			}
+			if m.searchFor == targetNewColumn {
+				m.columnDraft.Kind = FeedSearch
+				m.columnDraft.Query = query
+				m.searchFor = targetFocusedColumn
+				m.searchInput.Blur()
+				return m, m.beginAccountPicker("new column · account", intentColumnAccount)
 			}
 			m.cur().searchQuery = query
 			m.searchInput.Blur()

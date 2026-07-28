@@ -75,6 +75,7 @@ const (
 	modeReply
 	modeSearch
 	modeListPicker
+	modeChoicePicker
 )
 
 type Model struct {
@@ -119,6 +120,10 @@ type Model struct {
 	listPickerErr     error
 	listPickerLoading bool
 	listReturn        mode
+	picker            choicePicker
+	columnDraft       ColumnSpec
+	searchFor         pickerTarget
+	listFor           pickerTarget
 }
 
 type pageMsg struct {
@@ -190,6 +195,7 @@ type previewState struct {
 type previewMsg struct {
 	postID     string
 	colID      int
+	mode       imageMode
 	content    string
 	nativePath string
 	nativeData string
@@ -425,6 +431,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if loaded, ok := msg.(accountsLoadedMsg); ok {
 		if loaded.err == nil {
 			m.accounts = loaded.accounts
+			// An account picker already on screen follows the refresh.
+			if m.mode == modeChoicePicker &&
+				(m.picker.intent == intentColumnAccount || m.picker.intent == intentColumnAccountRetarget) {
+				m.picker.items = m.accountChoiceItems()
+				m.picker.sel = min(m.picker.sel, max(0, len(m.picker.items)-1))
+			}
 		}
 		return m, nil
 	}
@@ -499,6 +511,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSearch(msg)
 	case modeListPicker:
 		return m.updateListPicker(msg)
+	case modeChoicePicker:
+		return m.updateChoicePicker(msg)
 	case modeThread:
 		return m.updateThread(msg)
 	}
@@ -588,6 +602,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.beginListPicker()
 	case "@":
 		return m, cycleAccountCmd()
+	case "n":
+		return m, m.beginColumnAdd()
+	case "x":
+		return m, m.removeColumn()
+	case "s":
+		return m, m.beginAccountPicker("column account", intentColumnAccountRetarget)
+	case "I":
+		m.beginChoicePicker("image mode", m.imageModeItems(), intentImageMode)
+		return m, m.imageRepaint()
+	case "T":
+		m.beginChoicePicker("theme", m.themeItems(), intentTheme)
+		return m, m.imageRepaint()
 	case "R", "ctrl+r":
 		c := m.cur()
 		if len(c.posts) == 0 {
@@ -678,6 +704,11 @@ func (m *Model) applyLikeResult(msg likeMsg) tea.Cmd {
 func (m *Model) storePreview(msg previewMsg) *column {
 	c := m.columnByID(msg.colID)
 	if c == nil {
+		return nil
+	}
+	if msg.mode != "" && msg.mode != m.imageMode {
+		// Fetched for a renderer the user has since switched away from; its
+		// payload format no longer matches what the view draws.
 		return nil
 	}
 	m.previews[msg.postID] = previewState{

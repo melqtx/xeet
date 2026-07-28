@@ -152,5 +152,7 @@ func applyConfiguredTheme(flagValue string) error {
 	}
 	timeline.ApplyTheme(palette)
 	tui.ApplyTheme(palette)
+	// The timeline's in-TUI theme picker marks the current entry from this.
+	timeline.SetThemeName(name)
 	return nil
 }

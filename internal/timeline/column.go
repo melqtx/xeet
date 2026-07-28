@@ -4,7 +4,12 @@ import (
 	"github.com/melqtx/xeet/pkg/api"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// maxColumns matches the --columns flag's limit; more panes than that leave
+// each one too narrow to read.
+const maxColumns = 4
 
 // column is one independently scrolling feed pane. With one column the TUI
 // behaves exactly as before; the struct exists so state cannot leak between
@@ -91,6 +96,82 @@ func (m *Model) configureColumns(specs []ColumnSpec) {
 	}
 	m.focus = 0
 	m.enforceMultiColumnImageMode()
+}
+
+// addColumn appends a pane and focuses it. A page arriving for an id that no
+// longer exists is dropped by columnByID, so ids are never reused.
+func (m *Model) addColumn(spec ColumnSpec) tea.Cmd {
+	if len(m.columns) >= maxColumns {
+		return m.showToast("already at 4 columns")
+	}
+	c := newColumn(m.nextColID)
+	m.nextColID++
+	c.feed = spec.Kind
+	c.accountID = spec.AccountID
+	c.searchQuery = spec.Query
+	c.listID = spec.ListID
+	if spec.Kind == FeedList {
+		c.listName = spec.ListID
+	}
+	m.columns = append(m.columns, c)
+	m.focus = len(m.columns) - 1
+	m.enforceMultiColumnImageMode()
+	m.resize()
+	cmds := []tea.Cmd{m.spinner.Tick, fetchPageSeq(
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
+	)}
+	if c.feed == FeedList {
+		cmds = append(cmds, fetchListsCmd(m.requestContext(), c.accountID, false))
+	}
+	return m.imageRepaint(tea.Batch(cmds...))
+}
+
+// removeColumn drops the focused pane. In-flight pages for it die against the
+// nil from columnByID; the preview cache only needs a budget re-check.
+func (m *Model) removeColumn() tea.Cmd {
+	if len(m.columns) <= 1 {
+		return m.showToast("keep at least one column")
+	}
+	m.columns = append(m.columns[:m.focus], m.columns[m.focus+1:]...)
+	m.focus = min(m.focus, len(m.columns)-1)
+	m.evictDistantPreviews()
+	m.resize()
+	return m.imageRepaint(m.requestPreviews())
+}
+
+// setColumnAccount repoints the focused pane at another saved account while
+// keeping its feed kind, query, and list. The seq bump in resetColumnFeed
+// retires any page the old account still has in flight.
+func (m *Model) setColumnAccount(accountID string) tea.Cmd {
+	c := m.cur()
+	if c.accountID == accountID {
+		return m.showToast("already " + m.accountLabelFor(accountID))
+	}
+	c.accountID = accountID
+	if c.feed == FeedList {
+		// The name came from the old account's lists; show the id until the
+		// new account's enumeration confirms what it can actually see.
+		c.listName = c.listID
+	}
+	refetch := m.resetColumnFeed(c, c.feed)
+	cmds := []tea.Cmd{m.spinner.Tick, refetch}
+	if c.feed == FeedList {
+		cmds = append(cmds, fetchListsCmd(m.requestContext(), accountID, false))
+	}
+	m.syncViewport()
+	return m.imageRepaint(tea.Batch(cmds...))
+}
+
+func (m Model) accountLabelFor(accountID string) string {
+	if accountID == "" {
+		return "the active account"
+	}
+	for _, account := range m.accounts {
+		if account.UserID == accountID {
+			return accountInfoLabel(account)
+		}
+	}
+	return accountID
 }
 
 // namesPendingForListColumns reports whether any column is still showing a raw
