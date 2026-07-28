@@ -33,8 +33,8 @@ showing 1/37 with the enter, e, r, and ? key hints](docs/timeline.png)
 
 ## get it
 
-works on macos and linux. windows isn't supported, open an issue if you
-want it.
+works on macos and linux, including wsl with a windows firefox session.
+native windows isn't supported yet.
 
 **with nix**:
 
@@ -97,6 +97,22 @@ replaces a session that already works, and a failure lets you try another
 browser without starting over.
 
 scripting it? `xeet auth --browser firefox` skips the picker entirely.
+
+**using wsl?** xeet can read the x.com session from firefox running on the
+windows side:
+
+```bash
+xeet auth --browser firefox
+```
+
+windows command interoperability must be enabled, with `cmd.exe`,
+`powershell.exe`, and `wslpath` available on `PATH`. xeet asks windows for the
+current user's firefox profile instead of assuming windows is mounted at
+`/mnt/c`. its copy of the two session values is encrypted with windows dpapi
+for that windows user; plaintext values are never written to the linux
+filesystem. windows chrome, brave, helium, zen, and edge profiles are not
+supported from wsl. browsers installed inside the linux distribution continue
+to use their normal linux profile locations.
 
 then just:
 
@@ -236,8 +252,9 @@ xeet reuses the x.com session already in your browser and speaks the same
 unsupported internal graphql endpoints the website does. the imported
 `auth_token` and `ct0` cookies grant account-level access, so treat them
 like a password. they live in the macos keychain or linux secret service, never
-in the yaml config file. `xeet logout` deletes xeet's copy (your browser
-stays logged in).
+in the yaml config file. on wsl, windows dpapi encrypts xeet's copy before the
+ciphertext reaches the linux filesystem. `xeet logout` deletes xeet's copy
+(your browser stays logged in).
 
 <details>
 <summary>details: query ids and retries</summary>

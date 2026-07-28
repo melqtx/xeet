@@ -10,16 +10,18 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/melqtx/xeet/internal/wsl"
 	"github.com/zalando/go-keyring"
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the whole of xeet's saved state: your x.com browser session plus
 // cached, non-secret operation ids and session metadata. AuthToken is the
-// session cookie and CT0 is the matching CSRF token; both live in the OS keyring (macOS Keychain, Linux
-// Secret Service), never on disk. The config file contains only non-secret
-// state: X's rotating GraphQL query ids and browser-session source metadata used
-// by `xeet doctor`.
+// session cookie and CT0 is the matching CSRF token; both live in secure
+// platform storage (macOS Keychain, Linux Secret Service, or Windows DPAPI
+// while running under WSL), never in the YAML config. The config file contains
+// only non-secret state: X's rotating GraphQL query ids and browser-session
+// source metadata used by `xeet doctor`.
 type Config struct {
 	AuthToken             string    `yaml:"-"`
 	CT0                   string    `yaml:"-"`
@@ -125,7 +127,14 @@ func NewConfigManager() (*ConfigManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newConfigManagerAt(homeDir, systemKeyring{}), nil
+	return newConfigManagerAt(homeDir, secretStoreFor(homeDir, wsl.Active())), nil
+}
+
+func secretStoreFor(homeDir string, isWSL bool) SecretStore {
+	if isWSL {
+		return newWSLSecretStore(homeDir)
+	}
+	return systemKeyring{}
 }
 
 func newConfigManagerAt(dir string, secrets SecretStore) *ConfigManager {
@@ -382,33 +391,7 @@ func (cm *ConfigManager) writeFile(fc *fileConfig) error {
 		return err
 	}
 
-	dir := filepath.Dir(cm.configPath)
-	tmp, err := os.CreateTemp(dir, ".xeet-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op after successful rename
-
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, cm.configPath); err != nil {
-		return err
-	}
-	return syncDirectory(dir)
+	return atomicWriteFile(cm.configPath, data)
 }
 
 // legacyDecrypt undoes the old AES-GCM-with-key-on-disk scheme, used only to
