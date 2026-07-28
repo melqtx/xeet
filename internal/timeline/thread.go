@@ -261,6 +261,8 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.showAltText()
 	case "i":
 		return m, m.zoomSelected()
+	case "v":
+		return m, m.playSelectedVideo()
 	case "l":
 		return m, m.toggleSelectedLike()
 	case "y":
