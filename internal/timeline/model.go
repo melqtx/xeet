@@ -1219,6 +1219,17 @@ func relativeTime(value time.Time) string {
 	return value.Format("Jan 2")
 }
 
+// cleanText keeps a post's line breaks -- they carry meaning in lists and
+// verse -- but collapses runs of spaces inside each line and drops blank
+// lines, which would only eat the four-row preview budget.
 func cleanText(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	lines := strings.Split(value, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.Join(strings.Fields(line), " "); line != "" {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }

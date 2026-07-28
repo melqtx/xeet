@@ -106,7 +106,7 @@ func TestSelectedImageRowsCarryGutter(t *testing.T) {
 	m.syncViewport()
 	content, _, _ := m.renderFeedContent()
 	for _, line := range strings.Split(content, "\n") {
-		if strings.Contains(line, "IMGROW") && !strings.Contains(line, "▎") {
+		if strings.Contains(line, "IMGROW") && !strings.Contains(line, "▌") {
 			t.Fatalf("image row lost the selection gutter: %q", line)
 		}
 	}
@@ -154,7 +154,7 @@ func TestImageBlockIsPaddedWithGutterLines(t *testing.T) {
 		}
 		above, below := lines[i-1], lines[i+1]
 		for _, spacer := range []string{above, below} {
-			if !strings.Contains(spacer, "▎") || strings.TrimSpace(strings.ReplaceAll(spacer, "▎", "")) != "" {
+			if !strings.Contains(spacer, "▌") || strings.TrimSpace(strings.ReplaceAll(spacer, "▌", "")) != "" {
 				t.Fatalf("image is not framed by blank gutter lines:\n%s", content)
 			}
 		}
@@ -203,7 +203,7 @@ func headerIndent(t *testing.T, lines []string, handle string) int {
 		if !strings.Contains(stripped, handle) {
 			continue
 		}
-		return lipgloss.Width(stripped) - lipgloss.Width(strings.TrimLeft(stripped, "│▎ "))
+		return lipgloss.Width(stripped) - lipgloss.Width(strings.TrimLeft(stripped, "│▌ "))
 	}
 	t.Fatalf("no header for %s in:\n%s", handle, strings.Join(lines, "\n"))
 	return 0
@@ -270,7 +270,7 @@ func TestSelectedReplyUsesTheReplyAccent(t *testing.T) {
 		}
 	}
 	for i, line := range lines {
-		if strings.Contains(ansi.Strip(line), "▎") != (i >= header) {
+		if strings.Contains(ansi.Strip(line), "▌") != (i >= header) {
 			t.Fatalf("line %d does not agree with the selection (header at %d):\n%s",
 				i, header, strings.Join(lines, "\n"))
 		}

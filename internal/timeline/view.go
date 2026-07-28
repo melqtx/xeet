@@ -83,7 +83,8 @@ func (m Model) View() string {
 func (m Model) viewColumns() string {
 	first, count := m.visibleColumnRange()
 	width := columnContentWidth(m.width, count)
-	blocks := make([]string, 0, count)
+	blocks := make([]string, 0, count*2)
+	sepHeight := 0
 	for index := first; index < first+count; index++ {
 		c := &m.columns[index]
 		center := c.viewport.View()
@@ -97,10 +98,11 @@ func (m Model) viewColumns() string {
 					Render("the cat lost the timeline\n\n"+c.err.Error()))
 		}
 		block := m.columnHeader(c, width, index == m.focus) + "\n" + center
-		if index < first+count-1 {
-			block = lipgloss.NewStyle().PaddingRight(columnGutter).Render(block)
+		if index > first {
+			blocks = append(blocks, columnSeparator(sepHeight))
 		}
 		blocks = append(blocks, block)
+		sepHeight = max(sepHeight, lipgloss.Height(block))
 	}
 
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, blocks...)
@@ -130,6 +132,17 @@ func (m Model) shell(center, footer string) string {
 }
 
 const columnGutter = 2
+
+// columnSeparator fills the gutter between two columns with a vertical bar
+// instead of blank padding, so the eye can tell where one column ends.
+func columnSeparator(height int) string {
+	bar := lipgloss.NewStyle().Foreground(muted).Render("│")
+	lines := make([]string, max(1, height))
+	for i := range lines {
+		lines[i] = bar
+	}
+	return lipgloss.NewStyle().Width(columnGutter).Render(strings.Join(lines, "\n"))
+}
 
 // columnContentWidth deliberately keeps all feed columns equal-width: the
 // post-ID-keyed previews map depends on that invariant. Unequal panes would
@@ -172,6 +185,9 @@ func (m Model) header(width int) string {
 
 func (m Model) columnHeader(c *column, width int, focused bool) string {
 	status := m.columnFeedLabel(c, width)
+	if account := m.columnAccountHandle(c); account != "" {
+		status = ansi.Truncate(account+" · "+status, max(9, width-2), "…")
+	}
 	if focused {
 		return lipgloss.NewStyle().
 			Foreground(bright).
@@ -184,6 +200,22 @@ func (m Model) columnHeader(c *column, width int, focused bool) string {
 		Foreground(muted).
 		Width(width).
 		Render("  " + status)
+}
+
+// columnAccountHandle names the account a column reads from, but only when
+// the user juggles more than one -- a single account would repeat what the
+// screen header already says.
+func (m Model) columnAccountHandle(c *column) string {
+	if len(m.accounts) <= 1 {
+		return ""
+	}
+	id := m.columnAccountID(c)
+	for _, account := range m.accounts {
+		if account.UserID == id {
+			return accountInfoLabel(account)
+		}
+	}
+	return ""
 }
 
 func (m Model) columnFeedLabel(c *column, width int) string {
@@ -424,7 +456,7 @@ func threadRail(depth int, selected bool) string {
 		own = "  "
 	}
 	if selected {
-		own = lipgloss.NewStyle().Foreground(selectionAccent(depth)).Render("▎") + " "
+		own = lipgloss.NewStyle().Foreground(selectionAccent(depth)).Bold(true).Render("▌") + " "
 	}
 	return strings.Repeat(railBar(), railLevels(depth)) + own
 }
@@ -525,7 +557,7 @@ func (m Model) renderPostForColumn(c *column, post api.TimelinePost, selected, n
 		textColor = dim
 		handleColor = muted
 		gutter = strings.Repeat(railBar(), railLevels(depth)) +
-			lipgloss.NewStyle().Foreground(muted).Render("▎") + " "
+			lipgloss.NewStyle().Foreground(muted).Bold(true).Render("▌") + " "
 	}
 	header := gutter +
 		lipgloss.NewStyle().Foreground(nameColor).Bold(true).Render(name) + "  " +
@@ -676,30 +708,36 @@ func highlightEntities(text string, base lipgloss.Color) string {
 	mention := lipgloss.NewStyle().Foreground(blue)
 	hashtag := lipgloss.NewStyle().Foreground(lavender)
 	link := lipgloss.NewStyle().Foreground(blue).Underline(true)
-	words := strings.Fields(text)
-	for i, word := range words {
-		switch {
-		case len(word) > 1 && word[0] == '@':
-			words[i] = mention.Render(word)
-		case len(word) > 1 && word[0] == '#':
-			words[i] = hashtag.Render(word)
-		case strings.HasPrefix(word, "https://") || strings.HasPrefix(word, "http://"):
-			trimmed := strings.TrimPrefix(strings.TrimPrefix(word, "https://"), "http://")
-			words[i] = link.Render(trimmed)
-		default:
-			words[i] = baseStyle.Render(word)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		words := strings.Fields(line)
+		for j, word := range words {
+			switch {
+			case len(word) > 1 && word[0] == '@':
+				words[j] = mention.Render(word)
+			case len(word) > 1 && word[0] == '#':
+				words[j] = hashtag.Render(word)
+			case strings.HasPrefix(word, "https://") || strings.HasPrefix(word, "http://"):
+				trimmed := strings.TrimPrefix(strings.TrimPrefix(word, "https://"), "http://")
+				words[j] = link.Render(trimmed)
+			default:
+				words[j] = baseStyle.Render(word)
+			}
 		}
+		lines[i] = strings.Join(words, " ")
 	}
-	return strings.Join(words, " ")
+	return strings.Join(lines, "\n")
 }
 
 // stripTrailingMediaLink removes the t.co link X appends to a post's text
 // when its media is attached; the timeline renders the image itself instead.
+// The trailing check looks for newlines too: cleanText now preserves them,
+// and a link followed by another line is not the trailing media link.
 func stripTrailingMediaLink(text string) string {
-	if index := strings.LastIndex(text, " https://t.co/"); index >= 0 && !strings.Contains(text[index+1:], " ") {
+	if index := strings.LastIndex(text, " https://t.co/"); index >= 0 && !strings.ContainsAny(text[index+1:], " \n") {
 		return text[:index]
 	}
-	if strings.HasPrefix(text, "https://t.co/") && !strings.Contains(text, " ") {
+	if strings.HasPrefix(text, "https://t.co/") && !strings.ContainsAny(text, " \n") {
 		return ""
 	}
 	return text
