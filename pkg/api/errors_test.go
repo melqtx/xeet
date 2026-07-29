@@ -89,7 +89,7 @@ func TestPostTweetSessionExpired(t *testing.T) {
 		client := newTestClient(func(req *http.Request) (*http.Response, error) {
 			return response(status, `{"errors":[{"message":"nope"}]}`), nil
 		})
-		_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+		_, err := client.PostTweet(context.Background(), "hi", "", "", nil, nil)
 		if !errors.Is(err, ErrSessionExpired) {
 			t.Errorf("HTTP %d: got %v, want ErrSessionExpired", status, err)
 		}
@@ -103,7 +103,7 @@ func TestPostTweetRateLimited(t *testing.T) {
 		resp.Header.Set("x-rate-limit-reset", strconv.FormatInt(reset, 10))
 		return resp, nil
 	})
-	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "hi", "", "", nil, nil)
 	var rle *RateLimitError
 	if !errors.As(err, &rle) {
 		t.Fatalf("got %v, want RateLimitError", err)
@@ -122,7 +122,7 @@ func TestPostTweetGraphQLAuthError(t *testing.T) {
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{"errors":[{"message":"Could not authenticate you","code":32}]}`), nil
 	})
-	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "hi", "", "", nil, nil)
 	if !errors.Is(err, ErrSessionExpired) {
 		t.Fatalf("got %v, want ErrSessionExpired", err)
 	}
@@ -132,7 +132,7 @@ func TestPostTweetDuplicateIsActionable(t *testing.T) {
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{"errors":[{"message":"Status is a duplicate.","code":187}]}`), nil
 	})
-	_, err := client.PostTweet(context.Background(), "same text", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "same text", "", "", nil, nil)
 	var recent *RecentlyPostedError
 	if !errors.As(err, &recent) {
 		t.Fatalf("got %v, want RecentlyPostedError", err)
@@ -144,7 +144,7 @@ func TestPostTweetAutomationBlockIsActionable(t *testing.T) {
 		// X sometimes omits code 226 and only returns the automation text.
 		return response(http.StatusOK, `{"errors":[{"message":"Authorization: This request looks like it might be automated"}]}`), nil
 	})
-	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "hi", "", "", nil, nil)
 	var blocked *AutomationBlockedError
 	if !errors.As(err, &blocked) || !strings.Contains(err.Error(), "try the exact text in X") {
 		t.Fatalf("got %v, want automation-block guidance", err)
@@ -188,7 +188,7 @@ func TestPostTweetNotRetriedOnTransientFailure(t *testing.T) {
 		}
 		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
 	})
-	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "hi", "", "", nil, nil)
 	var ambiguous *AmbiguousPostError
 	if !errors.As(err, &ambiguous) {
 		t.Fatalf("got %v, want AmbiguousPostError", err)
@@ -210,7 +210,7 @@ func TestUploadRetriesTransientFailures(t *testing.T) {
 		}
 		return response(http.StatusOK, `{"data":{"create_tweet":{"tweet_results":{"result":{"rest_id":"1"}}}}}`), nil
 	})
-	id, err := client.PostTweet(context.Background(), "pic", "",
+	id, err := client.PostTweet(context.Background(), "pic", "", "",
 		[]Upload{{Filename: "a.png", ContentType: "image/png", Data: []byte("x")}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +226,7 @@ func TestUploadGivesUpAfterMaxAttempts(t *testing.T) {
 		attempts++
 		return response(http.StatusBadGateway, `down`), nil
 	})
-	_, err := client.PostTweet(context.Background(), "pic", "",
+	_, err := client.PostTweet(context.Background(), "pic", "", "",
 		[]Upload{{Filename: "a.png", ContentType: "image/png", Data: []byte("x")}}, nil)
 	if err == nil {
 		t.Fatal("expected error")
@@ -331,7 +331,7 @@ func TestErrorsNeverLeakCookies(t *testing.T) {
 	})
 	client.authToken = "tok_hunter2_secret"
 	client.ct0 = "csrf_hunter2_secret"
-	_, err := client.PostTweet(context.Background(), "hi", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "hi", "", "", nil, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -407,7 +407,7 @@ func TestPostTweetRefreshesRotatedQueryID(t *testing.T) {
 		return "fresh", nil
 	}
 
-	id, err := client.PostTweet(context.Background(), "hello", "", nil, nil)
+	id, err := client.PostTweet(context.Background(), "hello", "", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestPostTweetRejectsMissingCreatedID(t *testing.T) {
 	client := newTestClient(func(req *http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{"data":{"create_tweet":{"tweet_results":{"result":{}}}}}`), nil
 	})
-	if _, err := client.PostTweet(context.Background(), "hello", "", nil, nil); err == nil {
+	if _, err := client.PostTweet(context.Background(), "hello", "", "", nil, nil); err == nil {
 		t.Fatal("missing created post id was reported as success")
 	}
 }

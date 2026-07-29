@@ -15,6 +15,7 @@ import (
 
 var (
 	replyTo     string
+	quoteTo     string
 	imagePaths  []string
 	postAccount string
 )
@@ -38,12 +39,14 @@ turns it into the destination instead, so the check has to move to the caller.`,
   xeet post --image one.png --image two.jpg   # no text, images only
   xeet post "clip" --image ./clip.mp4
   xeet post "a reply" --reply 1234567890
+  xeet post "a quote" --quote 1234567890
   xeet post "hi" --account @alice        # post as a saved account, not the active one`,
 	RunE: runPost,
 }
 
 func init() {
 	postCmd.Flags().StringVar(&replyTo, "reply", "", "tweet id to reply to")
+	postCmd.Flags().StringVar(&quoteTo, "quote", "", "tweet id to quote")
 	postCmd.Flags().StringArrayVarP(&imagePaths, "image", "i", nil, "image or video path (up to 4 images, or 1 video)")
 	postCmd.Flags().StringVar(&postAccount, "account", "", "saved account to post as (handle or user id); defaults to the active one")
 	rootCmd.AddCommand(postCmd)
@@ -106,7 +109,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 	}
 
 	client := api.NewWebClient(cfg)
-	id, err := client.PostTweet(ctx, text, replyTo, uploads, func(event api.PostEvent) {
+	id, err := client.PostTweet(ctx, text, replyTo, quoteTo, uploads, func(event api.PostEvent) {
 		if v, _ := cmd.Flags().GetBool("verbose"); v {
 			switch event.Stage {
 			case api.PostStageUploading:

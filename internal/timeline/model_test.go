@@ -288,6 +288,59 @@ func TestReplyPostsWithoutLeavingProgram(t *testing.T) {
 	}
 }
 
+func TestQuoteOpensInPlaceAndReturnsToFeed(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "123", Handle: "alice", Text: "hello"}}
+	m.syncViewport()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Q'}})
+	m = next.(Model)
+	if cmd == nil || m.mode != modeQuote || m.replyPost.ID != "123" {
+		t.Fatal("quote did not open in place")
+	}
+	if view := m.View(); !strings.Contains(view, "quoting @alice") {
+		t.Fatalf("quote title missing: %s", view)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeFeed {
+		t.Fatal("quote did not return to feed")
+	}
+}
+
+func TestQuotePostsWithoutLeavingProgram(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "123", Handle: "alice", Text: "hello"}}
+	m.syncViewport()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Q'}})
+	m.replyEditor.SetValue("so true")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil || !m.replyPosting || m.mode != modeQuote {
+		t.Fatal("quote did not start posting")
+	}
+	m = update(t, m, replyResultMsg{id: "456"})
+	if m.mode != modeFeed || m.toast != "quote sent ♥" {
+		t.Fatalf("quote did not return to feed: mode=%v toast=%q", m.mode, m.toast)
+	}
+}
+
+func TestQuoteRejectsEmptyText(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "123", Handle: "alice", Text: "hello"}}
+	m.syncViewport()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Q'}})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd != nil || m.replyPosting {
+		t.Fatal("empty quote started posting")
+	}
+	if m.replyErr == nil || m.replyErr.Error() != "write the quote text first" {
+		t.Fatalf("replyErr = %v", m.replyErr)
+	}
+}
+
 func TestRejectedReplyOffersBrowserFallback(t *testing.T) {
 	m := New()
 	m.mode = modeReply

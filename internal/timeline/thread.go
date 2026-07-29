@@ -251,6 +251,10 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
 		}
+	case "Q":
+		if post, ok := m.currentPost(); ok {
+			return m.beginQuote(post)
+		}
 	case "/":
 		return m, m.beginSearch()
 	case "enter", " ", "e":

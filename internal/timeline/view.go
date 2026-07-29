@@ -34,7 +34,7 @@ func (m Model) View() string {
 	if m.mode == modeChoicePicker {
 		return m.viewChoicePicker()
 	}
-	if m.mode == modeReply {
+	if m.mode == modeReply || m.mode == modeQuote {
 		return m.viewReply()
 	}
 	if m.mode == modeThread {
@@ -776,6 +776,9 @@ func compactCount(value, unit int, suffix string) string {
 func (m Model) viewReply() string {
 	w := columnContentWidth(m.width, 1)
 	title := "replying to @" + m.replyPost.Handle
+	if m.mode == modeQuote {
+		title = "quoting @" + m.replyPost.Handle
+	}
 	original := lipgloss.NewStyle().Foreground(muted).Width(max(20, w-8)).Render(cleanText(m.replyPost.Text))
 	originalLines := strings.Split(original, "\n")
 	if len(originalLines) > 2 {
@@ -1099,16 +1102,16 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nt           repost / unrepost\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nt           repost / unrepost\nr           reply\nQ           quote post\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nt           repost / unrepost\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nt           repost / unrepost\nr           reply to selected\nQ           quote selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
 		// One leading newline, not two: the repost entry makes the longest line
 		// wrap, and the extra row would push the box's title off a short screen.
-		keys = "\nj/k move · g/G ends · f feed\nb saved · L lists · / search\nl like · t repost · r reply · y copy\nenter open · e read · i zoom\nA alt · o open · R reload\nP post · @ acct · q quit\nn/x col± · s acct · I/T img"
+		keys = "\nj/k move · g/G ends · f feed\nb saved · L lists · / search\nl like · t repost · r reply\nenter open · e read · i zoom\nA alt · o open · R reload\nQ quote · y copy · P post\n@ acct · q quit · n/x col±\ns acct · I/T img"
 		if m.mode == modeThread {
-			keys = "\n\nj/k move · g/G ends\nl like · t repost · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
+			keys = "\n\nj/k move · g/G ends\nl like · t repost · r reply\nQ quote · y copy · e read\ni zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
 		}
 	}
 	images := "images: " + string(m.imageMode)

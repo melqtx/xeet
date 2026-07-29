@@ -230,7 +230,7 @@ func beginPost(parent context.Context, text string, attachments []media.Attachme
 				uploads = append(uploads, upload)
 			}
 			client := api.NewWebClient(cfg)
-			id, err := client.PostTweet(ctx, text, "", uploads, func(event api.PostEvent) {
+			id, err := client.PostTweet(ctx, text, "", "", uploads, func(event api.PostEvent) {
 				events <- postProgressMsg{event: event}
 			})
 			if client.ApplyRefreshedQueryIDs(cfg) {

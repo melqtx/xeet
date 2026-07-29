@@ -15,7 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func sendReply(parent context.Context, accountID, tweetID, text string) tea.Cmd {
+func sendReply(parent context.Context, accountID, tweetID, quoteID, text string) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := openRequestConfigManager()
 		if err != nil {
@@ -28,7 +28,7 @@ func sendReply(parent context.Context, accountID, tweetID, text string) tea.Cmd 
 		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
 		client := api.NewWebClient(cfg)
-		id, err := client.PostTweet(ctx, text, tweetID, nil, nil)
+		id, err := client.PostTweet(ctx, text, tweetID, quoteID, nil, nil)
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.SaveQueryIDs(cfg)
 		}
@@ -46,6 +46,17 @@ func (m Model) beginReply(post api.TimelinePost) (tea.Model, tea.Cmd) {
 	m.replyEditor.Reset()
 	m.resize()
 	return m, m.imageRepaint(m.replyEditor.Focus())
+}
+
+// beginQuote reuses the reply composer state wholesale: the only difference
+// is the mode flag, which decides whether the post id goes out as a reply
+// target or a quote attachment. Sharing the fields keeps the two from
+// drifting apart.
+func (m Model) beginQuote(post api.TimelinePost) (tea.Model, tea.Cmd) {
+	next, cmd := m.beginReply(post)
+	model := next.(Model)
+	model.mode = modeQuote
+	return model, cmd
 }
 
 func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -82,10 +93,14 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replyNotice = ""
 			return m, m.replyEditor.Focus()
 		}
+		quoting := m.mode == modeQuote
 		m.mode = m.replyReturn
 		m.replyEditor.Blur()
 		m.replyEditor.Reset()
 		toast := m.showToast("reply sent ♥")
+		if quoting {
+			toast = m.showToast("quote sent ♥")
+		}
 		m.syncViewport()
 		m.ensureSelectedVisible()
 		if m.mode == modeThread {
@@ -123,15 +138,25 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.imageRepaint(m.requestPreviews())
 		case "enter":
 			if strings.TrimSpace(m.replyEditor.Value()) == "" {
-				m.replyErr = fmt.Errorf("write a reply first")
+				if m.mode == modeQuote {
+					m.replyErr = fmt.Errorf("write the quote text first")
+				} else {
+					m.replyErr = fmt.Errorf("write a reply first")
+				}
 				return m, nil
 			}
 			m.replyPosting = true
 			m.replyErr = nil
 			m.replyNotice = ""
 			m.replyEditor.Blur()
+			// A reply carries the target as in_reply_to_tweet_id; a quote
+			// carries it as attachment_url. Never both.
+			replyTo, quoteID := m.replyPost.ID, ""
+			if m.mode == modeQuote {
+				replyTo, quoteID = "", m.replyPost.ID
+			}
 			return m, tea.Batch(m.spinner.Tick, sendReply(
-				m.requestContext(), m.replyAccountID, m.replyPost.ID, m.replyEditor.Value(),
+				m.requestContext(), m.replyAccountID, replyTo, quoteID, m.replyEditor.Value(),
 			))
 		case "alt+enter", "ctrl+j":
 			m.replyEditor.InsertString("\n")

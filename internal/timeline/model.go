@@ -75,6 +75,7 @@ const (
 	modeFeed mode = iota
 	modeThread
 	modeReply
+	modeQuote
 	modeSearch
 	modeListPicker
 	modeChoicePicker
@@ -557,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch m.mode {
-	case modeReply:
+	case modeReply, modeQuote:
 		return m.updateReply(msg)
 	case modeSearch:
 		return m.updateSearch(msg)
@@ -673,6 +674,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
+		}
+	case "Q":
+		if post, ok := m.currentPost(); ok {
+			return m.beginQuote(post)
 		}
 	case "a":
 		if errors.Is(m.cur().err, api.ErrSessionExpired) {
@@ -1042,7 +1047,7 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 	c.err = nil
 	focused := c == m.cur()
 	threadContext := focused && (m.mode == modeThread ||
-		(m.mode == modeReply && m.replyReturn == modeThread) ||
+		((m.mode == modeReply || m.mode == modeQuote) && m.replyReturn == modeThread) ||
 		(m.mode == modeSearch && m.searchReturn == modeThread) ||
 		(m.mode == modeListPicker && m.listReturn == modeThread))
 	feedIndex := c.selected
@@ -1106,7 +1111,7 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	if !focused || m.mode == modeReply {
+	if !focused || m.mode == modeReply || m.mode == modeQuote {
 		if !focused && m.mode == modeFeed {
 			return m, m.imageRepaint(m.requestPreviews(), toast)
 		}

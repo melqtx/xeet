@@ -71,7 +71,7 @@ func TestPostTweetUploadsMultipleImages(t *testing.T) {
 	})}
 
 	var events []PostEvent
-	id, err := client.PostTweet(context.Background(), "album", "", []Upload{
+	id, err := client.PostTweet(context.Background(), "album", "", "", []Upload{
 		{Filename: "one.png", ContentType: "image/png", Data: []byte("one")},
 		{Filename: "two.png", ContentType: "image/png", Data: []byte("two")},
 	}, func(event PostEvent) { events = append(events, event) })
@@ -91,14 +91,14 @@ func TestPostTweetUploadsMultipleImages(t *testing.T) {
 
 func TestPostTweetValidatesContent(t *testing.T) {
 	client := &WebClient{authToken: "auth", ct0: "csrf"}
-	if _, err := client.PostTweet(context.Background(), "", "", nil, nil); err == nil {
+	if _, err := client.PostTweet(context.Background(), "", "", "", nil, nil); err == nil {
 		t.Fatal("empty post should fail")
 	}
 	uploads := make([]Upload, 5)
 	for i := range uploads {
 		uploads[i] = Upload{Data: []byte("x")}
 	}
-	if _, err := client.PostTweet(context.Background(), "x", "", uploads, nil); err == nil {
+	if _, err := client.PostTweet(context.Background(), "x", "", "", uploads, nil); err == nil {
 		t.Fatal("five images should fail")
 	}
 }
@@ -112,8 +112,44 @@ func TestPostTweetRejectsMixedVideoAndImages(t *testing.T) {
 		{ContentType: "video/mp4", Data: []byte("v")},
 		{ContentType: "image/png", Data: []byte("i")},
 	}
-	if _, err := client.PostTweet(context.Background(), "x", "", uploads, nil); err == nil {
+	if _, err := client.PostTweet(context.Background(), "x", "", "", uploads, nil); err == nil {
 		t.Fatal("video mixed with an image should fail")
+	}
+}
+
+func TestPostTweetQuoteAttachesStatusURL(t *testing.T) {
+	var graphQLBody []byte
+	client := &WebClient{authToken: "auth", ct0: "csrf", operationQIDs: map[string]string{"CreateTweet": "qid"}}
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		graphQLBody, _ = io.ReadAll(req.Body)
+		return response(http.StatusOK, `{"data":{"create_tweet":{"tweet_results":{"result":{"rest_id":"99"}}}}}`), nil
+	})}
+
+	id, err := client.PostTweet(context.Background(), "so true", "", "42", nil, nil)
+	if err != nil || id != "99" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	if !strings.Contains(string(graphQLBody), `"attachment_url":"https://x.com/i/status/42"`) {
+		t.Fatalf("quote attachment missing: %s", graphQLBody)
+	}
+	if strings.Contains(string(graphQLBody), "in_reply_to_tweet_id") {
+		t.Fatalf("quote must not double as a reply: %s", graphQLBody)
+	}
+}
+
+func TestPostTweetWithoutQuoteOmitsAttachmentURL(t *testing.T) {
+	var graphQLBody []byte
+	client := &WebClient{authToken: "auth", ct0: "csrf", operationQIDs: map[string]string{"CreateTweet": "qid"}}
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		graphQLBody, _ = io.ReadAll(req.Body)
+		return response(http.StatusOK, `{"data":{"create_tweet":{"tweet_results":{"result":{"rest_id":"99"}}}}}`), nil
+	})}
+
+	if _, err := client.PostTweet(context.Background(), "plain", "", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(graphQLBody), "attachment_url") {
+		t.Fatalf("plain post carried an attachment_url: %s", graphQLBody)
 	}
 }
 

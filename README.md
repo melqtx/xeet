@@ -118,6 +118,7 @@ echo "piped in" | xeet post           # reads stdin
 xeet post "photos" -i one.png -i two.jpg
 xeet post --image meme.png             # image-only, no text
 xeet post "a reply" --reply 1234567890
+xeet post "a quote" --quote 1234567890
 ```
 
 if your session feels off:
@@ -174,6 +175,7 @@ come back next time.
 | `A` | read image descriptions (works with previews off) |
 | `l` | like / unlike |
 | `t` | repost / unrepost |
+| `Q` | quote the selected post |
 | `r` | reply in place |
 | `o` | open in browser |
 | `y` | copy link |

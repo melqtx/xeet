@@ -431,6 +431,7 @@ type createTweetVariables struct {
 	DisallowedReplyOptions    []string                    `json:"disallowed_reply_options"`
 	SemanticAnnotationOptions ctSemanticAnnotationOptions `json:"semantic_annotation_options"`
 	Reply                     *ctReply                    `json:"reply,omitempty"`
+	AttachmentURL             string                      `json:"attachment_url,omitempty"`
 }
 
 type ctSemanticAnnotationOptions struct {
@@ -462,9 +463,18 @@ func newCreateTweetVariables(text string) createTweetVariables {
 	}
 }
 
+// quoteAttachmentURL builds the attachment_url CreateTweet expects for a
+// quote. The /i/status/ form is what the web composer sends; if a live run
+// ever posts without the quoted_status attached, this one function is the
+// place to try the public status URL instead.
+func quoteAttachmentURL(tweetID string) string {
+	return "https://x.com/i/status/" + tweetID
+}
+
 // PostTweet posts through the web GraphQL endpoint and returns the created id.
-// Media is uploaded first and attached to the same CreateTweet operation.
-func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploads []Upload, progress ProgressFunc) (string, error) {
+// Media is uploaded first and attached to the same CreateTweet operation; a
+// quoteID attaches that post as a quote.
+func (c *WebClient) PostTweet(ctx context.Context, text, replyToID, quoteID string, uploads []Upload, progress ProgressFunc) (string, error) {
 	c.lastDiagnostic = ""
 	if c.authToken == "" || c.ct0 == "" {
 		return "", fmt.Errorf("no session; run 'xeet auth' first")
@@ -514,6 +524,9 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	}
 	if replyToID != "" {
 		vars.Reply = &ctReply{InReplyToTweetID: replyToID, ExcludeReplyUserIDs: []string{}}
+	}
+	if quoteID != "" {
+		vars.AttachmentURL = quoteAttachmentURL(quoteID)
 	}
 
 	emitProgress(progress, PostEvent{Stage: PostStagePublishing})

@@ -96,7 +96,7 @@ func TestPostTweetChunkedVideo(t *testing.T) {
 	})}
 
 	var events []PostEvent
-	id, err := client.PostTweet(context.Background(), "clip", "", []Upload{
+	id, err := client.PostTweet(context.Background(), "clip", "", "", []Upload{
 		{Filename: "clip.mp4", ContentType: "video/mp4", Path: path},
 	}, func(event PostEvent) { events = append(events, event) })
 	if err != nil {
