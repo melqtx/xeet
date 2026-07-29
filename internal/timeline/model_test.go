@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melqtx/xeet/pkg/api"
 
@@ -307,6 +308,85 @@ func TestRefreshMergesOnTopAndKeepsPosition(t *testing.T) {
 	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(8), Cursor: "third"}})
 	if len(m.cur().posts) != 8 || !strings.Contains(m.toast, "caught up") {
 		t.Fatalf("no-change refresh misbehaved: %d posts, toast %q", len(m.cur().posts), m.toast)
+	}
+}
+
+func TestPollTickRefreshesFocusedColumn(t *testing.T) {
+	m := New()
+	m.pollInterval = time.Minute
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(3), Cursor: "c"}})
+	next, cmd := m.Update(pollTickMsg{})
+	m = next.(Model)
+	if !m.cur().refreshing {
+		t.Fatal("poll tick did not start a refresh of the focused column")
+	}
+	if cmd == nil {
+		t.Fatal("poll tick did not reschedule the next poll")
+	}
+}
+
+func TestPollTickSkipsRefreshOutsideFeedMode(t *testing.T) {
+	m := New()
+	m.pollInterval = time.Minute
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(3), Cursor: "c"}})
+	m.mode = modeThread
+	next, cmd := m.Update(pollTickMsg{})
+	m = next.(Model)
+	if m.cur().refreshing {
+		t.Fatal("poll tick refreshed while the thread view was open")
+	}
+	if cmd == nil {
+		t.Fatal("poll tick must still reschedule when the refresh is skipped")
+	}
+}
+
+func TestAutoRefreshSkipsBusyHelpAndErrorStates(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{"help open", func(m *Model) { m.help = true }},
+		{"thread mode", func(m *Model) { m.mode = modeThread }},
+		{"column loading", func(m *Model) { m.cur().loading = true }},
+		{"column refreshing", func(m *Model) { m.cur().refreshing = true }},
+		{"column error", func(m *Model) { m.cur().err = errors.New("boom") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New()
+			m.cur().loading = false
+			m.cur().posts = posts(2)
+			tc.setup(&m)
+			if cmd := m.autoRefresh(); cmd != nil {
+				t.Fatal("autoRefresh started a fetch despite the guard")
+			}
+		})
+	}
+}
+
+func TestPollTickDoesNothingWithoutInterval(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.cur().posts = posts(2)
+	if cmd := m.pollTick(); cmd != nil {
+		t.Fatal("pollTick fired with a zero interval; polling must stay opt-in")
+	}
+}
+
+func TestAutoRefreshStaysSilentWhenCaughtUp(t *testing.T) {
+	m := New()
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(5), Cursor: "first"}})
+	m.toast = ""
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(5), Cursor: "second"}, auto: true})
+	if m.toast != "" {
+		t.Fatalf("auto refresh showed a toast with no new posts: %q", m.toast)
+	}
+	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(7), Cursor: "third"}, auto: true})
+	if !strings.Contains(m.toast, "2 new") {
+		t.Fatalf("auto refresh hid the new-posts toast: %q", m.toast)
+	}
+	if len(m.cur().posts) != 7 || m.cur().posts[0].ID != "f" {
+		t.Fatalf("auto refresh did not prepend new posts: %+v", m.cur().posts[:3])
 	}
 }
 

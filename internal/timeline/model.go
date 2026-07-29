@@ -104,6 +104,9 @@ type Model struct {
 	focus     int
 	nextColID int
 	accounts  []config.AccountInfo
+	// pollInterval is the auto-refresh period for the focused column.
+	// Zero keeps the timeline manual-only (R), which is the default.
+	pollInterval time.Duration
 
 	mode              mode
 	replyReturn       mode
@@ -130,6 +133,7 @@ type pageMsg struct {
 	page  *api.TimelinePage
 	err   error
 	more  bool
+	auto  bool
 	seq   int
 	colID int
 }
@@ -172,6 +176,15 @@ type clockTickMsg time.Time
 
 func clockTick() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg { return clockTickMsg(t) })
+}
+
+type pollTickMsg struct{}
+
+func (m Model) pollTick() tea.Cmd {
+	if m.pollInterval <= 0 {
+		return nil
+	}
+	return tea.Tick(m.pollInterval, func(time.Time) tea.Msg { return pollTickMsg{} })
 }
 
 func (m *Model) showToast(text string) tea.Cmd {
@@ -244,7 +257,7 @@ func (m Model) requestContext() context.Context {
 func (m Model) Init() tea.Cmd {
 	c := m.cur()
 	if c.feed == FeedSearch && c.searchQuery == "" {
-		return tea.Batch(m.searchInput.Focus(), loadAccountsCmd(), clockTick())
+		return tea.Batch(m.searchInput.Focus(), loadAccountsCmd(), clockTick(), m.pollTick())
 	}
 	if m.mode == modeListPicker {
 		return tea.Batch(
@@ -252,13 +265,14 @@ func (m Model) Init() tea.Cmd {
 			fetchListsCmd(m.requestContext(), c.accountID, true),
 			loadAccountsCmd(),
 			clockTick(),
+			m.pollTick(),
 		)
 	}
 	cmds := []tea.Cmd{m.spinner.Tick, loadAccountsCmd()}
 	for i := range m.columns {
 		c := &m.columns[i]
 		cmds = append(cmds, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, false,
 		))
 	}
 	// List names are account-scoped, so one global enumeration could label a
@@ -274,13 +288,14 @@ func (m Model) Init() tea.Cmd {
 			cmds = append(cmds, fetchListsCmd(m.requestContext(), c.accountID, false))
 		}
 	}
-	cmds = append(cmds, clockTick())
+	cmds = append(cmds, clockTick(), m.pollTick())
 	return tea.Batch(cmds...)
 }
 
-func Run(ctx context.Context, images string, specs []ColumnSpec) (Action, error) {
+func Run(ctx context.Context, images string, specs []ColumnSpec, pollInterval time.Duration) (Action, error) {
 	m := NewWithImageMode(images)
 	m.ctx = ctx
+	m.pollInterval = pollInterval
 	m.configureColumns(specs)
 	if len(specs) == 1 && specs[0].Kind == FeedSearch && specs[0].Query == "" {
 		m.cur().loading = false
@@ -336,15 +351,15 @@ func loadRequestConfig(mgr requestConfigManager, accountID string) (*config.Conf
 	return mgr.LoadAccount(accountID)
 }
 
-func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, accountID, cursor string, more bool, seq, colID int) tea.Cmd {
+func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, accountID, cursor string, more bool, seq, colID int, auto bool) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := openRequestConfigManager()
 		if err != nil {
-			return pageMsg{err: err, more: more, seq: seq, colID: colID}
+			return pageMsg{err: err, more: more, auto: auto, seq: seq, colID: colID}
 		}
 		cfg, err := loadRequestConfig(mgr, accountID)
 		if err != nil {
-			return pageMsg{err: err, more: more, seq: seq, colID: colID}
+			return pageMsg{err: err, more: more, auto: auto, seq: seq, colID: colID}
 		}
 		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
 		defer cancel()
@@ -370,7 +385,7 @@ func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, accountI
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.SaveQueryIDs(cfg)
 		}
-		return pageMsg{page: page, err: err, more: more, seq: seq, colID: colID}
+		return pageMsg{page: page, err: err, more: more, auto: auto, seq: seq, colID: colID}
 	}
 }
 
@@ -406,6 +421,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 		}
 		return m, clockTick()
+	}
+	if _, ok := msg.(pollTickMsg); ok {
+		// The tick always reschedules, even when this round skips the fetch.
+		return m, tea.Batch(m.autoRefresh(), m.pollTick())
 	}
 	if _, ok := msg.(wezRepaintMsg); ok {
 		if m.imageMode != imageModeWezTerm {
@@ -615,16 +634,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.beginChoicePicker("theme", m.themeItems(), intentTheme)
 		return m, m.imageRepaint()
 	case "R", "ctrl+r":
-		c := m.cur()
-		if len(c.posts) == 0 {
-			c.loading = true
-		} else {
-			c.refreshing = true
-		}
-		c.err = nil
-		return m, m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
-		)))
+		return m, m.refreshCurrentColumn(false)
 	case "r":
 		if post, ok := m.currentPost(); ok {
 			return m.beginReply(post)
@@ -871,7 +881,7 @@ func (m *Model) resetColumnFeed(c *column, kind FeedKind) tea.Cmd {
 	c.viewport.YOffset = 0
 	c.viewport.SetContent("")
 	return fetchPageSeq(
-		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, false,
 	)
 }
 
@@ -895,12 +905,41 @@ func (m *Model) switchFeed() tea.Cmd {
 	return m.setFeed(FeedForYou)
 }
 
+// refreshCurrentColumn re-fetches the focused column's first page. auto marks
+// poll-driven refreshes so applyFeedPage can stay quiet when nothing changed.
+func (m *Model) refreshCurrentColumn(auto bool) tea.Cmd {
+	c := m.cur()
+	if len(c.posts) == 0 {
+		c.loading = true
+	} else {
+		c.refreshing = true
+	}
+	c.err = nil
+	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, auto,
+	)))
+}
+
+// autoRefresh polls the focused column only, and only while the feed view is
+// usable. A column holding an error is left alone: with an expired session
+// every tick would re-fail against X, so recovery stays a manual R.
+func (m *Model) autoRefresh() tea.Cmd {
+	if m.mode != modeFeed || m.help {
+		return nil
+	}
+	c := m.cur()
+	if c.loading || c.loadingMore || c.refreshing || c.err != nil {
+		return nil
+	}
+	return m.refreshCurrentColumn(true)
+}
+
 func (m *Model) maybeLoadMore() tea.Cmd {
 	c := m.cur()
 	if len(c.posts) > 0 && c.selected >= len(c.posts)-5 && c.cursor != "" && !c.loadingMore {
 		c.loadingMore = true
 		return tea.Batch(m.spinner.Tick, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, c.cursor, true, c.feedSeq, c.id,
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, c.cursor, true, c.feedSeq, c.id, false,
 		))
 	}
 	return nil
@@ -954,7 +993,9 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 				label = "post"
 			}
 			toast = m.showToast(fmt.Sprintf("%d new %s · g jumps to top", len(fresh), label))
-		} else {
+		} else if !msg.auto {
+			// Polls fire every interval, so only a manual R earns the
+			// "all caught up" confirmation; auto refreshes stay silent.
 			toast = m.showToast("all caught up")
 		}
 	} else {

@@ -34,6 +34,7 @@ func configFromFile(fc *fileConfig) *Config {
 		TweetDetailQID:                 fc.TweetDetailQID,
 		Theme:                          fc.Theme,
 		Columns:                        append([]string(nil), fc.Columns...),
+		RefreshInterval:                fc.RefreshInterval,
 		SessionBrowser:                 fc.SessionBrowser,
 		SessionProfile:                 fc.SessionProfile,
 		SessionDomain:                  fc.SessionDomain,

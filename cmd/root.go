@@ -98,6 +98,7 @@ func init() {
 	rootCmd.Flags().StringVar(&rootListID, "list", "", "start on the given list id")
 	rootCmd.Flags().StringVar(&rootColumns, "columns", "1", "column count (1-4) or feeds, optionally prefixed with @handle:")
 	rootCmd.Flags().StringVar(&rootTheme, "theme", "", "color theme for this run (see 'xeet theme')")
+	rootCmd.Flags().String("refresh", "", "auto-refresh the focused column every interval (e.g. 60s, 5m); off by default")
 	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
 	rootCmd.MarkFlagsMutuallyExclusive("compose", "following")
 	rootCmd.MarkFlagsMutuallyExclusive("following", "bookmarks", "list")
@@ -163,7 +164,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	return runTimeline(cmd.Context(), imageMode, specs)
+	refresh, err := refreshIntervalFor(cmd)
+	if err != nil {
+		return err
+	}
+	return runTimeline(cmd.Context(), imageMode, specs, refresh)
 }
 
 // printFirstRun greets someone who has not connected an account yet. It is the

@@ -508,6 +508,47 @@ func TestColumnsReadTheFileWithoutTouchingTheKeyring(t *testing.T) {
 	}
 }
 
+func TestRefreshIntervalRoundTripsWithoutTouchingTheKeyring(t *testing.T) {
+	dir := t.TempDir()
+	store := &countingStore{fakeStore: newFakeStore()}
+	cm := newConfigManagerAt(dir, store)
+	if err := cm.Save(&Config{RefreshInterval: "90s"}); err != nil {
+		t.Fatal(err)
+	}
+	store.gets = 0
+
+	interval, err := cm.RefreshInterval()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if interval != 90*time.Second {
+		t.Fatalf("RefreshInterval() = %v, want 90s", interval)
+	}
+	if store.gets != 0 {
+		t.Fatalf("RefreshInterval() made %d keyring reads; resolving a display setting must not prompt for secrets", store.gets)
+	}
+}
+
+func TestRefreshIntervalDefaultsToOff(t *testing.T) {
+	interval, err := newConfigManagerAt(t.TempDir(), newFakeStore()).RefreshInterval()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if interval != 0 {
+		t.Fatalf("RefreshInterval() = %v, want 0 so polling stays opt-in", interval)
+	}
+}
+
+func TestRefreshIntervalRejectsGarbage(t *testing.T) {
+	cm := newConfigManagerAt(t.TempDir(), newFakeStore())
+	if err := cm.Save(&Config{RefreshInterval: "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cm.RefreshInterval(); err == nil {
+		t.Fatal("RefreshInterval() accepted an unparseable duration")
+	}
+}
+
 func TestSaveColumnsPatchesOnlyTheLayout(t *testing.T) {
 	dir := t.TempDir()
 	store := &countingStore{fakeStore: newFakeStore()}

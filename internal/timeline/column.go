@@ -118,7 +118,7 @@ func (m *Model) addColumn(spec ColumnSpec) tea.Cmd {
 	m.enforceMultiColumnImageMode()
 	m.resize()
 	cmds := []tea.Cmd{m.spinner.Tick, fetchPageSeq(
-		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id,
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, false,
 	)}
 	if c.feed == FeedList {
 		cmds = append(cmds, fetchListsCmd(m.requestContext(), c.accountID, false))

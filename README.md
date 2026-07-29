@@ -186,6 +186,24 @@ conversation, `j`/`k` moves through replies, `r` replies to the selected
 item, `R` reloads, and `esc` drops you back exactly where you were in the
 timeline.
 
+**auto-refresh**
+
+the timeline is manual-only by default: nothing refetches until you press
+`R`. to keep the focused column current on its own, set an interval once in
+`~/.xeet.yaml` or pass one for a single run:
+
+```bash
+xeet --refresh 60s   # poll the focused column every minute
+```
+
+```yaml
+refresh_interval: 5m
+```
+
+polling follows focus, so `tab` moves it to another column. it pauses while
+you read a thread or the column holds an error, stays quiet when nothing is
+new, and stacks fresh posts on top with a toast when they arrive.
+
 ### multi-column
 
 `--columns 2` through `--columns 4` repeats the selected feed in equal-width

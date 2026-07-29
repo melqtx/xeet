@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/melqtx/xeet/internal/timeline"
 	"github.com/melqtx/xeet/internal/tui"
@@ -54,7 +55,11 @@ var timelineCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runTimeline(cmd.Context(), timelineImageMode, specs)
+		refresh, err := refreshIntervalFor(cmd)
+		if err != nil {
+			return err
+		}
+		return runTimeline(cmd.Context(), timelineImageMode, specs, refresh)
 	},
 }
 
@@ -65,11 +70,12 @@ func init() {
 	timelineCmd.Flags().StringVar(&timelineListID, "list", "", "start on the given list id")
 	timelineCmd.Flags().StringVar(&timelineColumns, "columns", "1", "column count (1-4) or feeds, optionally prefixed with @handle:")
 	timelineCmd.Flags().StringVar(&timelineTheme, "theme", "", "color theme for this run (see 'xeet theme')")
+	timelineCmd.Flags().String("refresh", "", "auto-refresh the focused column every interval (e.g. 60s, 5m); off by default")
 	timelineCmd.MarkFlagsMutuallyExclusive("following", "bookmarks", "list")
 	rootCmd.AddCommand(timelineCmd)
 }
 
-func runTimeline(ctx context.Context, imageMode string, specs []timeline.ColumnSpec) error {
+func runTimeline(ctx context.Context, imageMode string, specs []timeline.ColumnSpec, refreshInterval time.Duration) error {
 	switch imageMode {
 	case "auto", "native", "ansi", "off":
 	default:
@@ -79,7 +85,7 @@ func runTimeline(ctx context.Context, imageMode string, specs []timeline.ColumnS
 		return err
 	}
 	for {
-		action, err := timeline.Run(ctx, imageMode, specs)
+		action, err := timeline.Run(ctx, imageMode, specs, refreshInterval)
 		if err != nil {
 			return err
 		}
@@ -115,6 +121,24 @@ func runTimeline(ctx context.Context, imageMode string, specs []timeline.ColumnS
 			return nil
 		}
 	}
+}
+
+// refreshIntervalFor resolves the auto-refresh period: an explicit --refresh
+// wins, then the saved refresh_interval, and 0 keeps polling off. Commands
+// without a --refresh flag (lists, search) fall straight through to config.
+func refreshIntervalFor(cmd *cobra.Command) (time.Duration, error) {
+	if value, err := cmd.Flags().GetString("refresh"); err == nil && cmd.Flags().Changed("refresh") {
+		interval, err := time.ParseDuration(value)
+		if err != nil || interval < 0 {
+			return 0, fmt.Errorf("invalid --refresh value %q (use a duration like 60s or 5m)", value)
+		}
+		return interval, nil
+	}
+	mgr, err := config.NewConfigManager()
+	if err != nil {
+		return 0, err
+	}
+	return mgr.RefreshInterval()
 }
 
 func columnSpecsForTimelineCommand(

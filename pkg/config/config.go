@@ -35,6 +35,7 @@ type Config struct {
 	TweetDetailQID                 string    `yaml:"tweet_detail_qid,omitempty"`
 	Theme                          string    `yaml:"theme,omitempty"`
 	Columns                        []string  `yaml:"columns,omitempty"`
+	RefreshInterval                string    `yaml:"refresh_interval,omitempty"`
 	SessionBrowser                 string    `yaml:"session_browser,omitempty"`
 	SessionProfile                 string    `yaml:"session_profile,omitempty"`
 	SessionDomain                  string    `yaml:"session_domain,omitempty"`
@@ -119,6 +120,7 @@ type fileConfig struct {
 	TweetDetailQID                 string                 `yaml:"tweet_detail_qid,omitempty"`
 	Theme                          string                 `yaml:"theme,omitempty"`
 	Columns                        []string               `yaml:"columns,omitempty"`
+	RefreshInterval                string                 `yaml:"refresh_interval,omitempty"`
 	SessionBrowser                 string                 `yaml:"session_browser,omitempty"`
 	SessionProfile                 string                 `yaml:"session_profile,omitempty"`
 	SessionDomain                  string                 `yaml:"session_domain,omitempty"`
@@ -208,6 +210,24 @@ func (cm *ConfigManager) Columns() ([]string, error) {
 	return append([]string(nil), fc.Columns...), nil
 }
 
+// RefreshInterval reads the saved auto-refresh interval as a Go duration
+// ("60s", "5m"), or 0 when unset — polling stays opt-in. Like Theme and
+// Columns it reads the file only, so startup never provokes a keychain prompt.
+func (cm *ConfigManager) RefreshInterval() (time.Duration, error) {
+	fc, err := cm.readFile()
+	if err != nil {
+		return 0, err
+	}
+	if fc.RefreshInterval == "" {
+		return 0, nil
+	}
+	interval, err := time.ParseDuration(fc.RefreshInterval)
+	if err != nil {
+		return 0, fmt.Errorf("invalid refresh_interval %q (use a duration like 60s or 5m)", fc.RefreshInterval)
+	}
+	return interval, nil
+}
+
 // SaveColumns patches only the explicit layout setting. Loading and saving a
 // full Config here could overwrite session metadata changed by another command.
 func (cm *ConfigManager) SaveColumns(columns []string) error {
@@ -261,6 +281,7 @@ func fileConfigFor(config *Config) *fileConfig {
 		TweetDetailQID:                 config.TweetDetailQID,
 		Theme:                          config.Theme,
 		Columns:                        append([]string(nil), config.Columns...),
+		RefreshInterval:                config.RefreshInterval,
 	}
 	if config.UserID != "" {
 		result.Accounts = map[string]fileAccount{

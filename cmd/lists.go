@@ -20,7 +20,11 @@ var listsCmd = &cobra.Command{
 		if err := applyConfiguredTheme(listsTheme); err != nil {
 			return err
 		}
-		return runTimeline(cmd.Context(), listsImageMode, []timeline.ColumnSpec{{Kind: timeline.FeedList}})
+		refresh, err := refreshIntervalFor(cmd)
+		if err != nil {
+			return err
+		}
+		return runTimeline(cmd.Context(), listsImageMode, []timeline.ColumnSpec{{Kind: timeline.FeedList}}, refresh)
 	},
 }
 
