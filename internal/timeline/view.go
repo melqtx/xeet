@@ -227,6 +227,8 @@ func (m Model) columnFeedLabel(c *column, width int) string {
 		status = "following"
 	case FeedBookmarks:
 		status = "bookmarks"
+	case FeedNotifications:
+		status = "notifications"
 	case FeedSearch:
 		status = ansi.Truncate("search · “"+c.searchQuery+"”", max(9, width-12), "…")
 	case FeedList:
@@ -853,6 +855,8 @@ func (m Model) searchBackLabel() string {
 		return "back to following"
 	case FeedBookmarks:
 		return "back to bookmarks"
+	case FeedNotifications:
+		return "back to notifications"
 	case FeedSearch:
 		if m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 			return "quit"
@@ -875,6 +879,8 @@ func (m Model) searchBackShortLabel() string {
 		return "following"
 	case FeedBookmarks:
 		return "bookmarks"
+	case FeedNotifications:
+		return "notifications"
 	case FeedSearch:
 		if m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 			return "quit"

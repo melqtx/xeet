@@ -60,6 +60,8 @@ func (m *Model) beginColumnAdd() tea.Cmd {
 		{label: "bookmarks", hint: "your saved posts", value: "bookmarks"},
 		{label: "list", hint: "pick one of your lists next", value: "list"},
 		{label: "search", hint: "type a query next", value: "search"},
+		// Appended last on purpose: picker tests index these items by position.
+		{label: "notifications", hint: "likes, reposts, and replies to you", value: "notifications"},
 	}, intentColumnKind)
 	return m.imageRepaint()
 }
@@ -158,6 +160,8 @@ func (m Model) applyChoice(value string) (tea.Model, tea.Cmd) {
 			m.columnDraft.Kind = FeedFollowing
 		case "bookmarks":
 			m.columnDraft.Kind = FeedBookmarks
+		case "notifications":
+			m.columnDraft.Kind = FeedNotifications
 		default:
 			m.columnDraft.Kind = FeedForYou
 		}

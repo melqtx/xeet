@@ -109,6 +109,7 @@ xeet --list 1234567890                # start on a list by id
 xeet search "go tui"                  # search posts and browse results
 xeet --columns 2                      # show two side-by-side feeds
 xeet --columns foryou,bookmarks       # choose each column's feed
+xeet --columns notifications,foryou   # watch likes and replies roll in
 xeet columns save "foryou,following"  # save the default layout
 xeet --barebones                      # text-only feed
 xeet --compose                        # skip the feed, open the composer
@@ -208,7 +209,7 @@ new, and stacks fresh posts on top with a toast when they arrive.
 
 `--columns 2` through `--columns 4` repeats the selected feed in equal-width
 columns. a comma-separated layout can mix `foryou`, `following`, `bookmarks`,
-`list:<id>`, and `search:<query>`. `xeet columns save "..."` writes that
+`notifications`, `list:<id>`, and `search:<query>`. `xeet columns save "..."` writes that
 layout to `~/.xeet.yaml`; trying a layout never saves it implicitly.
 `tab` / `shift+tab` (or `]` / `[`) moves focus; navigation and post actions
 apply to the focused column. if the terminal is too narrow, xeet shows only

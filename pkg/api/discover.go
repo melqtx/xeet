@@ -106,6 +106,11 @@ func operationHint(operation string) string {
 	if operation == "TweetDetail" {
 		return "TweetDetail"
 	}
+	// The notifications page ships its timeline operation in the route chunk,
+	// which is named for the page (Notifications), not the operation.
+	if operation == notificationsTimelineOperation {
+		return "Notifications"
+	}
 	if strings.Contains(operation, "Home") {
 		return "HomeTimeline"
 	}

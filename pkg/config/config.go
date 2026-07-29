@@ -33,6 +33,7 @@ type Config struct {
 	UnfavoriteTweetQID             string    `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID                      string    `yaml:"viewer_qid,omitempty"`
 	TweetDetailQID                 string    `yaml:"tweet_detail_qid,omitempty"`
+	NotificationsTimelineQID       string    `yaml:"notifications_timeline_qid,omitempty"`
 	Theme                          string    `yaml:"theme,omitempty"`
 	Columns                        []string  `yaml:"columns,omitempty"`
 	RefreshInterval                string    `yaml:"refresh_interval,omitempty"`
@@ -118,6 +119,7 @@ type fileConfig struct {
 	UnfavoriteTweetQID             string                 `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID                      string                 `yaml:"viewer_qid,omitempty"`
 	TweetDetailQID                 string                 `yaml:"tweet_detail_qid,omitempty"`
+	NotificationsTimelineQID       string                 `yaml:"notifications_timeline_qid,omitempty"`
 	Theme                          string                 `yaml:"theme,omitempty"`
 	Columns                        []string               `yaml:"columns,omitempty"`
 	RefreshInterval                string                 `yaml:"refresh_interval,omitempty"`
@@ -279,6 +281,7 @@ func fileConfigFor(config *Config) *fileConfig {
 		UnfavoriteTweetQID:             config.UnfavoriteTweetQID,
 		ViewerQID:                      config.ViewerQID,
 		TweetDetailQID:                 config.TweetDetailQID,
+		NotificationsTimelineQID:       config.NotificationsTimelineQID,
 		Theme:                          config.Theme,
 		Columns:                        append([]string(nil), config.Columns...),
 		RefreshInterval:                config.RefreshInterval,

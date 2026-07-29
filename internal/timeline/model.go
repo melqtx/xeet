@@ -58,6 +58,7 @@ const (
 	FeedBookmarks
 	FeedSearch
 	FeedList
+	FeedNotifications
 )
 
 type ColumnSpec struct {
@@ -370,6 +371,8 @@ func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, accountI
 			fetch = client.FetchFollowingTimeline
 		case FeedBookmarks:
 			fetch = client.FetchBookmarks
+		case FeedNotifications:
+			fetch = client.FetchNotificationsTimeline
 		case FeedSearch:
 			q := query
 			fetch = func(ctx context.Context, cursor string, count int) (*api.TimelinePage, error) {

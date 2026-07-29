@@ -55,6 +55,11 @@ func TestColumnsFlagAcceptsCountsAndFeedSpecs(t *testing.T) {
 			},
 			ownsFeeds: true,
 		},
+		{
+			name: "notifications selects the notifications feed", value: "notifications",
+			want:      []timeline.ColumnSpec{{Kind: timeline.FeedNotifications}},
+			ownsFeeds: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

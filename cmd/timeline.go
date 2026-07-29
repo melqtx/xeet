@@ -255,6 +255,8 @@ func parseColumnSpecList(value string, accounts []config.AccountInfo) ([]timelin
 			spec.Kind = timeline.FeedFollowing
 		case item == "bookmarks":
 			spec.Kind = timeline.FeedBookmarks
+		case item == "notifications":
+			spec.Kind = timeline.FeedNotifications
 		case strings.HasPrefix(item, "list:"):
 			id := strings.TrimSpace(strings.TrimPrefix(item, "list:"))
 			if !isNumericListID(id) {
@@ -272,7 +274,7 @@ func parseColumnSpecList(value string, accounts []config.AccountInfo) ([]timelin
 			spec.Query = query
 			item = "search:" + query
 		default:
-			return nil, nil, fmt.Errorf("use foryou, following, bookmarks, list:<id>, or search:<query>")
+			return nil, nil, fmt.Errorf("use foryou, following, bookmarks, notifications, list:<id>, or search:<query>")
 		}
 		specs = append(specs, spec)
 		canonical = append(canonical, prefix+item)
@@ -309,7 +311,7 @@ func validateColumnSpecs(specs []timeline.ColumnSpec) error {
 	}
 	for _, spec := range specs {
 		switch spec.Kind {
-		case timeline.FeedForYou, timeline.FeedFollowing, timeline.FeedBookmarks:
+		case timeline.FeedForYou, timeline.FeedFollowing, timeline.FeedBookmarks, timeline.FeedNotifications:
 		case timeline.FeedSearch:
 			if len(specs) > 1 && spec.Query == "" {
 				return fmt.Errorf("invalid --columns search spec (use search:<query>)")
