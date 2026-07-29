@@ -33,6 +33,8 @@ func configFromFile(fc *fileConfig) *Config {
 		ViewerQID:                      fc.ViewerQID,
 		TweetDetailQID:                 fc.TweetDetailQID,
 		NotificationsTimelineQID:       fc.NotificationsTimelineQID,
+		CreateRetweetQID:               fc.CreateRetweetQID,
+		DeleteRetweetQID:               fc.DeleteRetweetQID,
 		Theme:                          fc.Theme,
 		Columns:                        append([]string(nil), fc.Columns...),
 		RefreshInterval:                fc.RefreshInterval,
@@ -315,6 +317,8 @@ func (cm *ConfigManager) SaveQueryIDs(cfg *Config) error {
 	fc.ViewerQID = cfg.ViewerQID
 	fc.TweetDetailQID = cfg.TweetDetailQID
 	fc.NotificationsTimelineQID = cfg.NotificationsTimelineQID
+	fc.CreateRetweetQID = cfg.CreateRetweetQID
+	fc.DeleteRetweetQID = cfg.DeleteRetweetQID
 	return cm.writeFile(fc)
 }
 

@@ -62,6 +62,10 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// toast, and no re-render of a list nobody can see.
 		m.settleLike(msg)
 		return m, nil
+	case retweetMsg:
+		// Same as the like above: settle without surfacing anything.
+		m.settleRepost(msg)
+		return m, nil
 	case previewMsg:
 		m.storePreview(msg)
 		return m, nil

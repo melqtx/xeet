@@ -34,6 +34,8 @@ type Config struct {
 	ViewerQID                      string    `yaml:"viewer_qid,omitempty"`
 	TweetDetailQID                 string    `yaml:"tweet_detail_qid,omitempty"`
 	NotificationsTimelineQID       string    `yaml:"notifications_timeline_qid,omitempty"`
+	CreateRetweetQID               string    `yaml:"create_retweet_qid,omitempty"`
+	DeleteRetweetQID               string    `yaml:"delete_retweet_qid,omitempty"`
 	Theme                          string    `yaml:"theme,omitempty"`
 	Columns                        []string  `yaml:"columns,omitempty"`
 	RefreshInterval                string    `yaml:"refresh_interval,omitempty"`
@@ -120,6 +122,8 @@ type fileConfig struct {
 	ViewerQID                      string                 `yaml:"viewer_qid,omitempty"`
 	TweetDetailQID                 string                 `yaml:"tweet_detail_qid,omitempty"`
 	NotificationsTimelineQID       string                 `yaml:"notifications_timeline_qid,omitempty"`
+	CreateRetweetQID               string                 `yaml:"create_retweet_qid,omitempty"`
+	DeleteRetweetQID               string                 `yaml:"delete_retweet_qid,omitempty"`
 	Theme                          string                 `yaml:"theme,omitempty"`
 	Columns                        []string               `yaml:"columns,omitempty"`
 	RefreshInterval                string                 `yaml:"refresh_interval,omitempty"`
@@ -282,6 +286,8 @@ func fileConfigFor(config *Config) *fileConfig {
 		ViewerQID:                      config.ViewerQID,
 		TweetDetailQID:                 config.TweetDetailQID,
 		NotificationsTimelineQID:       config.NotificationsTimelineQID,
+		CreateRetweetQID:               config.CreateRetweetQID,
+		DeleteRetweetQID:               config.DeleteRetweetQID,
 		Theme:                          config.Theme,
 		Columns:                        append([]string(nil), config.Columns...),
 		RefreshInterval:                config.RefreshInterval,

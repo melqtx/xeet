@@ -70,6 +70,72 @@ func TestLikeIsOptimisticAndRollsBack(t *testing.T) {
 	}
 }
 
+func TestRepostIsOptimisticAndRollsBack(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "1", Text: "post", RepostCount: 4}}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(Model)
+	if cmd == nil || !m.cur().posts[0].Reposted || m.cur().posts[0].RepostCount != 5 {
+		t.Fatalf("repost was not optimistic: %+v", m.cur().posts[0])
+	}
+	m = update(t, m, retweetMsg{id: "1", reposted: true, err: errors.New("nope")})
+	if m.cur().posts[0].Reposted || m.cur().posts[0].RepostCount != 4 {
+		t.Fatalf("failed repost did not roll back: %+v", m.cur().posts[0])
+	}
+}
+
+func TestRepostTogglesOffOnRepostedPost(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "1", Text: "post", Reposted: true, RepostCount: 2}}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(Model)
+	if cmd == nil || m.cur().posts[0].Reposted || m.cur().posts[0].RepostCount != 1 {
+		t.Fatalf("unrepost was not optimistic: %+v", m.cur().posts[0])
+	}
+	m = update(t, m, retweetMsg{id: "1", reposted: false})
+	if m.cur().posts[0].Reposted || m.cur().posts[0].RepostCount != 1 {
+		t.Fatalf("successful unrepost changed state again: %+v", m.cur().posts[0])
+	}
+}
+
+func TestRepostSecondPressBlockedWhileFirstIsInFlight(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "1", Text: "post", RepostCount: 4}}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("first repost press produced no request")
+	}
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(Model)
+	if cmd != nil || m.cur().posts[0].RepostCount != 5 {
+		t.Fatalf("second press fired a duplicate request: cmd=%v post=%+v", cmd, m.cur().posts[0])
+	}
+	m = update(t, m, retweetMsg{id: "1", reposted: true})
+	if m.reposting[likeKey("", "1")] {
+		t.Fatal("in-flight marker survived a settled repost")
+	}
+}
+
+func TestRepostWorksInThreadMode(t *testing.T) {
+	m := New()
+	m.cur().loading = false
+	m.mode = modeThread
+	m.cur().threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "1", Text: "post", RepostCount: 4}}}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(Model)
+	if cmd == nil || !m.cur().threadPosts[0].Reposted || m.cur().threadPosts[0].RepostCount != 5 {
+		t.Fatalf("thread repost was not optimistic: %+v", m.cur().threadPosts[0])
+	}
+	m = update(t, m, retweetMsg{id: "1", reposted: true, err: errors.New("nope")})
+	if m.cur().threadPosts[0].Reposted || m.cur().threadPosts[0].RepostCount != 4 {
+		t.Fatalf("failed thread repost did not roll back: %+v", m.cur().threadPosts[0])
+	}
+}
+
 func TestPostAction(t *testing.T) {
 	m := New()
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})

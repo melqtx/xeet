@@ -114,6 +114,9 @@ func (m Model) updateChoicePicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case likeMsg:
 		m.settleLike(msg)
 		return m, nil
+	case retweetMsg:
+		m.settleRepost(msg)
+		return m, nil
 	case previewMsg:
 		m.storePreview(msg)
 		return m, nil

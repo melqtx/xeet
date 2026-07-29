@@ -185,6 +185,8 @@ func NewWebClient(cfg *config.Config) *WebClient {
 		"Viewer":                      cfg.ViewerQID,
 		"TweetDetail":                 cfg.TweetDetailQID,
 		"NotificationsTimeline":       cfg.NotificationsTimelineQID,
+		"CreateRetweet":               cfg.CreateRetweetQID,
+		"DeleteRetweet":               cfg.DeleteRetweetQID,
 	}
 	qid := operationQIDs["CreateTweet"]
 	if qid == "" {
@@ -270,6 +272,10 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.TweetDetailQID = qid
 		case "NotificationsTimeline":
 			cfg.NotificationsTimelineQID = qid
+		case "CreateRetweet":
+			cfg.CreateRetweetQID = qid
+		case "DeleteRetweet":
+			cfg.DeleteRetweetQID = qid
 		}
 	}
 	return true

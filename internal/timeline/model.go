@@ -27,6 +27,7 @@ var (
 	muted    lipgloss.Color
 	red      lipgloss.Color
 	yellow   lipgloss.Color
+	green    lipgloss.Color
 	bright   lipgloss.Color
 	dim      lipgloss.Color
 )
@@ -36,7 +37,7 @@ func init() { ApplyTheme(theme.Default()) }
 // ApplyTheme recolors the timeline. Call it before Run; layout is unaffected.
 func ApplyTheme(p theme.Palette) {
 	blue, lavender, pink, muted = p.Blue, p.Lavender, p.Pink, p.Muted
-	red, yellow, bright, dim = p.Red, p.Yellow, p.Bright, p.Dim
+	red, yellow, green, bright, dim = p.Red, p.Yellow, p.Green, p.Bright, p.Dim
 }
 
 type ActionKind int
@@ -96,6 +97,7 @@ type Model struct {
 	toast         string
 	toastSeq      int
 	liking        map[string]bool
+	reposting     map[string]bool
 	// previews is shared by post ID rather than duplicated per column because
 	// every feed column has the same width. Unequal panes would need a
 	// per-column cache to avoid alternating width-based refetches.
@@ -148,6 +150,13 @@ type likeMsg struct {
 	id        string
 	accountID string
 	liked     bool
+	err       error
+}
+
+type retweetMsg struct {
+	id        string
+	accountID string
+	reposted  bool
 	err       error
 }
 
@@ -240,7 +249,7 @@ func NewWithImageMode(requested string) Model {
 	return Model{
 		ctx:   context.Background(),
 		width: 80, height: 24, imageMode: mode, imageNote: note,
-		liking: map[string]bool{}, previews: map[string]previewState{},
+		liking: map[string]bool{}, reposting: map[string]bool{}, previews: map[string]previewState{},
 		spinner: s, columns: []column{newColumn(0)},
 		nextColID: 1, replyEditor: editor, searchInput: search,
 	}
@@ -413,6 +422,27 @@ func setLike(parent context.Context, selectedAccountID, actingAccountID, tweetID
 	}
 }
 
+func setRetweet(parent context.Context, selectedAccountID, actingAccountID, tweetID string, reposted bool) tea.Cmd {
+	return func() tea.Msg {
+		mgr, err := openRequestConfigManager()
+		if err != nil {
+			return retweetMsg{id: tweetID, accountID: actingAccountID, reposted: reposted, err: err}
+		}
+		cfg, err := loadRequestConfig(mgr, selectedAccountID)
+		if err != nil {
+			return retweetMsg{id: tweetID, accountID: actingAccountID, reposted: reposted, err: err}
+		}
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+		defer cancel()
+		client := api.NewWebClient(cfg)
+		err = client.SetTweetReposted(ctx, tweetID, reposted)
+		if client.ApplyRefreshedQueryIDs(cfg) {
+			_ = mgr.SaveQueryIDs(cfg)
+		}
+		return retweetMsg{id: tweetID, accountID: actingAccountID, reposted: reposted, err: err}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = size.Width, size.Height
@@ -557,6 +587,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyPreview(msg)
 	case likeMsg:
 		return m, m.applyLikeResult(msg)
+	case retweetMsg:
+		return m, m.applyRepostResult(msg)
 	case listsMsg:
 		// Outside the picker this only ever arrives from Init's backfill, and a
 		// failure just leaves the ids on screen — the feeds themselves loaded.
@@ -680,6 +712,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.zoomSelected()
 	case "l":
 		return m, m.toggleSelectedLike()
+	case "t":
+		return m, m.toggleSelectedRepost()
 	case "y":
 		return m, m.copySelectedLink()
 	}
@@ -707,6 +741,30 @@ func (m *Model) applyLikeResult(msg likeMsg) tea.Cmd {
 		toast = "couldn't update like"
 	case msg.liked:
 		toast = "liked ♥"
+	}
+	cmd := m.showToast(toast)
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return cmd
+}
+
+// settleRepost clears the in-flight marker and rolls an optimistic repost back
+// if the request failed.
+func (m *Model) settleRepost(msg retweetMsg) {
+	delete(m.reposting, likeKey(msg.accountID, msg.id))
+	if msg.err != nil {
+		m.applyRepost(msg.accountID, msg.id, !msg.reposted)
+	}
+}
+
+func (m *Model) applyRepostResult(msg retweetMsg) tea.Cmd {
+	m.settleRepost(msg)
+	toast := "repost removed"
+	switch {
+	case msg.err != nil:
+		toast = "couldn't update repost"
+	case msg.reposted:
+		toast = "reposted ⟳"
 	}
 	cmd := m.showToast(toast)
 	m.syncViewport()
@@ -808,6 +866,25 @@ func (m *Model) toggleSelectedLike() tea.Cmd {
 	m.syncViewport()
 	m.ensureSelectedVisible()
 	return setLike(m.requestContext(), c.accountID, accountID, post.ID, liked)
+}
+
+func (m *Model) toggleSelectedRepost() tea.Cmd {
+	post, ok := m.currentPost()
+	if !ok {
+		return nil
+	}
+	c := m.cur()
+	accountID := m.columnAccountID(c)
+	key := likeKey(accountID, post.ID)
+	if m.reposting[key] {
+		return nil
+	}
+	reposted := !post.Reposted
+	m.reposting[key] = true
+	m.applyRepost(accountID, post.ID, reposted)
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return setRetweet(m.requestContext(), c.accountID, accountID, post.ID, reposted)
 }
 
 func (m *Model) copySelectedLink() tea.Cmd {
@@ -1198,6 +1275,32 @@ func (m *Model) applyLike(accountID, id string, liked bool) {
 			post.LikeCount++
 		} else if post.LikeCount > 0 {
 			post.LikeCount--
+		}
+	}
+	for columnIndex := range m.columns {
+		c := &m.columns[columnIndex]
+		if m.columnAccountID(c) != accountID {
+			continue
+		}
+		for i := range c.posts {
+			apply(&c.posts[i])
+		}
+		for i := range c.threadPosts {
+			apply(&c.threadPosts[i].TimelinePost)
+		}
+	}
+}
+
+func (m *Model) applyRepost(accountID, id string, reposted bool) {
+	apply := func(post *api.TimelinePost) {
+		if post.ID != id || post.Reposted == reposted {
+			return
+		}
+		post.Reposted = reposted
+		if reposted {
+			post.RepostCount++
+		} else if post.RepostCount > 0 {
+			post.RepostCount--
 		}
 	}
 	for columnIndex := range m.columns {

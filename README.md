@@ -173,6 +173,7 @@ come back next time.
 | `i` | zoom the post's image to the whole terminal |
 | `A` | read image descriptions (works with previews off) |
 | `l` | like / unlike |
+| `t` | repost / unrepost |
 | `r` | reply in place |
 | `o` | open in browser |
 | `y` | copy link |

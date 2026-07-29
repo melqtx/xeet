@@ -186,6 +186,21 @@ func TestLikeFansOutToDuplicatePostAcrossColumns(t *testing.T) {
 	}
 }
 
+func TestRepostFansOutToDuplicatePostAcrossColumns(t *testing.T) {
+	m := modelWithNamedColumns("Alice", "Bob")
+	m.columns[0].posts[0].ID = "shared"
+	m.columns[1].posts[0].ID = "shared"
+
+	m.applyRepost("", "shared", true)
+
+	for index := range m.columns {
+		post := m.columns[index].posts[0]
+		if !post.Reposted || post.RepostCount != 1 {
+			t.Fatalf("column %d duplicate was not updated: %+v", index, post)
+		}
+	}
+}
+
 func TestFocusedColumnStaysVisibleWhenWindowSlides(t *testing.T) {
 	m := modelWithNamedColumns("Alice", "Bob", "Carol", "Dave")
 	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
