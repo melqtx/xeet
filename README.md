@@ -176,6 +176,7 @@ come back next time.
 | `l` | like / unlike |
 | `t` | repost / unrepost |
 | `Q` | quote the selected post |
+| `u` | open the author's profile timeline |
 | `r` | reply in place |
 | `o` | open in browser |
 | `y` | copy link |

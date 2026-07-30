@@ -112,7 +112,7 @@ func TestColumnFetchUsesItsOwnAccountSession(t *testing.T) {
 
 	for index, accountID := range []string{"42", "84"} {
 		msg := fetchPageSeq(
-			context.Background(), FeedForYou, "", "", accountID, "", false, index, index, false,
+			context.Background(), FeedForYou, "", "", "", accountID, "", false, index, index, false,
 		)().(pageMsg)
 		if msg.err != nil {
 			t.Fatalf("account %s fetch: %v", accountID, msg.err)

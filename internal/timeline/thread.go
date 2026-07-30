@@ -180,6 +180,8 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyLikeResult(msg)
 	case retweetMsg:
 		return m, m.applyRepostResult(msg)
+	case profileMsg:
+		return m, m.applyProfileResult(msg)
 	case previewMsg:
 		return m, m.applyPreview(msg)
 	case actionMsg:
@@ -254,6 +256,10 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "Q":
 		if post, ok := m.currentPost(); ok {
 			return m.beginQuote(post)
+		}
+	case "u":
+		if post, ok := m.currentPost(); ok {
+			return m.beginProfile(post)
 		}
 	case "/":
 		return m, m.beginSearch()

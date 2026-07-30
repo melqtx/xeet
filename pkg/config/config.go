@@ -36,6 +36,8 @@ type Config struct {
 	NotificationsTimelineQID       string    `yaml:"notifications_timeline_qid,omitempty"`
 	CreateRetweetQID               string    `yaml:"create_retweet_qid,omitempty"`
 	DeleteRetweetQID               string    `yaml:"delete_retweet_qid,omitempty"`
+	UserByScreenNameQID            string    `yaml:"user_by_screen_name_qid,omitempty"`
+	UserTweetsQID                  string    `yaml:"user_tweets_qid,omitempty"`
 	Theme                          string    `yaml:"theme,omitempty"`
 	Columns                        []string  `yaml:"columns,omitempty"`
 	RefreshInterval                string    `yaml:"refresh_interval,omitempty"`
@@ -124,6 +126,8 @@ type fileConfig struct {
 	NotificationsTimelineQID       string                 `yaml:"notifications_timeline_qid,omitempty"`
 	CreateRetweetQID               string                 `yaml:"create_retweet_qid,omitempty"`
 	DeleteRetweetQID               string                 `yaml:"delete_retweet_qid,omitempty"`
+	UserByScreenNameQID            string                 `yaml:"user_by_screen_name_qid,omitempty"`
+	UserTweetsQID                  string                 `yaml:"user_tweets_qid,omitempty"`
 	Theme                          string                 `yaml:"theme,omitempty"`
 	Columns                        []string               `yaml:"columns,omitempty"`
 	RefreshInterval                string                 `yaml:"refresh_interval,omitempty"`
@@ -288,6 +292,8 @@ func fileConfigFor(config *Config) *fileConfig {
 		NotificationsTimelineQID:       config.NotificationsTimelineQID,
 		CreateRetweetQID:               config.CreateRetweetQID,
 		DeleteRetweetQID:               config.DeleteRetweetQID,
+		UserByScreenNameQID:            config.UserByScreenNameQID,
+		UserTweetsQID:                  config.UserTweetsQID,
 		Theme:                          config.Theme,
 		Columns:                        append([]string(nil), config.Columns...),
 		RefreshInterval:                config.RefreshInterval,

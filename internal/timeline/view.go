@@ -233,6 +233,8 @@ func (m Model) columnFeedLabel(c *column, width int) string {
 		status = ansi.Truncate("search · “"+c.searchQuery+"”", max(9, width-12), "…")
 	case FeedList:
 		status = ansi.Truncate("list · "+c.listName, max(9, width-12), "…")
+	case FeedProfile:
+		status = ansi.Truncate("@"+c.profileHandle, max(9, width-12), "…")
 	}
 	return status
 }
@@ -873,6 +875,8 @@ func (m Model) searchBackLabel() string {
 			return "quit"
 		}
 		return "back to results"
+	case FeedProfile:
+		return "back to @" + m.cur().profileHandle
 	default:
 		return "back to for you"
 	}
@@ -897,6 +901,8 @@ func (m Model) searchBackShortLabel() string {
 			return "quit"
 		}
 		return "results"
+	case FeedProfile:
+		return "@" + m.cur().profileHandle
 	default:
 		return "for you"
 	}
@@ -1102,16 +1108,16 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nt           repost / unrepost\nr           reply\nQ           quote post\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nt           repost / unrepost\nr           reply\nQ           quote post\nu           author profile\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nt           repost / unrepost\nr           reply to selected\nQ           quote selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nt           repost / unrepost\nr           reply to selected\nQ           quote selected\nu           author profile\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
 		// One leading newline, not two: the repost entry makes the longest line
 		// wrap, and the extra row would push the box's title off a short screen.
-		keys = "\nj/k move · g/G ends · f feed\nb saved · L lists · / search\nl like · t repost · r reply\nenter open · e read · i zoom\nA alt · o open · R reload\nQ quote · y copy · P post\n@ acct · q quit · n/x col±\ns acct · I/T img"
+		keys = "\nj/k move · g/G ends · f feed\nb saved · L lists · / search\nl like · t repost · r reply\nenter open · e read · i zoom\nA alt · o open · R reload\nQ quote · u prof · y copy\n@ acct · q quit · n/x col±\ns acct · I/T img · P post"
 		if m.mode == modeThread {
-			keys = "\n\nj/k move · g/G ends\nl like · t repost · r reply\nQ quote · y copy · e read\ni zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
+			keys = "\n\nj/k move · g/G ends\nl like · t repost · r reply\nQ quote · u prof · e read\ni zoom · A alt text\nR refresh · o browser · / search\ny copy · esc back · q quit"
 		}
 	}
 	images := "images: " + string(m.imageMode)

@@ -35,7 +35,7 @@ func TestFetchPageSeqRoutesNotificationsFeedToNotificationsOperation(t *testing.
 	t.Cleanup(func() { http.DefaultTransport = originalTransport })
 
 	msg := fetchPageSeq(
-		context.Background(), FeedNotifications, "", "", "", "", false, 0, 0, false,
+		context.Background(), FeedNotifications, "", "", "", "", "", false, 0, 0, false,
 	)().(pageMsg)
 	if msg.err != nil {
 		t.Fatalf("notifications fetch: %v", msg.err)

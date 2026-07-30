@@ -77,6 +77,10 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Same as the like above: settle without surfacing anything.
 		m.settleRepost(msg)
 		return m, nil
+	case profileMsg:
+		// Resolution keeps moving under the composer; its pageMsg lands in
+		// this same switch.
+		return m, m.applyProfileResult(msg)
 	case previewMsg:
 		m.storePreview(msg)
 		return m, nil

@@ -60,13 +60,15 @@ const (
 	FeedSearch
 	FeedList
 	FeedNotifications
+	FeedProfile
 )
 
 type ColumnSpec struct {
-	Kind      FeedKind
-	AccountID string
-	Query     string
-	ListID    string
+	Kind          FeedKind
+	AccountID     string
+	Query         string
+	ListID        string
+	ProfileHandle string
 }
 
 type mode int
@@ -283,7 +285,7 @@ func (m Model) Init() tea.Cmd {
 	for i := range m.columns {
 		c := &m.columns[i]
 		cmds = append(cmds, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, false,
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.profileUserID, c.accountID, "", false, c.feedSeq, c.id, false,
 		))
 	}
 	// List names are account-scoped, so one global enumeration could label a
@@ -362,7 +364,7 @@ func loadRequestConfig(mgr requestConfigManager, accountID string) (*config.Conf
 	return mgr.LoadAccount(accountID)
 }
 
-func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, accountID, cursor string, more bool, seq, colID int, auto bool) tea.Cmd {
+func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, profileUserID, accountID, cursor string, more bool, seq, colID int, auto bool) tea.Cmd {
 	return func() tea.Msg {
 		mgr, err := openRequestConfigManager()
 		if err != nil {
@@ -392,6 +394,11 @@ func fetchPageSeq(parent context.Context, feed FeedKind, query, listID, accountI
 			id := listID
 			fetch = func(ctx context.Context, cursor string, count int) (*api.TimelinePage, error) {
 				return client.FetchListTimeline(ctx, id, cursor, count)
+			}
+		case FeedProfile:
+			uid := profileUserID
+			fetch = func(ctx context.Context, cursor string, count int) (*api.TimelinePage, error) {
+				return client.FetchUserTweets(ctx, uid, cursor, count)
 			}
 		}
 		page, err := fetch(ctx, cursor, 30)
@@ -590,6 +597,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyLikeResult(msg)
 	case retweetMsg:
 		return m, m.applyRepostResult(msg)
+	case profileMsg:
+		return m, m.applyProfileResult(msg)
 	case listsMsg:
 		// Outside the picker this only ever arrives from Init's backfill, and a
 		// failure just leaves the ids on screen — the feeds themselves loaded.
@@ -678,6 +687,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "Q":
 		if post, ok := m.currentPost(); ok {
 			return m.beginQuote(post)
+		}
+	case "u":
+		if post, ok := m.currentPost(); ok {
+			return m.beginProfile(post)
 		}
 	case "a":
 		if errors.Is(m.cur().err, api.ErrSessionExpired) {
@@ -966,7 +979,7 @@ func (m *Model) resetColumnFeed(c *column, kind FeedKind) tea.Cmd {
 	c.viewport.YOffset = 0
 	c.viewport.SetContent("")
 	return fetchPageSeq(
-		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, false,
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.profileUserID, c.accountID, "", false, c.feedSeq, c.id, false,
 	)
 }
 
@@ -994,6 +1007,16 @@ func (m *Model) switchFeed() tea.Cmd {
 // poll-driven refreshes so applyFeedPage can stay quiet when nothing changed.
 func (m *Model) refreshCurrentColumn(auto bool) tea.Cmd {
 	c := m.cur()
+	// A profile column whose resolution failed has nothing to fetch yet;
+	// retry the handle→id hop instead of replaying the empty id.
+	if c.feed == FeedProfile && c.profileUserID == "" {
+		c.loading = true
+		c.refreshing = false
+		c.err = nil
+		return m.imageRepaint(tea.Batch(m.spinner.Tick, resolveProfile(
+			m.requestContext(), c.id, c.accountID, c.profileHandle,
+		)))
+	}
 	if len(c.posts) == 0 {
 		c.loading = true
 	} else {
@@ -1001,7 +1024,7 @@ func (m *Model) refreshCurrentColumn(auto bool) tea.Cmd {
 	}
 	c.err = nil
 	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(
-		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, auto,
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.profileUserID, c.accountID, "", false, c.feedSeq, c.id, auto,
 	)))
 }
 
@@ -1024,7 +1047,7 @@ func (m *Model) maybeLoadMore() tea.Cmd {
 	if len(c.posts) > 0 && c.selected >= len(c.posts)-5 && c.cursor != "" && !c.loadingMore {
 		c.loadingMore = true
 		return tea.Batch(m.spinner.Tick, fetchPageSeq(
-			m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, c.cursor, true, c.feedSeq, c.id, false,
+			m.requestContext(), c.feed, c.searchQuery, c.listID, c.profileUserID, c.accountID, c.cursor, true, c.feedSeq, c.id, false,
 		))
 	}
 	return nil

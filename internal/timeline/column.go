@@ -21,19 +21,23 @@ type column struct {
 	searchQuery string
 	listID      string
 	listName    string
-	feedSeq     int
-	posts       []api.TimelinePost
-	cursor      string
-	selected    int
-	starts      []int
-	ends        []int
-	loading     bool
-	loadingMore bool
-	refreshing  bool
-	expanded    bool
-	err         error
-	viewport    viewport.Model
-	wezFrameKey string
+	// profileHandle is shown in the header; profileUserID is the resolved
+	// id UserTweets pages by. Kept separate so pagination never re-resolves.
+	profileHandle string
+	profileUserID string
+	feedSeq       int
+	posts         []api.TimelinePost
+	cursor        string
+	selected      int
+	starts        []int
+	ends          []int
+	loading       bool
+	loadingMore   bool
+	refreshing    bool
+	expanded      bool
+	err           error
+	viewport      viewport.Model
+	wezFrameKey   string
 
 	// thread cluster — the thread overlay is full-screen (decision #2) but its
 	// STATE belongs to the column that opened it, so returning from the overlay
@@ -88,6 +92,7 @@ func (m *Model) configureColumns(specs []ColumnSpec) {
 		c.accountID = spec.AccountID
 		c.searchQuery = spec.Query
 		c.listID = spec.ListID
+		c.profileHandle = spec.ProfileHandle
 		if spec.Kind == FeedList {
 			// A spec carries only the id, so the header shows that until the
 			// lists request lands and names it.
@@ -110,6 +115,7 @@ func (m *Model) addColumn(spec ColumnSpec) tea.Cmd {
 	c.accountID = spec.AccountID
 	c.searchQuery = spec.Query
 	c.listID = spec.ListID
+	c.profileHandle = spec.ProfileHandle
 	if spec.Kind == FeedList {
 		c.listName = spec.ListID
 	}
@@ -118,7 +124,7 @@ func (m *Model) addColumn(spec ColumnSpec) tea.Cmd {
 	m.enforceMultiColumnImageMode()
 	m.resize()
 	cmds := []tea.Cmd{m.spinner.Tick, fetchPageSeq(
-		m.requestContext(), c.feed, c.searchQuery, c.listID, c.accountID, "", false, c.feedSeq, c.id, false,
+		m.requestContext(), c.feed, c.searchQuery, c.listID, c.profileUserID, c.accountID, "", false, c.feedSeq, c.id, false,
 	)}
 	if c.feed == FeedList {
 		cmds = append(cmds, fetchListsCmd(m.requestContext(), c.accountID, false))
