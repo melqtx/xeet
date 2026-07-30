@@ -28,51 +28,101 @@ func (m Model) View() string {
 	if m.mode == modeSearch {
 		return m.viewSearch()
 	}
-	if m.mode == modeReply {
+	if m.mode == modeListPicker {
+		return m.viewListPicker()
+	}
+	if m.mode == modeChoicePicker {
+		return m.viewChoicePicker()
+	}
+	if m.mode == modeReply || m.mode == modeQuote {
 		return m.viewReply()
 	}
 	if m.mode == modeThread {
 		return m.viewThread()
 	}
+	if len(m.columns) > 1 {
+		return m.viewColumns()
+	}
 
 	footer := m.footer()
-	if m.loading && len(m.posts) == 0 {
+	if m.cur().loading && len(m.cur().posts) == 0 {
 		message := m.spinner.View() + " gathering xeets…"
 		loadingFooter := footer
-		if m.feed == FeedSearch {
-			query := ansi.Truncate(m.searchQuery, max(8, m.viewport.Width-20), "…")
+		if m.cur().feed == FeedSearch {
+			query := ansi.Truncate(m.cur().searchQuery, max(8, m.cur().viewport.Width-20), "…")
 			message = m.spinner.View() + " searching “" + query + "”…"
 			loadingFooter = "/ edit search  ·  q quit"
 		}
-		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
+		center := lipgloss.Place(m.cur().viewport.Width, m.cur().viewport.Height, lipgloss.Center, lipgloss.Center,
 			lipgloss.NewStyle().Foreground(lavender).Render(message))
 		return m.shell(center, loadingFooter)
 	}
-	if m.err != nil && len(m.posts) == 0 {
+	if m.cur().err != nil && len(m.cur().posts) == 0 {
 		title := "the cat lost the timeline"
 		errorFooter := m.errorFooter(true)
-		if m.feed == FeedSearch {
+		if m.cur().feed == FeedSearch {
 			title = "search couldn't reach X"
 			errorFooter = m.searchErrorFooter(true)
 		}
-		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(red).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
-				Render(title+"\n\n"+m.err.Error()))
+		center := lipgloss.Place(m.cur().viewport.Width, m.cur().viewport.Height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(red).Width(max(20, m.cur().viewport.Width-8)).Align(lipgloss.Center).
+				Render(title+"\n\n"+m.cur().err.Error()))
 		return m.shell(center, errorFooter)
 	}
-	if m.feed == FeedSearch && len(m.posts) == 0 {
-		query := ansi.Truncate(m.searchQuery, max(8, m.viewport.Width-24), "…")
+	if m.cur().feed == FeedSearch && len(m.cur().posts) == 0 {
+		query := ansi.Truncate(m.cur().searchQuery, max(8, m.cur().viewport.Width-24), "…")
 		message := lipgloss.NewStyle().Foreground(bright).Bold(true).Render("no posts found") + "\n\n" +
-			lipgloss.NewStyle().Foreground(muted).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
+			lipgloss.NewStyle().Foreground(muted).Width(max(20, m.cur().viewport.Width-8)).Align(lipgloss.Center).
 				Render("nothing matched “"+query+"”\ntry fewer words or remove a search operator")
-		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center, message)
+		center := lipgloss.Place(m.cur().viewport.Width, m.cur().viewport.Height, lipgloss.Center, lipgloss.Center, message)
 		return m.shell(center, m.searchEmptyFooter())
 	}
-	return m.shell(m.viewport.View(), footer)
+	return m.shell(m.cur().viewport.View(), footer)
+}
+
+func (m Model) viewColumns() string {
+	first, count := m.visibleColumnRange()
+	width := columnContentWidth(m.width, count)
+	blocks := make([]string, 0, count*2)
+	sepHeight := 0
+	for index := first; index < first+count; index++ {
+		c := &m.columns[index]
+		center := c.viewport.View()
+		switch {
+		case c.loading && len(c.posts) == 0:
+			center = lipgloss.Place(width, c.viewport.Height, lipgloss.Center, lipgloss.Center,
+				lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View()+" gathering xeets…"))
+		case c.err != nil && len(c.posts) == 0:
+			center = lipgloss.Place(width, c.viewport.Height, lipgloss.Center, lipgloss.Center,
+				lipgloss.NewStyle().Foreground(red).Width(max(20, width-8)).Align(lipgloss.Center).
+					Render("the cat lost the timeline\n\n"+c.err.Error()))
+		}
+		block := m.columnHeader(c, width, index == m.focus) + "\n" + center
+		if index > first {
+			blocks = append(blocks, columnSeparator(sepHeight))
+		}
+		blocks = append(blocks, block)
+		sepHeight = max(sepHeight, lipgloss.Height(block))
+	}
+
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, blocks...)
+	totalWidth := width*count + columnGutter*(count-1)
+	hidden := len(m.columns) - count
+	footer := m.footerAtWidth(width)
+	if hidden > 0 {
+		footer = m.footerWithHiddenColumns(width, hidden, footer)
+	}
+	body := m.screenHeader(totalWidth) + "\n" + joined + "\n" +
+		lipgloss.NewStyle().Foreground(muted).Width(totalWidth).Align(lipgloss.Center).Render(footer)
+	left := max(0, (m.width-totalWidth)/2)
+	return lipgloss.NewStyle().MarginLeft(left).Render(body)
 }
 
 func (m Model) shell(center, footer string) string {
 	w := m.contentWidth()
+	if m.mode != modeFeed {
+		w = columnContentWidth(m.width, 1)
+	}
 	body := m.header(w) + "\n\n" + center + "\n" +
 		lipgloss.NewStyle().Foreground(muted).Width(w).Align(lipgloss.Center).Render(footer)
 	// Keep two columns clear on the right. Filling the terminal's final column
@@ -81,91 +131,209 @@ func (m Model) shell(center, footer string) string {
 	return lipgloss.NewStyle().MarginLeft(left).Render(body)
 }
 
+const columnGutter = 2
+
+// columnSeparator fills the gutter between two columns with a vertical bar
+// instead of blank padding, so the eye can tell where one column ends.
+func columnSeparator(height int) string {
+	bar := lipgloss.NewStyle().Foreground(muted).Render("│")
+	lines := make([]string, max(1, height))
+	for i := range lines {
+		lines[i] = bar
+	}
+	return lipgloss.NewStyle().Width(columnGutter).Render(strings.Join(lines, "\n"))
+}
+
+// columnContentWidth deliberately keeps all feed columns equal-width: the
+// post-ID-keyed previews map depends on that invariant. Unequal panes would
+// require per-column previews to avoid alternating width-based refetches.
+func columnContentWidth(totalWidth, ncols int) int {
+	ncols = max(1, ncols)
+	usable := totalWidth - 4
+	width := (usable - columnGutter*(ncols-1)) / ncols
+	return min(76, max(30, width))
+}
+
 func (m Model) contentWidth() int {
-	w := m.width - 4
-	if w > 76 {
-		w = 76
+	return columnContentWidth(m.width, len(m.columns))
+}
+
+func (m Model) visibleColumnRange() (int, int) {
+	configured := len(m.columns)
+	if configured == 0 {
+		return 0, 0
 	}
-	if w < 30 {
-		w = 30
-	}
-	return w
+	usable := max(0, m.width-4)
+	count := min(configured, max(1, usable/32))
+	first := min(max(0, m.focus-count+1), configured-count)
+	return first, count
+}
+
+func (m Model) visibleColumnWidth() int {
+	_, count := m.visibleColumnRange()
+	return columnContentWidth(m.width, count)
 }
 
 func (m Model) header(width int) string {
+	c := m.cur()
+	status := m.columnStatus(c, width)
+	if account := m.activeAccountLabel(); account != "" {
+		status = truncateRunes(account+" · "+status, max(9, width-12))
+	}
+	return m.catHeader(c, width, status)
+}
+
+func (m Model) columnHeader(c *column, width int, focused bool) string {
+	status := m.columnFeedLabel(c, width)
+	if account := m.columnAccountHandle(c); account != "" {
+		status = ansi.Truncate(account+" · "+status, max(9, width-2), "…")
+	}
+	if focused {
+		return lipgloss.NewStyle().
+			Foreground(bright).
+			Background(blue).
+			Bold(true).
+			Width(width).
+			Render("▸ " + status)
+	}
+	return lipgloss.NewStyle().
+		Foreground(muted).
+		Width(width).
+		Render("  " + status)
+}
+
+// columnAccountHandle names the account a column reads from, but only when
+// the user juggles more than one -- a single account would repeat what the
+// screen header already says.
+func (m Model) columnAccountHandle(c *column) string {
+	if len(m.accounts) <= 1 {
+		return ""
+	}
+	id := m.columnAccountID(c)
+	for _, account := range m.accounts {
+		if account.UserID == id {
+			return accountInfoLabel(account)
+		}
+	}
+	return ""
+}
+
+func (m Model) columnFeedLabel(c *column, width int) string {
 	status := "for you"
-	switch m.feed {
+	switch c.feed {
 	case FeedForYou:
 		status = "for you"
 	case FeedFollowing:
 		status = "following"
 	case FeedBookmarks:
 		status = "bookmarks"
+	case FeedNotifications:
+		status = "notifications"
 	case FeedSearch:
-		status = ansi.Truncate("search · “"+m.searchQuery+"”", max(9, width-12), "…")
+		status = ansi.Truncate("search · “"+c.searchQuery+"”", max(9, width-12), "…")
+	case FeedList:
+		status = ansi.Truncate("list · "+c.listName, max(9, width-12), "…")
+	case FeedProfile:
+		status = ansi.Truncate("@"+c.profileHandle, max(9, width-12), "…")
 	}
+	return status
+}
+
+func (m Model) columnStatus(c *column, width int) string {
+	status := m.columnFeedLabel(c, width)
 	if m.mode == modeThread {
 		status = "replies"
-		if root, ok := m.threadRootPost(); ok && root.Handle != "" {
+		if root, ok := c.threadRootPost(); ok && root.Handle != "" {
 			status = truncateRunes("replies to @"+root.Handle, max(9, width-12))
 		}
 	}
-	if m.mode == modeThread && (m.threadLoading || m.threadMore) {
+	if m.mode == modeThread && (c.threadLoading || c.threadMore) {
 		status = m.spinner.View() + " loading replies"
-	} else if m.refreshing {
+	} else if c.refreshing {
 		status = m.spinner.View() + " refreshing"
-	} else if m.loadingMore {
+	} else if c.loadingMore {
 		status = m.spinner.View() + " loading more"
 	}
+	return status
+}
+
+func (m Model) screenHeader(width int) string {
+	return m.catHeader(m.cur(), width, m.activeAccountLabel())
+}
+
+func (m Model) catHeader(c *column, width int, status string) string {
 	face := "( o.o )"
-	if m.err != nil || (m.mode == modeThread && m.threadErr != nil) {
+	if c.err != nil || (m.mode == modeThread && c.threadErr != nil) {
 		face = "( >.< )"
+	}
+	secondLine := lipgloss.NewStyle().Foreground(pink).Render(face)
+	if status != "" {
+		secondLine += lipgloss.NewStyle().Foreground(muted).Render("   " + status)
 	}
 	cat := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
 		lipgloss.NewStyle().Foreground(blue).Bold(true).Render("   xeet") + "\n" +
-		lipgloss.NewStyle().Foreground(pink).Render(face) +
-		lipgloss.NewStyle().Foreground(muted).Render("   "+status)
+		secondLine
 	return lipgloss.NewStyle().Width(width).Render(cat)
 }
 
 func (m Model) footer() string {
+	return m.footerAtWidth(m.contentWidth())
+}
+
+func (m Model) footerAtWidth(width int) string {
 	if m.toast != "" {
 		return m.toast
 	}
-	if m.err != nil {
-		if m.feed == FeedSearch {
+	if m.cur().err != nil {
+		if m.cur().feed == FeedSearch {
 			return m.searchErrorFooter(false)
 		}
 		return m.errorFooter(false)
 	}
 	position := 0
-	if len(m.posts) > 0 {
-		position = m.selected + 1
+	if len(m.cur().posts) > 0 {
+		position = m.cur().selected + 1
 	}
-	if m.feed == FeedSearch {
+	if m.cur().feed == FeedSearch {
 		var footer string
-		if m.expanded {
-			footer = fmt.Sprintf("%d/%d · / edit · e collapse · o browser · ? help", position, len(m.posts))
+		if m.cur().expanded {
+			footer = fmt.Sprintf("%d/%d · / edit · e collapse · o browser · ? help", position, len(m.cur().posts))
 		} else {
-			footer = fmt.Sprintf("%d/%d · / edit search · R refresh · enter replies · ? help", position, len(m.posts))
+			footer = fmt.Sprintf("%d/%d · / edit search · R refresh · enter replies · ? help", position, len(m.cur().posts))
 		}
-		if ansi.StringWidth(footer) > m.contentWidth() {
-			return fmt.Sprintf("%d/%d · / edit · ? help", position, len(m.posts))
+		if ansi.StringWidth(footer) > width {
+			return fmt.Sprintf("%d/%d · / edit · ? help", position, len(m.cur().posts))
 		}
 		return footer
 	}
-	if m.contentWidth() < 50 || len(m.posts) == 0 {
-		return fmt.Sprintf("%d/%d  ·  ? help", position, len(m.posts))
+	if width < 50 || len(m.cur().posts) == 0 {
+		return fmt.Sprintf("%d/%d  ·  ? help", position, len(m.cur().posts))
 	}
-	if m.expanded {
-		return fmt.Sprintf("%d/%d · e collapse · o browser · ? help", position, len(m.posts))
+	if m.cur().expanded {
+		return fmt.Sprintf("%d/%d · e collapse · o browser · ? help", position, len(m.cur().posts))
 	}
-	return fmt.Sprintf("%d/%d · enter replies · e read · r reply · ? help", position, len(m.posts))
+	return fmt.Sprintf("%d/%d · enter replies · e read · r reply · ? help", position, len(m.cur().posts))
+}
+
+func (m Model) footerWithHiddenColumns(width, hidden int, base string) string {
+	note := fmt.Sprintf("+%d more (widen terminal)", hidden)
+	if lipgloss.Width(base)+3+lipgloss.Width(note) <= width {
+		return base + " · " + note
+	}
+	position := 0
+	if len(m.cur().posts) > 0 {
+		position = m.cur().selected + 1
+	}
+	compact := fmt.Sprintf("%d/%d · %s", position, len(m.cur().posts), note)
+	if lipgloss.Width(compact) <= width {
+		return compact
+	}
+	return note
 }
 
 func (m Model) errorFooter(includeQuit bool) string {
 	parts := []string{"R retry"}
-	if errors.Is(m.err, api.ErrSessionExpired) {
+	if errors.Is(m.cur().err, api.ErrSessionExpired) {
 		parts = append([]string{"a reconnect"}, parts...)
 	}
 	if includeQuit {
@@ -180,7 +348,7 @@ func (m Model) searchErrorFooter(includeQuit bool) string {
 		edit = "/ edit"
 	}
 	parts := []string{"R retry", edit}
-	if errors.Is(m.err, api.ErrSessionExpired) {
+	if errors.Is(m.cur().err, api.ErrSessionExpired) {
 		parts = append([]string{"a reconnect"}, parts...)
 	}
 	if includeQuit {
@@ -199,62 +367,63 @@ func (m Model) searchEmptyFooter() string {
 
 func (m Model) viewThread() string {
 	footer := m.threadFooter()
-	if m.threadLoading && len(m.threadPosts) <= 1 {
-		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
+	if m.cur().threadLoading && len(m.cur().threadPosts) <= 1 {
+		center := lipgloss.Place(m.cur().viewport.Width, m.cur().viewport.Height, lipgloss.Center, lipgloss.Center,
 			lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View()+" gathering replies…"))
 		return m.shell(center, footer)
 	}
 	// The thread opens pre-seeded with the focal post, so a fetch failure
 	// almost never leaves the list empty. Show the error over the posts we
 	// have instead of hiding it behind a bare retry footer.
-	if m.threadErr != nil {
-		center := lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(red).Width(max(20, m.viewport.Width-8)).Align(lipgloss.Center).
-				Render("the cat lost the replies\n\n"+m.threadErr.Error()))
+	if m.cur().threadErr != nil {
+		center := lipgloss.Place(m.cur().viewport.Width, m.cur().viewport.Height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(red).Width(max(20, m.cur().viewport.Width-8)).Align(lipgloss.Center).
+				Render("the cat lost the replies\n\n"+m.cur().threadErr.Error()))
 		return m.shell(center, footer)
 	}
-	return m.shell(m.viewport.View(), footer)
+	return m.shell(m.cur().viewport.View(), footer)
 }
 
 func (m Model) threadFooter() string {
 	if m.toast != "" {
 		return m.toast
 	}
-	if m.threadErr != nil {
+	if m.cur().threadErr != nil {
 		parts := []string{"R retry"}
-		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+		if errors.Is(m.cur().threadErr, api.ErrSessionExpired) {
 			parts = append([]string{"a reconnect"}, parts...)
 		}
 		parts = append(parts, "esc back")
 		return strings.Join(parts, "  ·  ")
 	}
 	position := 0
-	if len(m.threadPosts) > 0 {
-		position = m.selected + 1
+	if len(m.cur().threadPosts) > 0 {
+		position = m.cur().selected + 1
 	}
-	return fmt.Sprintf("%d/%d · r reply · e read · esc back · ? help", position, len(m.threadPosts))
+	return fmt.Sprintf("%d/%d · r reply · e read · esc back · ? help", position, len(m.cur().threadPosts))
 }
 
 func (m Model) renderThreadContent() (string, []int, []int) {
-	if len(m.threadPosts) == 0 {
-		return lipgloss.NewStyle().Foreground(muted).Width(m.contentWidth()).Align(lipgloss.Center).Render("no replies yet · press r to start one"), nil, nil
+	width := columnContentWidth(m.width, 1)
+	if len(m.cur().threadPosts) == 0 {
+		return lipgloss.NewStyle().Foreground(muted).Width(width).Align(lipgloss.Center).Render("no replies yet · press r to start one"), nil, nil
 	}
-	handles := make(map[string]string, len(m.threadPosts))
-	for _, item := range m.threadPosts {
+	handles := make(map[string]string, len(m.cur().threadPosts))
+	for _, item := range m.cur().threadPosts {
 		handles[item.ID] = item.Handle
 	}
-	pieces := make([]string, 0, 2*len(m.threadPosts))
-	starts := make([]int, 0, len(m.threadPosts))
-	ends := make([]int, 0, len(m.threadPosts))
+	pieces := make([]string, 0, 2*len(m.cur().threadPosts))
+	starts := make([]int, 0, len(m.cur().threadPosts))
+	ends := make([]int, 0, len(m.cur().threadPosts))
 	line := 0
-	for i, item := range m.threadPosts {
+	for i, item := range m.cur().threadPosts {
 		// The gap between posts carries this post's ancestor rails so the
 		// conversation reads as one unbroken line down the left.
 		if i > 0 {
 			pieces = append(pieces, threadSpacer(item.Depth))
 			line++
 		}
-		block := m.renderPost(item.TimelinePost, i == m.selected, true, item.Depth)
+		block := m.renderPostForColumn(m.cur(), item.TimelinePost, i == m.cur().selected, true, item.Depth, width, true)
 		if context := m.replyContext(i, handles); context != "" {
 			block = context + "\n" + block
 		}
@@ -291,7 +460,7 @@ func threadRail(depth int, selected bool) string {
 		own = "  "
 	}
 	if selected {
-		own = lipgloss.NewStyle().Foreground(selectionAccent(depth)).Render("▎") + " "
+		own = lipgloss.NewStyle().Foreground(selectionAccent(depth)).Bold(true).Render("▌") + " "
 	}
 	return strings.Repeat(railBar(), railLevels(depth)) + own
 }
@@ -319,11 +488,11 @@ func selectionAccent(depth int) lipgloss.Color {
 // parent is not the post directly above it, or one nested past maxRailDepth,
 // where every further level draws at the same indent.
 func (m Model) replyContext(index int, handles map[string]string) string {
-	item := m.threadPosts[index]
+	item := m.cur().threadPosts[index]
 	if index == 0 || item.Depth <= 1 {
 		return ""
 	}
-	if item.InReplyToID == m.threadPosts[index-1].ID && item.Depth <= maxRailDepth {
+	if item.InReplyToID == m.cur().threadPosts[index-1].ID && item.Depth <= maxRailDepth {
 		return ""
 	}
 	handle := handles[item.InReplyToID]
@@ -335,39 +504,43 @@ func (m Model) replyContext(index int, handles map[string]string) string {
 }
 
 func (m Model) renderFeedContent() (string, []int, []int) {
-	if len(m.posts) == 0 {
-		return lipgloss.NewStyle().Foreground(muted).Width(m.contentWidth()).Align(lipgloss.Center).Render("the timeline is quiet"), nil, nil
+	return m.renderFeedColumnContent(m.cur(), m.contentWidth(), true)
+}
+
+func (m Model) renderFeedColumnContent(c *column, width int, focused bool) (string, []int, []int) {
+	if len(c.posts) == 0 {
+		return lipgloss.NewStyle().Foreground(muted).Width(width).Align(lipgloss.Center).Render("the timeline is quiet"), nil, nil
 	}
-	blocks := make([]string, 0, len(m.posts))
-	starts := make([]int, 0, len(m.posts))
-	ends := make([]int, 0, len(m.posts))
+	blocks := make([]string, 0, len(c.posts))
+	starts := make([]int, 0, len(c.posts))
+	ends := make([]int, 0, len(c.posts))
 	line := 0
-	for i, post := range m.posts {
-		showImage := abs(i-m.selected) <= inlineImageRadius
+	for i, post := range c.posts {
+		showImage := abs(i-c.selected) <= inlineImageRadius
 		if m.imageMode == imageModeNative || m.imageMode == imageModeWezTerm {
 			// Native previews are cheap escape sequences rather than large ANSI
 			// mosaics. Keep cached images in the feed so they do not disappear as
 			// soon as the selection moves away from their post.
 			showImage = true
 		}
-		block := m.renderPost(post, i == m.selected, showImage, feedDepth)
+		block := m.renderPostForColumn(c, post, i == c.selected, showImage, feedDepth, width, focused)
 		height := lipgloss.Height(block)
 		starts = append(starts, line)
 		ends = append(ends, line+height-1)
 		blocks = append(blocks, block)
 		line += height
-		if i < len(m.posts)-1 {
+		if i < len(c.posts)-1 {
 			line++
 		}
 	}
 	return strings.Join(blocks, "\n\n"), starts, ends
 }
 
-// renderPost draws one post. depth is its place in a conversation: feedDepth in
-// the timeline, zero for a thread's focal post, and deeper for each reply level,
-// which shifts the whole block right behind its rail.
-func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, depth int) string {
-	width := m.contentWidth()
+// renderPostForColumn draws one post at the given width. depth is its place in a
+// conversation: feedDepth in the timeline, zero for a thread's focal post, and
+// deeper for each reply level, which shifts the whole block right behind its
+// rail. focused dims the post when it belongs to a column that is not in focus.
+func (m Model) renderPostForColumn(c *column, post api.TimelinePost, selected, nearSelection bool, depth, width int, focused bool) string {
 	name := post.AuthorName
 	if name == "" {
 		name = "someone"
@@ -382,6 +555,13 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 		nameColor = bright
 		textColor = bright
 		handleColor = selectionAccent(depth)
+	}
+	if selected && !focused {
+		nameColor = muted
+		textColor = dim
+		handleColor = muted
+		gutter = strings.Repeat(railBar(), railLevels(depth)) +
+			lipgloss.NewStyle().Foreground(muted).Bold(true).Render("▌") + " "
 	}
 	header := gutter +
 		lipgloss.NewStyle().Foreground(nameColor).Bold(true).Render(name) + "  " +
@@ -403,7 +583,7 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 	if body != "" {
 		wrapped := lipgloss.NewStyle().Width(max(12, width-pad)).Render(highlightEntities(body, textColor))
 		textLines := strings.Split(wrapped, "\n")
-		if !(selected && m.expanded) && len(textLines) > 4 {
+		if !(selected && c.expanded) && len(textLines) > 4 {
 			textLines = textLines[:4]
 			textLines[3] = ansi.Truncate(textLines[3], max(2, width-pad-2), "…")
 		}
@@ -505,8 +685,21 @@ func (m Model) actionLine(post api.TimelinePost) string {
 	if post.ReplyCount > 0 {
 		segments = append(segments, quiet.Render("↩ "+formatCount(post.ReplyCount)))
 	}
-	if post.RepostCount > 0 {
-		segments = append(segments, quiet.Render("⟳ "+formatCount(post.RepostCount)))
+	// A reposted post shows its ⟳ in green even at zero reposts, mirroring how
+	// the like heart switches color instead of hiding.
+	repostedStyle := lipgloss.NewStyle().Foreground(green)
+	if post.RepostCount > 0 || post.Reposted {
+		repost := "⟳ " + formatCount(post.RepostCount)
+		if post.Reposted {
+			segments = append(segments, repostedStyle.Render(repost))
+		} else {
+			segments = append(segments, quiet.Render(repost))
+		}
+	}
+	// Bookmarks publish no count, so the marker only appears while set —
+	// unlike the heart and ⟳ it has nothing to show at zero.
+	if post.Bookmarked {
+		segments = append(segments, liked.Render("🔖"))
 	}
 	if views, err := strconv.Atoi(post.ViewCount); err == nil && views > 0 {
 		segments = append(segments, quiet.Render(formatCount(views)+" views"))
@@ -532,30 +725,36 @@ func highlightEntities(text string, base lipgloss.Color) string {
 	mention := lipgloss.NewStyle().Foreground(blue)
 	hashtag := lipgloss.NewStyle().Foreground(lavender)
 	link := lipgloss.NewStyle().Foreground(blue).Underline(true)
-	words := strings.Fields(text)
-	for i, word := range words {
-		switch {
-		case len(word) > 1 && word[0] == '@':
-			words[i] = mention.Render(word)
-		case len(word) > 1 && word[0] == '#':
-			words[i] = hashtag.Render(word)
-		case strings.HasPrefix(word, "https://") || strings.HasPrefix(word, "http://"):
-			trimmed := strings.TrimPrefix(strings.TrimPrefix(word, "https://"), "http://")
-			words[i] = link.Render(trimmed)
-		default:
-			words[i] = baseStyle.Render(word)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		words := strings.Fields(line)
+		for j, word := range words {
+			switch {
+			case len(word) > 1 && word[0] == '@':
+				words[j] = mention.Render(word)
+			case len(word) > 1 && word[0] == '#':
+				words[j] = hashtag.Render(word)
+			case strings.HasPrefix(word, "https://") || strings.HasPrefix(word, "http://"):
+				trimmed := strings.TrimPrefix(strings.TrimPrefix(word, "https://"), "http://")
+				words[j] = link.Render(trimmed)
+			default:
+				words[j] = baseStyle.Render(word)
+			}
 		}
+		lines[i] = strings.Join(words, " ")
 	}
-	return strings.Join(words, " ")
+	return strings.Join(lines, "\n")
 }
 
 // stripTrailingMediaLink removes the t.co link X appends to a post's text
 // when its media is attached; the timeline renders the image itself instead.
+// The trailing check looks for newlines too: cleanText now preserves them,
+// and a link followed by another line is not the trailing media link.
 func stripTrailingMediaLink(text string) string {
-	if index := strings.LastIndex(text, " https://t.co/"); index >= 0 && !strings.Contains(text[index+1:], " ") {
+	if index := strings.LastIndex(text, " https://t.co/"); index >= 0 && !strings.ContainsAny(text[index+1:], " \n") {
 		return text[:index]
 	}
-	if strings.HasPrefix(text, "https://t.co/") && !strings.Contains(text, " ") {
+	if strings.HasPrefix(text, "https://t.co/") && !strings.ContainsAny(text, " \n") {
 		return ""
 	}
 	return text
@@ -582,8 +781,11 @@ func compactCount(value, unit int, suffix string) string {
 }
 
 func (m Model) viewReply() string {
-	w := m.contentWidth()
+	w := columnContentWidth(m.width, 1)
 	title := "replying to @" + m.replyPost.Handle
+	if m.mode == modeQuote {
+		title = "quoting @" + m.replyPost.Handle
+	}
 	original := lipgloss.NewStyle().Foreground(muted).Width(max(20, w-8)).Render(cleanText(m.replyPost.Text))
 	originalLines := strings.Split(original, "\n")
 	if len(originalLines) > 2 {
@@ -630,7 +832,7 @@ func (m Model) viewReply() string {
 }
 
 func (m Model) viewSearch() string {
-	w := m.contentWidth()
+	w := columnContentWidth(m.width, 1)
 	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("search posts")
 	description := "find words, accounts, or exact phrases"
 	if m.width < 48 {
@@ -660,41 +862,143 @@ func (m Model) viewSearch() string {
 }
 
 func (m Model) searchBackLabel() string {
+	if m.searchFor == targetNewColumn {
+		return "cancel"
+	}
 	if m.searchReturn == modeThread {
 		return "back to replies"
 	}
-	switch m.feed {
+	switch m.cur().feed {
 	case FeedFollowing:
 		return "back to following"
 	case FeedBookmarks:
 		return "back to bookmarks"
+	case FeedNotifications:
+		return "back to notifications"
 	case FeedSearch:
-		if m.searchQuery == "" && len(m.posts) == 0 {
+		if m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 			return "quit"
 		}
 		return "back to results"
+	case FeedProfile:
+		return "back to @" + m.cur().profileHandle
 	default:
 		return "back to for you"
 	}
 }
 
 func (m Model) searchBackShortLabel() string {
+	if m.searchFor == targetNewColumn {
+		return "cancel"
+	}
 	if m.searchReturn == modeThread {
 		return "replies"
 	}
-	switch m.feed {
+	switch m.cur().feed {
 	case FeedFollowing:
 		return "following"
 	case FeedBookmarks:
 		return "bookmarks"
+	case FeedNotifications:
+		return "notifications"
 	case FeedSearch:
-		if m.searchQuery == "" && len(m.posts) == 0 {
+		if m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 			return "quit"
 		}
 		return "results"
+	case FeedProfile:
+		return "@" + m.cur().profileHandle
 	default:
 		return "for you"
 	}
+}
+
+func (m Model) viewListPicker() string {
+	w := columnContentWidth(m.width, 1)
+	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("lists")
+	var body string
+	switch {
+	case m.listPickerLoading:
+		body = lipgloss.NewStyle().Foreground(lavender).Render(m.spinner.View() + " loading lists…")
+	case m.listPickerErr != nil:
+		body = lipgloss.NewStyle().Foreground(red).Width(max(20, w-8)).Align(lipgloss.Center).
+			Render("couldn't load lists\n\n" + m.listPickerErr.Error())
+	case len(m.listPicker) == 0:
+		body = lipgloss.NewStyle().Foreground(muted).Render("no lists found")
+	default:
+		visible := min(len(m.listPicker), max(1, m.height-9))
+		start := max(0, m.listPickerSel-visible/2)
+		start = min(start, len(m.listPicker)-visible)
+		rows := make([]string, 0, visible)
+		for index := start; index < start+visible; index++ {
+			list := m.listPicker[index]
+			marker := "  "
+			nameStyle := lipgloss.NewStyle().Foreground(bright)
+			if index == m.listPickerSel {
+				marker = "› "
+				nameStyle = nameStyle.Foreground(blue).Bold(true)
+			}
+			members := fmt.Sprintf("%d members", list.MemberCount)
+			if list.MemberCount == 1 {
+				members = "1 member"
+			}
+			privacy := "public"
+			if list.IsPrivate {
+				privacy = "private"
+			}
+			row := marker + nameStyle.Render(list.Name) +
+				lipgloss.NewStyle().Foreground(muted).Render(" · "+members+" · "+privacy)
+			rows = append(rows, ansi.Truncate(row, max(10, w-8), "…"))
+		}
+		body = strings.Join(rows, "\n")
+	}
+	panel := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(blue).
+		Padding(0, 1).Width(w - 4).Render(body)
+	hintText := "j/k move · enter select · esc cancel"
+	if len(m.listPicker) > max(1, m.height-9) {
+		hintText = fmt.Sprintf("%d/%d · %s", m.listPickerSel+1, len(m.listPicker), hintText)
+	}
+	hint := lipgloss.NewStyle().Foreground(muted).Render(hintText)
+	content := title + "\n\n" + panel + "\n\n" + hint
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func (m Model) viewChoicePicker() string {
+	w := columnContentWidth(m.width, 1)
+	title := lipgloss.NewStyle().Foreground(pink).Bold(true).Render(m.picker.title)
+	var body string
+	if len(m.picker.items) == 0 {
+		body = lipgloss.NewStyle().Foreground(muted).Render("nothing to choose from")
+	} else {
+		visible := min(len(m.picker.items), max(1, m.height-9))
+		start := max(0, m.picker.sel-visible/2)
+		start = min(start, len(m.picker.items)-visible)
+		rows := make([]string, 0, visible)
+		for index := start; index < start+visible; index++ {
+			item := m.picker.items[index]
+			marker := "  "
+			nameStyle := lipgloss.NewStyle().Foreground(bright)
+			if index == m.picker.sel {
+				marker = "› "
+				nameStyle = nameStyle.Foreground(blue).Bold(true)
+			}
+			row := marker + nameStyle.Render(item.label)
+			if item.hint != "" {
+				row += lipgloss.NewStyle().Foreground(muted).Render(" · " + item.hint)
+			}
+			rows = append(rows, ansi.Truncate(row, max(10, w-8), "…"))
+		}
+		body = strings.Join(rows, "\n")
+	}
+	panel := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(blue).
+		Padding(0, 1).Width(w - 4).Render(body)
+	hintText := "j/k move · enter select · esc cancel"
+	if len(m.picker.items) > max(1, m.height-9) {
+		hintText = fmt.Sprintf("%d/%d · %s", m.picker.sel+1, len(m.picker.items), hintText)
+	}
+	hint := lipgloss.NewStyle().Foreground(muted).Render(hintText)
+	content := title + "\n\n" + panel + "\n\n" + hint
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m Model) viewZoom() string {
@@ -805,18 +1109,22 @@ func (m Model) viewAltText() string {
 }
 
 func (m Model) viewHelp() string {
-	w := m.contentWidth()
+	w := columnContentWidth(m.width, 1)
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nt           repost / unrepost\nB           bookmark / unbookmark\nr           reply\nQ           quote post\nu           author profile\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nt           repost / unrepost\nB           bookmark / unbookmark\nr           reply to selected\nQ           quote selected\nu           author profile\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · ^L redraw\nb bookmarks · q quit"
+		// One leading newline, not two: the repost entry makes the longest line
+		// wrap, and the extra row would push the box's title off a short screen.
+		// Content stays at eight lines for the same reason; g/G ends is the one
+		// full-help entry dropped to make room for B.
+		keys = "\nj/k move · f feed · b saved\nL lists · / search · @ acct\nl like · t repost · B save\nr reply · Q quote · u prof\nenter open · e read · i zoom\nA alt · o open · R reload\ny copy · n/x col± · s acct\nI/T img · P post · q quit"
 		if m.mode == modeThread {
-			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
+			keys = "\n\nj/k move · g/G ends\nl like · t repost · B save\nr reply · Q quote · u prof\ne read · i zoom · A alt\nR reload · o open · / search\ny copy · esc back · q quit"
 		}
 	}
 	images := "images: " + string(m.imageMode)

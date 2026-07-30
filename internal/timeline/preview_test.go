@@ -73,6 +73,57 @@ func TestNativeModeDetection(t *testing.T) {
 	}
 }
 
+func TestMultiColumnForcesANSIOnWezTermWithVisibleNote(t *testing.T) {
+	setWezTermEnvironment(t)
+	m := NewWithImageMode("native")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
+	m.width, m.height = 120, 32
+	m.resize()
+	m.help = true
+
+	if m.imageMode != imageModeANSI {
+		t.Fatalf("multi-column WezTerm mode=%q, want ansi", m.imageMode)
+	}
+	if m.imageNote != multiColumnImageNote {
+		t.Fatalf("multi-column WezTerm note=%q", m.imageNote)
+	}
+	view := strings.Join(strings.Fields(ansi.Strip(m.View())), " ")
+	if !strings.Contains(view, "multi-column:") || !strings.Contains(view, "back to ANSI") {
+		t.Fatalf("image downgrade note is not visible in help:\n%s", view)
+	}
+}
+
+func TestWezTermPathNeverRunsMultiColumn(t *testing.T) {
+	setWezTermEnvironment(t)
+	m := NewWithImageMode("native")
+	m.configureColumns(repeatedColumnSpecs(1, FeedForYou, "", ""))
+	if m.imageMode != imageModeWezTerm {
+		t.Fatalf("single-column WezTerm mode=%q", m.imageMode)
+	}
+	_ = m.imageFrameKey()
+
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
+	if m.imageMode == imageModeWezTerm {
+		t.Fatal("iTerm2-protocol renderer survived multi-column configuration")
+	}
+	if cmd := m.imageRepaint(); cmd != nil {
+		t.Fatal("multi-column mode still scheduled an iTerm2 full-screen repaint")
+	}
+}
+
+func setWezTermEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("ZELLIJ", "")
+	t.Setenv("TMUX", "")
+	t.Setenv("__CFBundleIdentifier", "")
+	t.Setenv("LC_TERMINAL", "")
+	t.Setenv("ITERM_SESSION_ID", "")
+	t.Setenv("WEZTERM_PANE", "")
+	t.Setenv("WEZTERM_EXECUTABLE", "")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("TERM_PROGRAM", "WezTerm")
+}
+
 func TestEmbeddedGhosttyHostDowngrades(t *testing.T) {
 	t.Setenv("ZELLIJ", "")
 	t.Setenv("TMUX", "")
@@ -113,8 +164,8 @@ func TestKittyPlaceholderBlockClampsToDiacriticsTable(t *testing.T) {
 
 func TestZoomOpensFetchesAndCloses(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(2)
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(2)
 	m.syncViewport()
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
@@ -129,7 +180,7 @@ func TestZoomOpensFetchesAndCloses(t *testing.T) {
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = next.(Model)
-	if m.selected != 0 {
+	if m.cur().selected != 0 {
 		t.Fatal("feed keys leaked through the zoom view")
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -146,8 +197,8 @@ func TestZoomOpensFetchesAndCloses(t *testing.T) {
 
 func TestZoomWithoutMediaIsIgnored(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{{ID: "1", Text: "text only", Handle: "cat"}}
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{ID: "1", Text: "text only", Handle: "cat"}}
 	m.syncViewport()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
@@ -168,6 +219,16 @@ func TestKittyPlaceholderBlockOccupiesCells(t *testing.T) {
 	}
 	if !strings.Contains(block, "\x1b[38;2;3;2;1m") {
 		t.Fatal("native placeholder does not encode its 24-bit image id as truecolor")
+	}
+}
+
+func TestNativePlaceholderRowsMeasureAtDeclaredWidth(t *testing.T) {
+	m := NewWithImageMode("native")
+	preview := previewState{nativePath: "/tmp/image.png", imageID: 0x030201, columns: 37, rows: 6}
+	for rowIndex, row := range strings.Split(m.nativePreviewBlock(preview), "\n") {
+		if width := lipgloss.Width(row); width != preview.columns {
+			t.Fatalf("native placeholder row %d width=%d, want %d", rowIndex, width, preview.columns)
+		}
 	}
 }
 
@@ -238,8 +299,8 @@ func TestDownscaleForCellsKeepsSmallImages(t *testing.T) {
 func TestWezRepaintClearsOnlyWhenFrameMoves(t *testing.T) {
 	m := New()
 	m.imageMode = imageModeWezTerm
-	m.loading = false
-	m.posts = mediaPosts(6)
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(6)
 	m.width, m.height = 80, 24
 	m.resize()
 
@@ -254,7 +315,7 @@ func TestWezRepaintClearsOnlyWhenFrameMoves(t *testing.T) {
 		t.Fatal("unmoved frame still cleared the screen (iTerm2 flicker)")
 	}
 
-	m.viewport.YOffset += 3
+	m.cur().viewport.YOffset += 3
 	next, cmd = m.Update(wezRepaintMsg{})
 	m = next.(Model)
 	if cmd == nil {
@@ -275,8 +336,8 @@ func TestWezRepaintIgnoredOutsideWezTermMode(t *testing.T) {
 func TestWezTermTimelineFrameKeepsStableHeight(t *testing.T) {
 	m := New()
 	m.imageMode = imageModeWezTerm
-	m.loading = false
-	m.posts = []api.TimelinePost{{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{
 		ID: "1", AuthorName: "Alice", Handle: "alice", Text: "image post",
 		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/a"}},
 	}}
@@ -294,8 +355,8 @@ func TestWezTermTimelineFrameKeepsStableHeight(t *testing.T) {
 
 func TestNativeFrameDoesNotDeleteCachedImages(t *testing.T) {
 	m := NewWithImageMode("native")
-	m.loading = false
-	m.posts = []api.TimelinePost{{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{
 		ID: "1", AuthorName: "Alice", Handle: "alice", Text: "image post",
 		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/a"}},
 	}}
@@ -314,9 +375,9 @@ func TestNativeFrameDoesNotDeleteCachedImages(t *testing.T) {
 func TestNativeCachedPreviewStaysRenderedAwayFromSelection(t *testing.T) {
 	m := NewWithImageMode("native")
 	m.imageMode = imageModeNative
-	m.loading = false
-	m.posts = mediaPosts(inlineImageRadius + 3)
-	m.selected = len(m.posts) - 1
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(inlineImageRadius + 3)
+	m.cur().selected = len(m.cur().posts) - 1
 	m.previews["p0"] = previewState{nativePath: "/tmp/image.png", imageID: 7, columns: 20, rows: 4}
 	content, _, _ := m.renderFeedContent()
 	if !strings.Contains(content, "\x1b_Ga=t") {
@@ -336,8 +397,8 @@ func TestBubbleTeaTruncationPreservesNativePlacement(t *testing.T) {
 
 func TestSelectedPostRequestsInlinePreview(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{{
+	m.cur().loading = false
+	m.cur().posts = []api.TimelinePost{{
 		ID: "123", Text: "photo",
 		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/abc", Type: "photo"}},
 	}}
@@ -346,8 +407,51 @@ func TestSelectedPostRequestsInlinePreview(t *testing.T) {
 	if cmd == nil || !m.previews["123"].loading {
 		t.Fatal("inline preview was not requested")
 	}
-	if !strings.Contains(m.viewport.View(), "loading image") {
+	if !strings.Contains(m.cur().viewport.View(), "loading image") {
 		t.Fatal("loading state is not rendered in the timeline")
+	}
+}
+
+func TestPreviewRequestsCoverVisibleNonFocusedColumns(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
+	m.width, m.height = 120, 30
+	for index, id := range []string{"left", "right"} {
+		c := &m.columns[index]
+		c.loading = false
+		c.posts = []api.TimelinePost{{
+			ID: id, Text: "photo",
+			Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/" + id, Type: "photo"}},
+		}}
+	}
+	m.resize()
+
+	if cmd := m.requestPreviews(); cmd == nil {
+		t.Fatal("visible columns requested no previews")
+	}
+	for _, id := range []string{"left", "right"} {
+		if !m.previews[id].loading {
+			t.Fatalf("visible post %q was not requested", id)
+		}
+	}
+}
+
+func TestPreviewArrivalRepaintsVisibleNonFocusedColumn(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
+	m.width, m.height = 120, 30
+	right := &m.columns[1]
+	right.loading = false
+	right.posts = []api.TimelinePost{{
+		ID: "right", Text: "photo",
+		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/right", Type: "photo"}},
+	}}
+	m.resize()
+
+	m.applyPreview(previewMsg{postID: "right", colID: right.id, content: "RIGHT-PREVIEW"})
+
+	if !strings.Contains(m.columns[1].viewport.View(), "RIGHT-PREVIEW") {
+		t.Fatal("visible non-focused column did not repaint its arrived preview")
 	}
 }
 
@@ -364,14 +468,14 @@ func mediaPosts(count int) []api.TimelinePost {
 
 func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(20)
-	m.selected = 5
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(20)
+	m.cur().selected = 5
 	m.syncViewport()
 	if cmd := m.requestPreviews(); cmd == nil {
 		t.Fatal("prefetch requested nothing")
 	}
-	for i := m.selected - prefetchBehind; i <= m.selected+prefetchAhead; i++ {
+	for i := m.cur().selected - prefetchBehind; i <= m.cur().selected+prefetchAhead; i++ {
 		if !m.previews[fmt.Sprintf("p%d", i)].loading {
 			t.Fatalf("post %d was not prefetched", i)
 		}
@@ -387,11 +491,11 @@ func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 
 func TestThreadRefetchesAPreviewTooWideForItsRail(t *testing.T) {
 	m := NewWithImageMode("ansi")
-	m.loading = false
+	m.cur().loading = false
 	m.mode = modeThread
-	m.threadRootID = "root"
-	m.threadPosts = []api.ConversationPost{{TimelinePost: mediaPosts(1)[0]}}
-	m.threadPosts[0].ID = "root"
+	m.cur().threadRootID = "root"
+	m.cur().threadPosts = []api.ConversationPost{{TimelinePost: mediaPosts(1)[0]}}
+	m.cur().threadPosts[0].ID = "root"
 	m.syncViewport()
 
 	// A preview cached at the feed's full width cannot fit a thread, where
@@ -410,10 +514,10 @@ func TestThreadRefetchesAPreviewTooWideForItsRail(t *testing.T) {
 
 func TestThreadSelectionRequestsInlinePreview(t *testing.T) {
 	m := NewWithImageMode("ansi")
-	m.loading = false
+	m.cur().loading = false
 	m.mode = modeThread
-	m.threadRootID = "root"
-	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{
+	m.cur().threadRootID = "root"
+	m.cur().threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{
 		ID: "root", Text: "photo", Media: []api.TimelineMedia{{URL: "https://example.com/photo.jpg"}},
 	}}}
 	m.syncViewport()
@@ -425,12 +529,12 @@ func TestThreadSelectionRequestsInlinePreview(t *testing.T) {
 func TestNativePrefetchIncludesVisiblePosts(t *testing.T) {
 	m := NewWithImageMode("native")
 	m.imageMode = imageModeNative
-	m.loading = false
-	m.posts = mediaPosts(20)
-	m.selected = 10
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(20)
+	m.cur().selected = 10
 	m.syncViewport()
-	m.viewport.YOffset = 0
-	m.viewport.Height = m.ends[4] + 1
+	m.cur().viewport.YOffset = 0
+	m.cur().viewport.Height = m.cur().ends[4] + 1
 	if cmd := m.requestPreviews(); cmd == nil {
 		t.Fatal("native visible prefetch requested nothing")
 	}
@@ -441,9 +545,9 @@ func TestNativePrefetchIncludesVisiblePosts(t *testing.T) {
 
 func TestFailedPreviewRetriesOnlyWhenSelected(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(3)
-	m.selected = 0
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(3)
+	m.cur().selected = 0
 	m.syncViewport()
 	m.previews["p0"] = previewState{err: fmt.Errorf("boom")}
 	m.previews["p1"] = previewState{err: fmt.Errorf("boom")}
@@ -460,23 +564,61 @@ func TestFailedPreviewRetriesOnlyWhenSelected(t *testing.T) {
 
 func TestPreviewCacheEvictsDistantEntries(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(80)
-	m.selected = 70
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(80)
+	m.cur().selected = 70
 	for i := 0; i < 80; i++ {
 		m.previews[fmt.Sprintf("p%d", i)] = previewState{content: "img"}
 	}
 	m.previews["gone-from-feed"] = previewState{content: "img"}
 	m.evictDistantPreviews()
-	if len(m.previews) > maxCachedPreviews {
+	if len(m.previews) > maxCachedPreviews(1) {
 		t.Fatalf("cache holds %d entries", len(m.previews))
 	}
-	for i := m.selected - previewKeepRadius; i <= 79; i++ {
+	for i := m.cur().selected - previewKeepRadius; i <= 79; i++ {
 		if _, ok := m.previews[fmt.Sprintf("p%d", i)]; !ok {
 			t.Fatalf("evicted preview %d near the selection", i)
 		}
 	}
 	if _, ok := m.previews["gone-from-feed"]; ok {
 		t.Fatal("orphaned preview survived eviction")
+	}
+}
+
+func TestEvictionKeepsPreviewsVisibleInNonFocusedColumns(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
+	m.width = 120
+	m.columns[0].posts = []api.TimelinePost{{ID: "focused"}}
+	m.columns[1].posts = []api.TimelinePost{{ID: "non-focused"}}
+	m.previews["focused"] = previewState{content: "img"}
+	m.previews["non-focused"] = previewState{content: "img"}
+	for index := 0; index < maxCachedPreviews(2); index++ {
+		m.previews[fmt.Sprintf("orphan-%d", index)] = previewState{content: "img"}
+	}
+
+	m.evictDistantPreviews()
+
+	if _, ok := m.previews["non-focused"]; !ok {
+		t.Fatal("eviction removed a preview selected in a visible non-focused column")
+	}
+	if len(m.previews) > maxCachedPreviews(2) {
+		t.Fatalf("two-column cache holds %d entries", len(m.previews))
+	}
+}
+
+func TestPreviewBudgetScalesWithColumnCount(t *testing.T) {
+	for _, test := range []struct {
+		columns int
+		want    int
+	}{
+		{columns: 1, want: 48},
+		{columns: 2, want: 96},
+		{columns: 3, want: 144},
+		{columns: 4, want: 144},
+	} {
+		if got := maxCachedPreviews(test.columns); got != test.want {
+			t.Fatalf("maxCachedPreviews(%d)=%d, want %d", test.columns, got, test.want)
+		}
 	}
 }

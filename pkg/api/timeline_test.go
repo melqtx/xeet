@@ -9,7 +9,7 @@ func TestParseTimeline(t *testing.T) {
 	fixture := `{"entries":[
 	  {"itemContent":{"tweet_results":{"result":{
 	    "rest_id":"1",
-	    "legacy":{"full_text":"hello timeline","reply_count":2,"retweet_count":3,"favorite_count":4,"favorited":true,"created_at":"Mon Jul 20 10:00:00 +0000 2026","extended_entities":{"media":[{"type":"photo","media_url_https":"https://pbs.twimg.com/media/abc","ext_alt_text":"a cat","original_info":{"width":1200,"height":800}}]}},
+	    "legacy":{"full_text":"hello timeline","reply_count":2,"retweet_count":3,"favorite_count":4,"favorited":true,"retweeted":true,"created_at":"Mon Jul 20 10:00:00 +0000 2026","extended_entities":{"media":[{"type":"photo","media_url_https":"https://pbs.twimg.com/media/abc","ext_alt_text":"a cat","original_info":{"width":1200,"height":800}}]}},
 	    "views":{"count":"55"},
 	    "core":{"user_results":{"result":{"is_blue_verified":true,"core":{"name":"Alice","screen_name":"alice"}}}}
 	  }}}},
@@ -32,12 +32,49 @@ func TestParseTimeline(t *testing.T) {
 	if first.Handle != "alice" || first.AuthorName != "Alice" || first.LikeCount != 4 || first.MediaCount != 1 || !first.Liked {
 		t.Fatalf("unexpected first post: %+v", first)
 	}
+	if !first.Reposted || first.RepostCount != 3 {
+		t.Fatalf("repost state lost: %+v", first)
+	}
 	if len(first.Media) != 1 || first.Media[0].URL != "https://pbs.twimg.com/media/abc" ||
 		first.Media[0].AltText != "a cat" || first.Media[0].Width != 1200 || first.Media[0].Height != 800 {
 		t.Fatalf("unexpected media: %+v", first.Media)
 	}
 	if page.Posts[1].Text != "this is the long note" || page.Posts[1].Handle != "bob" {
 		t.Fatalf("unexpected wrapped post: %+v", page.Posts[1])
+	}
+}
+
+func TestParseTimelineItemReadsArticlePlainText(t *testing.T) {
+	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+		"rest_id": "1", "legacy": map[string]any{"full_text": "preview blurb"},
+		"article": map[string]any{"article_results": map[string]any{"result": map[string]any{
+			"title":      "My Article",
+			"plain_text": "the full article body &amp; more",
+		}}},
+	}}}
+	post, ok := parseTimelineItem(item)
+	if !ok || post.Article == nil {
+		t.Fatalf("article not parsed: %+v", post)
+	}
+	if post.Article.Title != "My Article" || post.Article.Text != "the full article body & more" {
+		t.Fatalf("unexpected article: %+v", post.Article)
+	}
+	// The preview blurb stays on Text; the article body does not overwrite it.
+	if post.Text != "preview blurb" {
+		t.Fatalf("text=%q", post.Text)
+	}
+}
+
+func TestParseTimelineItemIgnoresArticlePreviewWithoutPlainText(t *testing.T) {
+	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+		"rest_id": "1", "legacy": map[string]any{"full_text": "preview blurb"},
+		"article": map[string]any{"article_results": map[string]any{"result": map[string]any{
+			"title": "My Article",
+		}}},
+	}}}
+	post, ok := parseTimelineItem(item)
+	if !ok || post.Article != nil {
+		t.Fatalf("preview-only article should not surface: %+v", post.Article)
 	}
 }
 

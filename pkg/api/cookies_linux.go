@@ -83,15 +83,24 @@ func DetectBrowsers() []string {
 }
 
 func ImportBrowserSession(name string) (*LoginResult, string, error) {
+	results, resolved, err := ImportBrowserSessions(name)
+	if err != nil {
+		return nil, "", err
+	}
+	return &results[0], resolved, nil
+}
+
+// ImportBrowserSessions reads every distinct x.com session from one browser.
+func ImportBrowserSessions(name string) ([]LoginResult, string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", err
 	}
 	if browser, ok := findGeckoBrowser(name, geckoBrowsers(home)); ok {
-		return importGeckoSession(browser)
+		return importGeckoSessions(browser)
 	}
 	if browser, ok := findChromiumBrowser(name, chromiumBrowsers(home)); ok {
-		return importChromiumSession(browser)
+		return importChromiumSessions(browser)
 	}
 	return nil, "", fmt.Errorf("unknown browser %q", name)
 }
@@ -138,7 +147,7 @@ func (b chromiumBrowser) cookieDBs() []string {
 	return out
 }
 
-func importChromiumSession(browser chromiumBrowser) (*LoginResult, string, error) {
+func importChromiumSessions(browser chromiumBrowser) ([]LoginResult, string, error) {
 	dbs := browser.cookieDBs()
 	if len(dbs) == 0 {
 		return nil, "", fmt.Errorf("%s has no cookie database; is it installed and set up?", browser.name)
@@ -156,7 +165,7 @@ func importChromiumSession(browser chromiumBrowser) (*LoginResult, string, error
 	}
 
 	var lastErr error
-	var best *LoginResult
+	var results []LoginResult
 	for _, db := range dbs {
 		tmp, copied, err := copyDB(db)
 		if err != nil {
@@ -176,13 +185,12 @@ func importChromiumSession(browser chromiumBrowser) (*LoginResult, string, error
 					result.LastUsedAt = info.ModTime()
 				}
 			}
-			if betterLoginResult(result, best) {
-				best = result
-			}
+			results = append(results, *result)
 		}
 	}
-	if best != nil {
-		return best, browser.name, nil
+	results = sortAndDeduplicateLoginResults(results)
+	if len(results) > 0 {
+		return results, browser.name, nil
 	}
 
 	if lastErr != nil {

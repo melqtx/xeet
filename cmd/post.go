@@ -14,8 +14,10 @@ import (
 )
 
 var (
-	replyTo    string
-	imagePaths []string
+	replyTo     string
+	quoteTo     string
+	imagePaths  []string
+	postAccount string
 )
 
 var postCmd = &cobra.Command{
@@ -23,19 +25,30 @@ var postCmd = &cobra.Command{
 	Short: "post from the command line, or from a pipe",
 	Long: `Post straight from the command line, with no interface in the way. The text
 can be an argument or piped in on stdin; attachments are up to four images or
-a single video.`,
+a single video.
+
+--account decides which saved account posts, resolved inside this one command
+so nothing else on the machine can move it in between. It only decides; it does
+not judge. A script that used to compare its expected handle against the active
+account was getting a wrong-account check for free, because a mistaken expected
+value disagreed with whatever was active. Passing that same value to --account
+turns it into the destination instead, so the check has to move to the caller.`,
 	Example: `  xeet post "hello world"
   echo "piped tweet" | xeet post
   xeet post "photo" --image ./photo.png
   xeet post --image one.png --image two.jpg   # no text, images only
   xeet post "clip" --image ./clip.mp4
-  xeet post "a reply" --reply 1234567890`,
+  xeet post "a reply" --reply 1234567890
+  xeet post "a quote" --quote 1234567890
+  xeet post "hi" --account @alice        # post as a saved account, not the active one`,
 	RunE: runPost,
 }
 
 func init() {
 	postCmd.Flags().StringVar(&replyTo, "reply", "", "tweet id to reply to")
+	postCmd.Flags().StringVar(&quoteTo, "quote", "", "tweet id to quote")
 	postCmd.Flags().StringArrayVarP(&imagePaths, "image", "i", nil, "image or video path (up to 4 images, or 1 video)")
+	postCmd.Flags().StringVar(&postAccount, "account", "", "saved account to post as (handle or user id); defaults to the active one")
 	rootCmd.AddCommand(postCmd)
 }
 
@@ -80,7 +93,11 @@ func runPost(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := configMgr.Load()
+	selector, err := accountSelectorFrom(cmd, postAccount)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadAccountSelection(configMgr, selector)
 	if err != nil {
 		return err
 	}
@@ -92,7 +109,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 	}
 
 	client := api.NewWebClient(cfg)
-	id, err := client.PostTweet(ctx, text, replyTo, uploads, func(event api.PostEvent) {
+	id, err := client.PostTweet(ctx, text, replyTo, quoteTo, uploads, func(event api.PostEvent) {
 		if v, _ := cmd.Flags().GetBool("verbose"); v {
 			switch event.Stage {
 			case api.PostStageUploading:
@@ -122,7 +139,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 	}
 	// Cache freshly discovered operation ids so later commands avoid discovery.
 	if client.ApplyRefreshedQueryIDs(cfg) {
-		_ = configMgr.Save(cfg)
+		_ = configMgr.SaveQueryIDs(cfg)
 	}
 	if id != "" {
 		fmt.Printf("posted: https://x.com/i/status/%s\n", id)

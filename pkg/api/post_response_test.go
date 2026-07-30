@@ -146,7 +146,7 @@ func TestAmbiguousCreateReconcilesWithOneReadAndNoMutationRetry(t *testing.T) {
 	})
 
 	var events []PostStage
-	id, err := client.PostTweet(context.Background(), "hello from reconciliation", "", nil, func(event PostEvent) {
+	id, err := client.PostTweet(context.Background(), "hello from reconciliation", "", "", nil, func(event PostEvent) {
 		events = append(events, event.Stage)
 	})
 	if err != nil {
@@ -170,7 +170,7 @@ func TestAmbiguousCreateRemainsAmbiguousWhenReadCannotConfirm(t *testing.T) {
 		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
 	})
 
-	_, err := client.PostTweet(context.Background(), "not in timeline", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "not in timeline", "", "", nil, nil)
 	var ambiguous *AmbiguousPostError
 	if !errors.As(err, &ambiguous) {
 		t.Fatalf("error=%v, want AmbiguousPostError", err)
@@ -201,7 +201,7 @@ func TestTransportFailureReconcilesWithoutMutationRetry(t *testing.T) {
 		return response(http.StatusOK, body), nil
 	})
 
-	id, err := client.PostTweet(context.Background(), "possibly landed", "", nil, nil)
+	id, err := client.PostTweet(context.Background(), "possibly landed", "", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestMalformedSuccessResponseIsAmbiguous(t *testing.T) {
 		return response(http.StatusOK, `{"data":{"home":{"instructions":[]}}}`), nil
 	})
 
-	_, err := client.PostTweet(context.Background(), "maybe", "", nil, nil)
+	_, err := client.PostTweet(context.Background(), "maybe", "", "", nil, nil)
 	var ambiguous *AmbiguousPostError
 	if !errors.As(err, &ambiguous) {
 		t.Fatalf("error=%v, want AmbiguousPostError", err)

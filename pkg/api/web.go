@@ -173,15 +173,24 @@ func needsQueryIDRefresh(res *httpResult) bool {
 
 func NewWebClient(cfg *config.Config) *WebClient {
 	operationQIDs := map[string]string{
-		"CreateTweet":        cfg.CreateTweetQID,
-		"HomeTimeline":       cfg.HomeTimelineQID,
-		"HomeLatestTimeline": cfg.HomeLatestTimelineQID,
-		"Bookmarks":          cfg.BookmarksQID,
-		"SearchTimeline":     cfg.SearchTimelineQID,
-		"FavoriteTweet":      cfg.FavoriteTweetQID,
-		"UnfavoriteTweet":    cfg.UnfavoriteTweetQID,
-		"Viewer":             cfg.ViewerQID,
-		"TweetDetail":        cfg.TweetDetailQID,
+		"CreateTweet":                 cfg.CreateTweetQID,
+		"HomeTimeline":                cfg.HomeTimelineQID,
+		"HomeLatestTimeline":          cfg.HomeLatestTimelineQID,
+		"Bookmarks":                   cfg.BookmarksQID,
+		"SearchTimeline":              cfg.SearchTimelineQID,
+		"ListLatestTweetsTimeline":    cfg.ListLatestTweetsTimelineQID,
+		"ListsManagementPageTimeline": cfg.ListsManagementPageTimelineQID,
+		"FavoriteTweet":               cfg.FavoriteTweetQID,
+		"UnfavoriteTweet":             cfg.UnfavoriteTweetQID,
+		"Viewer":                      cfg.ViewerQID,
+		"TweetDetail":                 cfg.TweetDetailQID,
+		"NotificationsTimeline":       cfg.NotificationsTimelineQID,
+		"CreateRetweet":               cfg.CreateRetweetQID,
+		"DeleteRetweet":               cfg.DeleteRetweetQID,
+		"UserByScreenName":            cfg.UserByScreenNameQID,
+		"UserTweets":                  cfg.UserTweetsQID,
+		"CreateBookmark":              cfg.CreateBookmarkQID,
+		"DeleteBookmark":              cfg.DeleteBookmarkQID,
 	}
 	qid := operationQIDs["CreateTweet"]
 	if qid == "" {
@@ -253,6 +262,10 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.BookmarksQID = qid
 		case "SearchTimeline":
 			cfg.SearchTimelineQID = qid
+		case "ListLatestTweetsTimeline":
+			cfg.ListLatestTweetsTimelineQID = qid
+		case "ListsManagementPageTimeline":
+			cfg.ListsManagementPageTimelineQID = qid
 		case "FavoriteTweet":
 			cfg.FavoriteTweetQID = qid
 		case "UnfavoriteTweet":
@@ -261,6 +274,20 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.ViewerQID = qid
 		case "TweetDetail":
 			cfg.TweetDetailQID = qid
+		case "NotificationsTimeline":
+			cfg.NotificationsTimelineQID = qid
+		case "CreateRetweet":
+			cfg.CreateRetweetQID = qid
+		case "DeleteRetweet":
+			cfg.DeleteRetweetQID = qid
+		case "UserByScreenName":
+			cfg.UserByScreenNameQID = qid
+		case "UserTweets":
+			cfg.UserTweetsQID = qid
+		case "CreateBookmark":
+			cfg.CreateBookmarkQID = qid
+		case "DeleteBookmark":
+			cfg.DeleteBookmarkQID = qid
 		}
 	}
 	return true
@@ -416,6 +443,7 @@ type createTweetVariables struct {
 	DisallowedReplyOptions    []string                    `json:"disallowed_reply_options"`
 	SemanticAnnotationOptions ctSemanticAnnotationOptions `json:"semantic_annotation_options"`
 	Reply                     *ctReply                    `json:"reply,omitempty"`
+	AttachmentURL             string                      `json:"attachment_url,omitempty"`
 }
 
 type ctSemanticAnnotationOptions struct {
@@ -447,9 +475,18 @@ func newCreateTweetVariables(text string) createTweetVariables {
 	}
 }
 
+// quoteAttachmentURL builds the attachment_url CreateTweet expects for a
+// quote. The /i/status/ form is what the web composer sends; if a live run
+// ever posts without the quoted_status attached, this one function is the
+// place to try the public status URL instead.
+func quoteAttachmentURL(tweetID string) string {
+	return "https://x.com/i/status/" + tweetID
+}
+
 // PostTweet posts through the web GraphQL endpoint and returns the created id.
-// Media is uploaded first and attached to the same CreateTweet operation.
-func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploads []Upload, progress ProgressFunc) (string, error) {
+// Media is uploaded first and attached to the same CreateTweet operation; a
+// quoteID attaches that post as a quote.
+func (c *WebClient) PostTweet(ctx context.Context, text, replyToID, quoteID string, uploads []Upload, progress ProgressFunc) (string, error) {
 	c.lastDiagnostic = ""
 	if c.authToken == "" || c.ct0 == "" {
 		return "", fmt.Errorf("no session; run 'xeet auth' first")
@@ -499,6 +536,9 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	}
 	if replyToID != "" {
 		vars.Reply = &ctReply{InReplyToTweetID: replyToID, ExcludeReplyUserIDs: []string{}}
+	}
+	if quoteID != "" {
+		vars.AttachmentURL = quoteAttachmentURL(quoteID)
 	}
 
 	emitProgress(progress, PostEvent{Stage: PostStagePublishing})

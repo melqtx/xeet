@@ -53,12 +53,17 @@ func TestTimelinePTYHelper(t *testing.T) {
 		return
 	}
 	m := New()
-	m.loading = false
-	m.posts = []api.TimelinePost{
+	m.configureColumns(repeatedColumnSpecs(2, FeedForYou, "", ""))
+	m.columns[0].loading = false
+	m.columns[0].posts = []api.TimelinePost{
 		{ID: "1", AuthorName: "Alice", Handle: "alice", Text: "hello from the PTY", LikeCount: 3},
 		{ID: "2", AuthorName: "Bob", Handle: "bob", Text: "unicode: 🐈 café 日本語", MediaCount: 1},
 	}
-	m.syncViewport()
+	m.columns[1].loading = false
+	m.columns[1].posts = []api.TimelinePost{
+		{ID: "3", AuthorName: "Carol", Handle: "carol", Text: "second PTY column"},
+	}
+	m.resize()
 	if _, err := tea.NewProgram(ptyModel{Model: m}, tea.WithAltScreen(), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout)).Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +120,7 @@ func TestTimelinePTYNavigationResizeAndHelp(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	output := captured.String()
-	for _, want := range []string{"xeet", "Alice", "search posts", "timeline keys"} {
+	for _, want := range []string{"xeet", "Alice", "search posts", "timeline keys", "+1 more (widen terminal)"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("PTY output missing %q; output:\n%s", want, output)
 		}

@@ -8,24 +8,43 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var logoutAll bool
+
 var logoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "disconnect and erase the saved session",
-	Long: `Removes the x.com session tokens from your OS keyring and deletes xeet's
-config file. Your browser session is untouched; run 'xeet auth' to reconnect.`,
+	Long: `Removes the active x.com session from your OS keyring while preserving
+other accounts and global settings. Use --all to remove every account and the
+config file. Your browser sessions are untouched.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configMgr, err := config.NewConfigManager()
 		if err != nil {
 			return err
 		}
-		if err := configMgr.Erase(); err != nil {
+		if logoutAll {
+			if err := configMgr.EraseAll(); err != nil {
+				return fmt.Errorf("logout incomplete: %w", err)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "✓ Logged out all accounts. Sessions and config erased.")
+			return nil
+		}
+		cfg, err := configMgr.Load()
+		if err != nil {
+			return err
+		}
+		if cfg.UserID == "" {
+			return fmt.Errorf("no saved session; run 'xeet auth' first")
+		}
+		if err := configMgr.EraseAccount(cfg.UserID); err != nil {
 			return fmt.Errorf("logout incomplete: %w", err)
 		}
-		fmt.Println("✓ Logged out. Session erased from keyring and config removed.")
+		fmt.Fprintln(cmd.OutOrStdout(), "✓ Logged out. Active session erased; global settings preserved.")
 		return nil
 	},
 }
 
 func init() {
+	logoutCmd.Flags().BoolVar(&logoutAll, "all", false, "remove every saved account and the config file")
 	rootCmd.AddCommand(logoutCmd)
 }

@@ -79,16 +79,8 @@ func runTheme(cmd *cobra.Command, args []string) error {
 	return saveTheme(configMgr, chosen, out)
 }
 
-// saveTheme rewrites the whole config, so it has to start from the whole
-// config: saving a half-read one would drop the cached query ids and the
-// session metadata `xeet doctor` reports.
 func saveTheme(configMgr *config.ConfigManager, name string, out io.Writer) error {
-	cfg, err := configMgr.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Theme = name
-	if err := configMgr.Save(cfg); err != nil {
+	if err := configMgr.SaveTheme(name); err != nil {
 		return err
 	}
 	styles := ui.New(paletteNamed(name))
@@ -160,5 +152,7 @@ func applyConfiguredTheme(flagValue string) error {
 	}
 	timeline.ApplyTheme(palette)
 	tui.ApplyTheme(palette)
+	// The timeline's in-TUI theme picker marks the current entry from this.
+	timeline.SetThemeName(name)
 	return nil
 }

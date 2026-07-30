@@ -104,7 +104,13 @@ then just:
 xeet                                  # browse your timeline, images and all
 xeet --following                      # start on the following feed
 xeet --bookmarks                      # start on your bookmarks
+xeet lists                            # pick a list and browse it
+xeet --list 1234567890                # start on a list by id
 xeet search "go tui"                  # search posts and browse results
+xeet --columns 2                      # show two side-by-side feeds
+xeet --columns foryou,bookmarks       # choose each column's feed
+xeet --columns notifications,foryou   # watch likes and replies roll in
+xeet columns save "foryou,following"  # save the default layout
 xeet --barebones                      # text-only feed
 xeet --compose                        # skip the feed, open the composer
 xeet post "hello from my shell"       # one-shot post
@@ -112,7 +118,20 @@ echo "piped in" | xeet post           # reads stdin
 xeet post "photos" -i one.png -i two.jpg
 xeet post --image meme.png             # image-only, no text
 xeet post "a reply" --reply 1234567890
+xeet post "a quote" --quote 1234567890
 ```
+
+reading a single post without the tui — handy for scripts and AI agents:
+
+```bash
+xeet fetch https://x.com/alice/status/1234567890   # JSON on stdout
+xeet fetch 1234567890 | jq .text                   # just the body
+xeet fetch <url> --text                            # human-readable instead
+xeet fetch <url> --replies 5                       # include replies
+```
+
+long posts come through in full, and X long-form articles land under
+`article.title` / `article.text`.
 
 if your session feels off:
 
@@ -120,7 +139,8 @@ if your session feels off:
 xeet whoami            # which account is connected
 xeet doctor            # session metadata + one authenticated read
 xeet doctor --offline  # local metadata only, no network
-xeet logout            # delete xeet's copy of the session
+xeet logout            # delete xeet's active session
+xeet logout --all      # delete every xeet session and the config file
 ```
 
 diagnostics print a short fingerprint and the browser/profile, never the
@@ -159,12 +179,17 @@ come back next time.
 | `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
 | `f` | switch between the for you and following feeds |
 | `b` | switch between bookmarks and the for you feed |
+| `L` | pick a list to browse |
 | `/` | search posts |
 | `enter` | open the post's replies |
 | `e` / `space` | read a truncated post in full |
 | `i` | zoom the post's image to the whole terminal |
 | `A` | read image descriptions (works with previews off) |
 | `l` | like / unlike |
+| `t` | repost / unrepost |
+| `B` | bookmark / unbookmark |
+| `Q` | quote the selected post |
+| `u` | open the author's profile timeline |
 | `r` | reply in place |
 | `o` | open in browser |
 | `y` | copy link |
@@ -172,11 +197,46 @@ come back next time.
 | `R` | refresh in place, new posts stack on top, you keep your spot |
 | `?` | key guide + which image renderer is active and why |
 
-more posts load automatically near the bottom; search results are just
-another feed, so like, reply, and thread all work there too. inside a
+more posts load automatically near the bottom; search results and list
+timelines behave like any other feed, so like, reply, and thread all work
+there too. inside a
 conversation, `j`/`k` moves through replies, `r` replies to the selected
 item, `R` reloads, and `esc` drops you back exactly where you were in the
 timeline.
+
+**auto-refresh**
+
+the timeline is manual-only by default: nothing refetches until you press
+`R`. to keep the focused column current on its own, set an interval once in
+`~/.xeet.yaml` or pass one for a single run:
+
+```bash
+xeet --refresh 60s   # poll the focused column every minute
+```
+
+```yaml
+refresh_interval: 5m
+```
+
+polling follows focus, so `tab` moves it to another column. it pauses while
+you read a thread or the column holds an error, stays quiet when nothing is
+new, and stacks fresh posts on top with a toast when they arrive.
+
+### multi-column
+
+`--columns 2` through `--columns 4` repeats the selected feed in equal-width
+columns. a comma-separated layout can mix `foryou`, `following`, `bookmarks`,
+`notifications`, `list:<id>`, and `search:<query>`. `xeet columns save "..."` writes that
+layout to `~/.xeet.yaml`; trying a layout never saves it implicitly.
+`tab` / `shift+tab` (or `]` / `[`) moves focus; navigation and post actions
+apply to the focused column. if the terminal is too narrow, xeet shows only
+the columns that fit and tells you how many are hidden.
+
+ansi previews and kitty/ghostty Unicode-placeholder images compose across
+columns. iterm2 and wezterm inline images rely on relative cursor movement,
+which cannot be composed safely side by side, so multi-column runs fall back
+to ansi even with `--images native`. the `?` help overlay shows the fallback
+note.
 
 **themes**
 
@@ -236,8 +296,13 @@ xeet reuses the x.com session already in your browser and speaks the same
 unsupported internal graphql endpoints the website does. the imported
 `auth_token` and `ct0` cookies grant account-level access, so treat them
 like a password. they live in the macos keychain or linux secret service, never
-in the yaml config file. `xeet logout` deletes xeet's copy (your browser
-stays logged in).
+in the yaml config file. account metadata and global settings use config schema
+v2 in `~/.xeet.yaml`; sessions from older installs migrate offline on first
+load. don't run an older xeet binary after migration: it cannot understand the
+`accounts:` block and may erase it when saving. new binaries refuse writes to
+config versions newer than they understand. `xeet logout` deletes the active
+session and `xeet logout --all` deletes every saved session (your browser stays
+logged in).
 
 <details>
 <summary>details: query ids and retries</summary>

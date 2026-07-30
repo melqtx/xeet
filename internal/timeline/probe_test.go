@@ -30,8 +30,8 @@ func TestParseProbeReply(t *testing.T) {
 
 func TestCtrlLTriggersRedraw(t *testing.T) {
 	m := New()
-	m.loading = false
-	m.posts = mediaPosts(2)
+	m.cur().loading = false
+	m.cur().posts = mediaPosts(2)
 	m.syncViewport()
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
 	if cmd == nil {

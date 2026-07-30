@@ -3,10 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melqtx/xeet/pkg/config"
 )
@@ -210,4 +213,206 @@ func decodeBookmarkVariables(t *testing.T, req *http.Request) map[string]any {
 		t.Fatalf("decode variables %q: %v", raw, err)
 	}
 	return variables
+}
+
+func configuredBookmarkMutationClient(t *testing.T, cfg *config.Config, handler func(*http.Request) (*http.Response, error)) *WebClient {
+	t.Helper()
+	cfg.AuthToken, cfg.CT0 = "auth", "csrf"
+	client := NewWebClient(cfg)
+	client.httpClient = &http.Client{Transport: roundTripFunc(handler)}
+	client.retryDelay = time.Millisecond
+	// The generator scrapes X's transaction page; tests stub the minting step
+	// and assert on the header it produces instead.
+	client.transactionID = func(context.Context, string, string) (string, error) {
+		return "tx-id", nil
+	}
+	return client
+}
+
+func TestSetTweetBookmarkedPostsTweetIDToCreateBookmark(t *testing.T) {
+	var path, body string
+	client := configuredBookmarkMutationClient(t, &config.Config{CreateBookmarkQID: "cb-qid"}, func(req *http.Request) (*http.Response, error) {
+		path = req.URL.Path
+		data, _ := io.ReadAll(req.Body)
+		body = string(data)
+		return response(http.StatusOK, `{"data":{"tweet_bookmark_put":"Done"}}`), nil
+	})
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "/cb-qid/CreateBookmark") || !strings.Contains(body, `"tweet_id":"123"`) {
+		t.Fatalf("path=%q body=%s", path, body)
+	}
+}
+
+func TestSetTweetUnbookmarkedPostsTweetIDToDeleteBookmark(t *testing.T) {
+	var path, body string
+	client := configuredBookmarkMutationClient(t, &config.Config{DeleteBookmarkQID: "db-qid"}, func(req *http.Request) (*http.Response, error) {
+		path = req.URL.Path
+		data, _ := io.ReadAll(req.Body)
+		body = string(data)
+		return response(http.StatusOK, `{"data":{"tweet_bookmark_delete":"Done"}}`), nil
+	})
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "/db-qid/DeleteBookmark") || !strings.Contains(body, `"tweet_id":"123"`) {
+		t.Fatalf("path=%q body=%s", path, body)
+	}
+}
+
+// The bookmark mutations answer a bodyless 404 without the transaction
+// header — confirmed on the first live run — so every attempt must carry the
+// minted id, exactly like the retweet pair.
+func TestSetTweetBookmarkedSendsTransactionHeader(t *testing.T) {
+	var header string
+	client := configuredBookmarkMutationClient(t, &config.Config{CreateBookmarkQID: "cb-qid"}, func(req *http.Request) (*http.Response, error) {
+		header = req.Header.Get("X-Client-Transaction-Id")
+		return response(http.StatusOK, `{"data":{"tweet_bookmark_put":"Done"}}`), nil
+	})
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", true); err != nil {
+		t.Fatal(err)
+	}
+	if header != "tx-id" {
+		t.Fatalf("X-Client-Transaction-Id = %q, want tx-id", header)
+	}
+}
+
+func TestSetTweetBookmarkedDiscoversMissingQueryIDBeforeFirstRequestAndExposesItForPersistence(t *testing.T) {
+	var path string
+	client := configuredBookmarkMutationClient(t, &config.Config{}, func(req *http.Request) (*http.Response, error) {
+		path = req.URL.Path
+		return response(http.StatusOK, `{"data":{"tweet_bookmark_put":"Done"}}`), nil
+	})
+	client.discover = func(_ context.Context, auth, ct0, operation string) (string, error) {
+		if auth != "auth" || ct0 != "csrf" || operation != createBookmarkOperation {
+			t.Fatalf("discovery args = auth:%q ct0:%q operation:%q", auth, ct0, operation)
+		}
+		return "fresh-cb", nil
+	}
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "/fresh-cb/CreateBookmark") {
+		t.Fatalf("path=%q", path)
+	}
+	cfg := &config.Config{}
+	if !client.ApplyRefreshedQueryIDs(cfg) || cfg.CreateBookmarkQID != "fresh-cb" {
+		t.Fatalf("config=%+v", cfg)
+	}
+}
+
+func TestSetTweetBookmarkedRotatesQueryIDOnceOnPersistedQueryMiss(t *testing.T) {
+	var paths []string
+	client := configuredBookmarkMutationClient(t, &config.Config{DeleteBookmarkQID: "stale"}, func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		if len(paths) == 1 {
+			return response(http.StatusNotFound, ``), nil
+		}
+		return response(http.StatusOK, `{"data":{"tweet_bookmark_delete":"Done"}}`), nil
+	})
+	discoveries := 0
+	client.discover = func(_ context.Context, _, _, operation string) (string, error) {
+		discoveries++
+		return "fresh-db", nil
+	}
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", false); err != nil {
+		t.Fatal(err)
+	}
+	if discoveries != 1 || len(paths) != 2 ||
+		!strings.Contains(paths[0], "/stale/DeleteBookmark") || !strings.Contains(paths[1], "/fresh-db/DeleteBookmark") {
+		t.Fatalf("discoveries=%d paths=%v", discoveries, paths)
+	}
+}
+
+// Bookmarks are only half idempotent: re-adding one is a no-op, but the live
+// endpoint errors on a replayed delete ("_Missing: not found in actor's
+// favorites"). So a create rides out a transient 503 while a delete surfaces
+// after exactly one attempt and leaves the retry to the user.
+func TestSetTweetBookmarkedRetriesTransientStatus(t *testing.T) {
+	attempts := 0
+	client := configuredBookmarkMutationClient(t, &config.Config{CreateBookmarkQID: "cb-qid"}, func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return response(http.StatusServiceUnavailable, ``), nil
+		}
+		return response(http.StatusOK, `{"data":{"tweet_bookmark_put":"Done"}}`), nil
+	})
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", true); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2 (transient retry for idempotent bookmarks)", attempts)
+	}
+}
+
+func TestSetTweetBookmarkedSurfacesPersistentTransientStatus(t *testing.T) {
+	client := configuredBookmarkMutationClient(t, &config.Config{CreateBookmarkQID: "cb-qid"}, func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusServiceUnavailable, ``), nil
+	})
+
+	err := client.SetTweetBookmarked(context.Background(), "123", true)
+	var unavailable *ServiceUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("err = %v, want ServiceUnavailableError", err)
+	}
+}
+
+func TestSetTweetUnbookmarkedDoesNotRetryTransientStatus(t *testing.T) {
+	attempts := 0
+	client := configuredBookmarkMutationClient(t, &config.Config{DeleteBookmarkQID: "db-qid"}, func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return response(http.StatusServiceUnavailable, ``), nil
+	})
+
+	err := client.SetTweetBookmarked(context.Background(), "123", false)
+	var unavailable *ServiceUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("err = %v, want ServiceUnavailableError", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (no transient retry for bookmark delete)", attempts)
+	}
+}
+
+func TestSetTweetBookmarkedHonorsEnvironmentQueryIDOverride(t *testing.T) {
+	t.Setenv("XEET_CREATEBOOKMARK_QID", "env-cb")
+	var path string
+	client := configuredBookmarkMutationClient(t, &config.Config{CreateBookmarkQID: "cfg-cb"}, func(req *http.Request) (*http.Response, error) {
+		path = req.URL.Path
+		return response(http.StatusOK, `{"data":{"tweet_bookmark_put":"Done"}}`), nil
+	})
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "/env-cb/CreateBookmark") {
+		t.Fatalf("path=%q", path)
+	}
+}
+
+func TestSetTweetBookmarkedRejectsMissingSessionAndEmptyIDBeforeAnyRequest(t *testing.T) {
+	requests := 0
+	client := configuredBookmarkMutationClient(t, &config.Config{CreateBookmarkQID: "cb-qid"}, func(req *http.Request) (*http.Response, error) {
+		requests++
+		return response(http.StatusOK, `{}`), nil
+	})
+	client.authToken, client.ct0 = "", ""
+
+	if err := client.SetTweetBookmarked(context.Background(), "123", true); err == nil {
+		t.Fatal("SetTweetBookmarked succeeded without a session")
+	}
+	client.authToken, client.ct0 = "auth", "csrf"
+	if err := client.SetTweetBookmarked(context.Background(), "", true); err == nil {
+		t.Fatal("SetTweetBookmarked succeeded with an empty tweet id")
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0", requests)
+	}
 }

@@ -53,10 +53,11 @@ func TestLinuxChromiumImportUsesCopiedDatabase(t *testing.T) {
 			}, nil
 		},
 	}
-	result, name, err := importChromiumSession(browser)
+	results, name, err := importChromiumSessions(browser)
 	if err != nil {
 		t.Fatal(err)
 	}
+	result := results[0]
 	if result.AuthToken != "token" || result.CT0 != "csrf" || name != "Chromium" {
 		t.Fatalf("result=%+v name=%q", result, name)
 	}
@@ -83,8 +84,46 @@ func TestLinuxLockedKeyringErrorIsActionable(t *testing.T) {
 			return nil, errors.New("collection is locked")
 		},
 	}
-	_, _, err := importChromiumSession(browser)
+	_, _, err := importChromiumSessions(browser)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "unlock") {
 		t.Fatalf("error = %v, want unlock guidance", err)
+	}
+}
+
+func TestLinuxScanReturnsAllLoggedInProfiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "chrome")
+	for _, profile := range []string{"Default", "Profile 8"} {
+		dir := filepath.Join(root, profile, "Network")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Cookies"), []byte("db"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	read := 0
+	browser := chromiumBrowser{
+		name:  "Chrome",
+		roots: []string{root},
+		reader: func(context.Context, string, ...kooky.Filter) ([]*kooky.Cookie, error) {
+			read++
+			suffix := string(rune('0' + read))
+			return []*kooky.Cookie{
+				{Cookie: http.Cookie{Name: "auth_token", Value: "auth-" + suffix, Domain: ".x.com"}},
+				{Cookie: http.Cookie{Name: "ct0", Value: "ct0-" + suffix, Domain: ".x.com"}},
+			}, nil
+		},
+	}
+	results, _, err := importChromiumSessions(browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("scan returned %d profiles, want 2", len(results))
+	}
+	profiles := map[string]bool{results[0].Profile: true, results[1].Profile: true}
+	if !profiles["Default"] || !profiles["Profile 8"] {
+		t.Fatalf("profiles = %v, want Default and Profile 8", profiles)
 	}
 }

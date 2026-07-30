@@ -9,6 +9,20 @@ import (
 	"strings"
 )
 
+// tweetDetailFieldToggles opts only TweetDetail into article plain text.
+// Flipping the shared timelineFieldToggles instead would reshape every
+// timeline request, while article bodies only matter when reading a single
+// post. withArticleRichContentState stays off: the ProseMirror JSON is heavy
+// and the plain text covers the read use case.
+var tweetDetailFieldToggles = func() map[string]bool {
+	toggles := make(map[string]bool, len(timelineFieldToggles)+1)
+	for key, value := range timelineFieldToggles {
+		toggles[key] = value
+	}
+	toggles["withArticlePlainText"] = true
+	return toggles
+}()
+
 // ConversationPost is one post in a TweetDetail conversation. Depth is
 // relative to the focal post (the focal post itself has depth zero).
 type ConversationPost struct {
@@ -103,7 +117,7 @@ func (c *WebClient) doTweetDetail(ctx context.Context, qid, tweetID, cursor stri
 	variables["count"] = count
 	variablesJSON, _ := json.Marshal(variables)
 	featuresJSON, _ := json.Marshal(timelineFeatures)
-	fieldTogglesJSON, _ := json.Marshal(timelineFieldToggles)
+	fieldTogglesJSON, _ := json.Marshal(tweetDetailFieldToggles)
 
 	params := url.Values{}
 	params.Set("variables", string(variablesJSON))

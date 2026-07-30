@@ -55,6 +55,14 @@ func TestOperationHintSelectsTheBundleForEachOperationFamily(t *testing.T) {
 		{operation: "CreateTweet", want: "Compose"},
 		{operation: "SearchTimeline", want: "SearchTimeline"},
 		{operation: "Bookmarks", want: "Bookmarks"},
+		// Both list read operations ship in the shared timeline chunk, observed
+		// live as shared~loader.Dock~bundle.BookmarkFolders~bundle.Bookmarks~
+		// bundle.Explore~bundle.HomeTimeline~bundle.Notifica.<hash>.js. Its name
+		// never contains "List", so hinting "List" reaches only the list
+		// management bundles (UserLists, ListHandler) and discovery finds
+		// nothing — the failure this table exists to prevent.
+		{operation: "ListLatestTweetsTimeline", want: "HomeTimeline"},
+		{operation: "ListsManagementPageTimeline", want: "HomeTimeline"},
 	}
 	for _, test := range tests {
 		t.Run(test.operation, func(t *testing.T) {

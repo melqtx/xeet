@@ -9,17 +9,31 @@ import (
 
 func (m *Model) beginSearch() tea.Cmd {
 	m.searchReturn = m.mode
-	m.searchInput.SetValue(m.searchQuery)
+	if m.searchFor == targetNewColumn {
+		m.searchInput.SetValue(m.columnDraft.Query)
+	} else {
+		m.searchInput.SetValue(m.cur().searchQuery)
+	}
 	m.mode = modeSearch
 	return m.imageRepaint(m.searchInput.Focus())
 }
 
 func (m Model) cancelSearch() (tea.Model, tea.Cmd) {
 	m.searchInput.Blur()
+	if m.searchFor == targetNewColumn {
+		// Escape abandons the whole add-column draft; it never quits, unlike
+		// the direct `xeet search` prompt below.
+		m.searchFor = targetFocusedColumn
+		m.columnDraft = ColumnSpec{}
+		m.mode = modeFeed
+		m.syncViewport()
+		m.ensureSelectedVisible()
+		return m, m.imageRepaint(m.requestPreviews())
+	}
 	// `xeet search` starts directly in an empty prompt. There is no previous
 	// feed to reveal in that case, so escape should leave instead of exposing
 	// an empty search-results screen.
-	if m.searchReturn == modeFeed && m.feed == FeedSearch && m.searchQuery == "" && len(m.posts) == 0 {
+	if m.searchReturn == modeFeed && m.cur().feed == FeedSearch && m.cur().searchQuery == "" && len(m.cur().posts) == 0 {
 		return m, tea.Quit
 	}
 	m.mode = m.searchReturn
@@ -40,11 +54,19 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case likeMsg:
 		m.settleLike(msg)
 		return m, nil
+	case retweetMsg:
+		m.settleRepost(msg)
+		return m, nil
+	case bookmarkMsg:
+		m.settleBookmark(msg)
+		return m, nil
+	case profileMsg:
+		return m, m.applyProfileResult(msg)
 	case previewMsg:
 		m.storePreview(msg)
 		return m, nil
 	case spinner.TickMsg:
-		if m.loading || m.loadingMore || m.refreshing || m.threadLoading || m.threadMore {
+		if m.cur().loading || m.cur().loadingMore || m.cur().refreshing || m.cur().threadLoading || m.cur().threadMore {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -60,7 +82,14 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if query == "" {
 				return m.cancelSearch()
 			}
-			m.searchQuery = query
+			if m.searchFor == targetNewColumn {
+				m.columnDraft.Kind = FeedSearch
+				m.columnDraft.Query = query
+				m.searchFor = targetFocusedColumn
+				m.searchInput.Blur()
+				return m, m.beginAccountPicker("new column · account", intentColumnAccount)
+			}
+			m.cur().searchQuery = query
 			m.searchInput.Blur()
 			m.mode = modeFeed
 			return m, m.setFeed(FeedSearch)

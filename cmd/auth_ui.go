@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/melqtx/xeet/internal/ui"
 	"github.com/melqtx/xeet/pkg/api"
@@ -18,6 +19,7 @@ type authPhase int
 
 const (
 	authPhasePick authPhase = iota
+	authPhaseChooseProfile
 	authPhaseImport
 	authPhaseVerify
 	authPhaseDone
@@ -39,6 +41,8 @@ type authPicker struct {
 	cursor   int
 	spinner  spinner.Model
 	chosen   string
+	sessions []api.LoginResult
+	profile  int
 	conn     connection
 	err      error
 	width    int
@@ -47,8 +51,8 @@ type authPicker struct {
 
 type browsersScannedMsg []string
 
-type sessionImportedMsg struct {
-	result  *api.LoginResult
+type sessionsImportedMsg struct {
+	results []api.LoginResult
 	browser string
 	err     error
 }
@@ -82,7 +86,7 @@ func newAuthPicker(ctx context.Context, cancel context.CancelFunc, styles ui.Sty
 
 func (p authPicker) Init() tea.Cmd {
 	if p.phase == authPhaseImport {
-		return tea.Batch(p.spinner.Tick, importSessionCmd(p.chosen))
+		return tea.Batch(p.spinner.Tick, importSessionsCmd(p.chosen))
 	}
 	return tea.Batch(p.spinner.Tick, scanBrowsersCmd())
 }
@@ -94,13 +98,13 @@ func scanBrowsersCmd() tea.Cmd {
 	return func() tea.Msg { return browsersScannedMsg(api.DetectBrowsers()) }
 }
 
-func importSessionCmd(browser string) tea.Cmd {
+func importSessionsCmd(browser string) tea.Cmd {
 	return func() tea.Msg {
-		result, resolved, err := api.ImportBrowserSession(browser)
+		results, resolved, err := api.ImportBrowserSessions(browser)
 		if resolved == "" {
 			resolved = browser
 		}
-		return sessionImportedMsg{result: result, browser: resolved, err: err}
+		return sessionsImportedMsg{results: results, browser: resolved, err: err}
 	}
 }
 
@@ -134,13 +138,26 @@ func (p authPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return p, nil
-	case sessionImportedMsg:
+	case sessionsImportedMsg:
 		if msg.err != nil {
 			p.phase, p.err = authPhaseFail, msg.err
 			return p, nil
 		}
+		if len(msg.results) == 0 {
+			p.phase = authPhaseFail
+			p.err = fmt.Errorf("no logged-in x.com session found in %s", msg.browser)
+			return p, nil
+		}
+		p.chosen = msg.browser
+		p.sessions = append([]api.LoginResult(nil), msg.results...)
+		p.profile = 0
+		if len(p.sessions) > 1 {
+			p.phase = authPhaseChooseProfile
+			return p, nil
+		}
 		p.phase = authPhaseVerify
-		return p, verifyCmd(p.ctx, msg.result, msg.browser)
+		result := p.sessions[0]
+		return p, verifyCmd(p.ctx, &result, msg.browser)
 	case sessionSavedMsg:
 		if msg.err != nil {
 			p.phase, p.err = authPhaseFail, msg.err
@@ -171,8 +188,30 @@ func (p authPicker) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			p.chosen = p.browsers[p.cursor]
 			p.phase = authPhaseImport
 			p.err = nil
-			return p, tea.Batch(p.spinner.Tick, importSessionCmd(p.chosen))
+			return p, tea.Batch(p.spinner.Tick, importSessionsCmd(p.chosen))
 		case "esc", "q", "ctrl+c":
+			p.quit = true
+			return p, tea.Quit
+		}
+	case authPhaseChooseProfile:
+		switch key {
+		case "up", "k":
+			if p.profile > 0 {
+				p.profile--
+			}
+		case "down", "j":
+			if p.profile < len(p.sessions)-1 {
+				p.profile++
+			}
+		case "enter":
+			result := p.sessions[p.profile]
+			p.phase = authPhaseVerify
+			return p, verifyCmd(p.ctx, &result, p.chosen)
+		case "esc":
+			p.phase = authPhasePick
+			p.sessions = nil
+			p.profile = 0
+		case "q", "ctrl+c":
 			p.quit = true
 			return p, tea.Quit
 		}
@@ -218,6 +257,8 @@ func (p authPicker) View() string {
 
 	caption := "let's get you connected"
 	switch p.phase {
+	case authPhaseChooseProfile:
+		caption = "choose a profile"
 	case authPhaseImport, authPhaseVerify:
 		caption = "hold on tight"
 	case authPhaseDone:
@@ -228,6 +269,8 @@ func (p authPicker) View() string {
 	head := s.RenderLogo(w) + "\n" + s.RenderMascot(w, caption) + "\n\n"
 
 	switch p.phase {
+	case authPhaseChooseProfile:
+		return head + p.renderProfilePick(w)
 	case authPhaseImport:
 		return head + p.renderWorking(w, "reading your x.com session from "+p.chosen+"…",
 			"your OS may ask to unlock its keyring")
@@ -240,6 +283,33 @@ func (p authPicker) View() string {
 	default:
 		return head + p.renderPick(w)
 	}
+}
+
+func (p authPicker) renderProfilePick(width int) string {
+	s := p.styles
+	rows := []string{s.Body.Render("which signed-in profile should xeet connect?"), ""}
+	for i, session := range p.sessions {
+		profile := session.Profile
+		if profile == "" {
+			profile = "unknown profile"
+		}
+		domain := session.CookieDomain
+		if domain == "" {
+			domain = "unknown domain"
+		}
+		expiry := "expiry unknown"
+		if !session.ExpiresAt.IsZero() {
+			expiry = "expires " + session.ExpiresAt.Local().Format(time.RFC3339)
+		}
+		label := fmt.Sprintf("%s  ·  %s  ·  %s", profile, domain, expiry)
+		if i == p.profile {
+			rows = append(rows, s.Accent.Render("  › ")+s.Body.Bold(true).Render(label))
+			continue
+		}
+		rows = append(rows, "    "+s.Dim.Render(label))
+	}
+	rows = append(rows, "", s.Dim.Render("↑↓ / j k  move   ·   enter  connect   ·   esc  browsers"))
+	return lipgloss.NewStyle().Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, rows...)) + "\n"
 }
 
 func (p authPicker) renderPick(width int) string {

@@ -26,6 +26,14 @@ type TimelineMedia struct {
 	Height  int
 }
 
+// TimelineArticle carries an X long-form article's plain-text body. Kept off
+// Text because an article tweet's legacy text is just a preview card blurb —
+// callers that flatten it into Text would lose the boundary between the two.
+type TimelineArticle struct {
+	Title string
+	Text  string
+}
+
 type TimelinePost struct {
 	ID             string
 	Text           string
@@ -39,8 +47,11 @@ type TimelinePost struct {
 	MediaCount     int
 	Media          []TimelineMedia
 	Liked          bool
+	Reposted       bool
+	Bookmarked     bool
 	InReplyToID    string
 	ConversationID string
+	Article        *TimelineArticle
 }
 
 type TimelinePage struct {
@@ -337,10 +348,25 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 	text = html.UnescapeString(text)
 
 	post := TimelinePost{ID: id, Text: text}
+	if article, ok := result["article"].(map[string]any); ok {
+		if articleResults, ok := article["article_results"].(map[string]any); ok {
+			if articleResult, ok := articleResults["result"].(map[string]any); ok {
+				// plain_text is only present when the request opts in via
+				// withArticlePlainText; without it the article node is just a
+				// preview card and not worth surfacing as an article.
+				if plainText, ok := articleResult["plain_text"].(string); ok && plainText != "" {
+					post.Article = &TimelineArticle{Text: html.UnescapeString(plainText)}
+					post.Article.Title, _ = articleResult["title"].(string)
+				}
+			}
+		}
+	}
 	post.ReplyCount = intValue(legacy["reply_count"])
 	post.RepostCount = intValue(legacy["retweet_count"])
 	post.LikeCount = intValue(legacy["favorite_count"])
 	post.Liked, _ = legacy["favorited"].(bool)
+	post.Reposted, _ = legacy["retweeted"].(bool)
+	post.Bookmarked, _ = legacy["bookmarked"].(bool)
 	post.InReplyToID, _ = legacy["in_reply_to_status_id_str"].(string)
 	post.ConversationID, _ = legacy["conversation_id_str"].(string)
 	if created, _ := legacy["created_at"].(string); created != "" {

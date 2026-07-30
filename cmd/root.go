@@ -21,6 +21,8 @@ var (
 	composeOnly   bool
 	rootFollowing bool
 	rootBookmarks bool
+	rootListID    string
+	rootColumns   string
 	rootTheme     string
 )
 
@@ -30,6 +32,9 @@ var rootCmd = &cobra.Command{
 	Example: `  xeet                         # your timeline, with inline images
   xeet --following             # the Following feed instead of For You
   xeet --bookmarks             # your saved posts
+  xeet --list 123              # a list by id
+  xeet --columns 2             # two copies of the selected feed
+  xeet --columns @alice:foryou,@bob:following
   xeet --compose               # just the composer
   xeet post "hello, terminal"  # post without opening anything
   xeet theme                   # pick a color theme, with a preview`,
@@ -90,18 +95,47 @@ func init() {
 	rootCmd.Flags().BoolVar(&composeOnly, "compose", false, "open only the post composer")
 	rootCmd.Flags().BoolVar(&rootFollowing, "following", false, "start on the Following feed instead of For You")
 	rootCmd.Flags().BoolVar(&rootBookmarks, "bookmarks", false, "start on your bookmarks feed")
+	rootCmd.Flags().StringVar(&rootListID, "list", "", "start on the given list id")
+	rootCmd.Flags().StringVar(&rootColumns, "columns", "1", "column count (1-4) or feeds, optionally prefixed with @handle:")
 	rootCmd.Flags().StringVar(&rootTheme, "theme", "", "color theme for this run (see 'xeet theme')")
+	rootCmd.Flags().String("refresh", "", "auto-refresh the focused column every interval (e.g. 60s, 5m); off by default")
 	rootCmd.MarkFlagsMutuallyExclusive("barebones", "compose")
 	rootCmd.MarkFlagsMutuallyExclusive("compose", "following")
-	rootCmd.MarkFlagsMutuallyExclusive("following", "bookmarks")
+	rootCmd.MarkFlagsMutuallyExclusive("following", "bookmarks", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("compose", "bookmarks")
+	rootCmd.MarkFlagsMutuallyExclusive("compose", "list")
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
+	feed := timeline.FeedForYou
+	if rootFollowing {
+		feed = timeline.FeedFollowing
+	}
+	if rootBookmarks {
+		feed = timeline.FeedBookmarks
+	}
+	if rootListID != "" {
+		feed = timeline.FeedList
+	}
+	base := columnSpecForFeed(feed, "", rootListID)
+	singleFeedFlag := cmd.Flags().Changed("following") ||
+		cmd.Flags().Changed("bookmarks") || cmd.Flags().Changed("list")
 	configMgr, err := config.NewConfigManager()
 	if err != nil {
 		return err
 	}
+	accounts, err := configMgr.Accounts()
+	if err != nil {
+		return err
+	}
+	var specs []timeline.ColumnSpec
+	if cmd.Flags().Changed("columns") {
+		specs, err = resolveColumnSpecs(rootColumns, true, nil, base, singleFeedFlag, accounts)
+		if err != nil {
+			return err
+		}
+	}
+
 	// A load failure here (an incomplete keyring pair, an unreadable config)
 	// carries its own recovery advice. Falling through to the timeline would
 	// bury it under a generic fetch error.
@@ -124,14 +158,17 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if barebones {
 		imageMode = "off"
 	}
-	feed := timeline.FeedForYou
-	if rootFollowing {
-		feed = timeline.FeedFollowing
+	if specs == nil {
+		specs, err = resolveColumnSpecs(rootColumns, false, cfg.Columns, base, singleFeedFlag, accounts)
+		if err != nil {
+			return err
+		}
 	}
-	if rootBookmarks {
-		feed = timeline.FeedBookmarks
+	refresh, err := refreshIntervalFor(cmd)
+	if err != nil {
+		return err
 	}
-	return runTimeline(cmd.Context(), imageMode, feed, "")
+	return runTimeline(cmd.Context(), imageMode, specs, refresh)
 }
 
 // printFirstRun greets someone who has not connected an account yet. It is the
