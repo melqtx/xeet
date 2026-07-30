@@ -38,6 +38,8 @@ type Config struct {
 	DeleteRetweetQID               string    `yaml:"delete_retweet_qid,omitempty"`
 	UserByScreenNameQID            string    `yaml:"user_by_screen_name_qid,omitempty"`
 	UserTweetsQID                  string    `yaml:"user_tweets_qid,omitempty"`
+	CreateBookmarkQID              string    `yaml:"create_bookmark_qid,omitempty"`
+	DeleteBookmarkQID              string    `yaml:"delete_bookmark_qid,omitempty"`
 	Theme                          string    `yaml:"theme,omitempty"`
 	Columns                        []string  `yaml:"columns,omitempty"`
 	RefreshInterval                string    `yaml:"refresh_interval,omitempty"`
@@ -128,6 +130,8 @@ type fileConfig struct {
 	DeleteRetweetQID               string                 `yaml:"delete_retweet_qid,omitempty"`
 	UserByScreenNameQID            string                 `yaml:"user_by_screen_name_qid,omitempty"`
 	UserTweetsQID                  string                 `yaml:"user_tweets_qid,omitempty"`
+	CreateBookmarkQID              string                 `yaml:"create_bookmark_qid,omitempty"`
+	DeleteBookmarkQID              string                 `yaml:"delete_bookmark_qid,omitempty"`
 	Theme                          string                 `yaml:"theme,omitempty"`
 	Columns                        []string               `yaml:"columns,omitempty"`
 	RefreshInterval                string                 `yaml:"refresh_interval,omitempty"`
@@ -294,6 +298,8 @@ func fileConfigFor(config *Config) *fileConfig {
 		DeleteRetweetQID:               config.DeleteRetweetQID,
 		UserByScreenNameQID:            config.UserByScreenNameQID,
 		UserTweetsQID:                  config.UserTweetsQID,
+		CreateBookmarkQID:              config.CreateBookmarkQID,
+		DeleteBookmarkQID:              config.DeleteBookmarkQID,
 		Theme:                          config.Theme,
 		Columns:                        append([]string(nil), config.Columns...),
 		RefreshInterval:                config.RefreshInterval,

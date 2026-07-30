@@ -696,6 +696,11 @@ func (m Model) actionLine(post api.TimelinePost) string {
 			segments = append(segments, quiet.Render(repost))
 		}
 	}
+	// Bookmarks publish no count, so the marker only appears while set —
+	// unlike the heart and ⟳ it has nothing to show at zero.
+	if post.Bookmarked {
+		segments = append(segments, liked.Render("🔖"))
+	}
 	if views, err := strconv.Atoi(post.ViewCount); err == nil && views > 0 {
 		segments = append(segments, quiet.Render(formatCount(views)+" views"))
 	}
@@ -1108,16 +1113,18 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nt           repost / unrepost\nr           reply\nQ           quote post\nu           author profile\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n@           next account\n/           search\nL           lists\nn           add column\nx           remove column\ns           column account\nI           image mode\nT           theme\nl           like / unlike\nt           repost / unrepost\nB           bookmark / unbookmark\nr           reply\nQ           quote post\nu           author profile\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nt           repost / unrepost\nr           reply to selected\nQ           quote selected\nu           author profile\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nt           repost / unrepost\nB           bookmark / unbookmark\nr           reply to selected\nQ           quote selected\nu           author profile\nR           refresh replies\ne / space   read full post\ni           zoom image\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.height < 25 {
 		// One leading newline, not two: the repost entry makes the longest line
 		// wrap, and the extra row would push the box's title off a short screen.
-		keys = "\nj/k move · g/G ends · f feed\nb saved · L lists · / search\nl like · t repost · r reply\nenter open · e read · i zoom\nA alt · o open · R reload\nQ quote · u prof · y copy\n@ acct · q quit · n/x col±\ns acct · I/T img · P post"
+		// Content stays at eight lines for the same reason; g/G ends is the one
+		// full-help entry dropped to make room for B.
+		keys = "\nj/k move · f feed · b saved\nL lists · / search · @ acct\nl like · t repost · B save\nr reply · Q quote · u prof\nenter open · e read · i zoom\nA alt · o open · R reload\ny copy · n/x col± · s acct\nI/T img · P post · q quit"
 		if m.mode == modeThread {
-			keys = "\n\nj/k move · g/G ends\nl like · t repost · r reply\nQ quote · u prof · e read\ni zoom · A alt text\nR refresh · o browser · / search\ny copy · esc back · q quit"
+			keys = "\n\nj/k move · g/G ends\nl like · t repost · B save\nr reply · Q quote · u prof\ne read · i zoom · A alt\nR reload · o open · / search\ny copy · esc back · q quit"
 		}
 	}
 	images := "images: " + string(m.imageMode)

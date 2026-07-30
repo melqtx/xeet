@@ -189,6 +189,8 @@ func NewWebClient(cfg *config.Config) *WebClient {
 		"DeleteRetweet":               cfg.DeleteRetweetQID,
 		"UserByScreenName":            cfg.UserByScreenNameQID,
 		"UserTweets":                  cfg.UserTweetsQID,
+		"CreateBookmark":              cfg.CreateBookmarkQID,
+		"DeleteBookmark":              cfg.DeleteBookmarkQID,
 	}
 	qid := operationQIDs["CreateTweet"]
 	if qid == "" {
@@ -282,6 +284,10 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.UserByScreenNameQID = qid
 		case "UserTweets":
 			cfg.UserTweetsQID = qid
+		case "CreateBookmark":
+			cfg.CreateBookmarkQID = qid
+		case "DeleteBookmark":
+			cfg.DeleteBookmarkQID = qid
 		}
 	}
 	return true

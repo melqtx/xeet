@@ -57,6 +57,9 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case retweetMsg:
 		m.settleRepost(msg)
 		return m, nil
+	case bookmarkMsg:
+		m.settleBookmark(msg)
+		return m, nil
 	case profileMsg:
 		return m, m.applyProfileResult(msg)
 	case previewMsg:

@@ -40,6 +40,7 @@ type TimelinePost struct {
 	Media          []TimelineMedia
 	Liked          bool
 	Reposted       bool
+	Bookmarked     bool
 	InReplyToID    string
 	ConversationID string
 }
@@ -343,6 +344,7 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 	post.LikeCount = intValue(legacy["favorite_count"])
 	post.Liked, _ = legacy["favorited"].(bool)
 	post.Reposted, _ = legacy["retweeted"].(bool)
+	post.Bookmarked, _ = legacy["bookmarked"].(bool)
 	post.InReplyToID, _ = legacy["in_reply_to_status_id_str"].(string)
 	post.ConversationID, _ = legacy["conversation_id_str"].(string)
 	if created, _ := legacy["created_at"].(string); created != "" {

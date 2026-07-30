@@ -175,6 +175,7 @@ come back next time.
 | `A` | read image descriptions (works with previews off) |
 | `l` | like / unlike |
 | `t` | repost / unrepost |
+| `B` | bookmark / unbookmark |
 | `Q` | quote the selected post |
 | `u` | open the author's profile timeline |
 | `r` | reply in place |

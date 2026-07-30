@@ -180,6 +180,8 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyLikeResult(msg)
 	case retweetMsg:
 		return m, m.applyRepostResult(msg)
+	case bookmarkMsg:
+		return m, m.applyBookmarkResult(msg)
 	case profileMsg:
 		return m, m.applyProfileResult(msg)
 	case previewMsg:
@@ -278,6 +280,8 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.toggleSelectedLike()
 	case "t":
 		return m, m.toggleSelectedRepost()
+	case "B":
+		return m, m.toggleSelectedBookmark()
 	case "y":
 		return m, m.copySelectedLink()
 	}

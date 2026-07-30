@@ -101,6 +101,7 @@ type Model struct {
 	toastSeq      int
 	liking        map[string]bool
 	reposting     map[string]bool
+	bookmarking   map[string]bool
 	// previews is shared by post ID rather than duplicated per column because
 	// every feed column has the same width. Unequal panes would need a
 	// per-column cache to avoid alternating width-based refetches.
@@ -161,6 +162,13 @@ type retweetMsg struct {
 	accountID string
 	reposted  bool
 	err       error
+}
+
+type bookmarkMsg struct {
+	id         string
+	accountID  string
+	bookmarked bool
+	err        error
 }
 
 type replyResultMsg struct {
@@ -252,7 +260,7 @@ func NewWithImageMode(requested string) Model {
 	return Model{
 		ctx:   context.Background(),
 		width: 80, height: 24, imageMode: mode, imageNote: note,
-		liking: map[string]bool{}, reposting: map[string]bool{}, previews: map[string]previewState{},
+		liking: map[string]bool{}, reposting: map[string]bool{}, bookmarking: map[string]bool{}, previews: map[string]previewState{},
 		spinner: s, columns: []column{newColumn(0)},
 		nextColID: 1, replyEditor: editor, searchInput: search,
 	}
@@ -451,6 +459,27 @@ func setRetweet(parent context.Context, selectedAccountID, actingAccountID, twee
 	}
 }
 
+func setBookmark(parent context.Context, selectedAccountID, actingAccountID, tweetID string, bookmarked bool) tea.Cmd {
+	return func() tea.Msg {
+		mgr, err := openRequestConfigManager()
+		if err != nil {
+			return bookmarkMsg{id: tweetID, accountID: actingAccountID, bookmarked: bookmarked, err: err}
+		}
+		cfg, err := loadRequestConfig(mgr, selectedAccountID)
+		if err != nil {
+			return bookmarkMsg{id: tweetID, accountID: actingAccountID, bookmarked: bookmarked, err: err}
+		}
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+		defer cancel()
+		client := api.NewWebClient(cfg)
+		err = client.SetTweetBookmarked(ctx, tweetID, bookmarked)
+		if client.ApplyRefreshedQueryIDs(cfg) {
+			_ = mgr.SaveQueryIDs(cfg)
+		}
+		return bookmarkMsg{id: tweetID, accountID: actingAccountID, bookmarked: bookmarked, err: err}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = size.Width, size.Height
@@ -597,6 +626,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyLikeResult(msg)
 	case retweetMsg:
 		return m, m.applyRepostResult(msg)
+	case bookmarkMsg:
+		return m, m.applyBookmarkResult(msg)
 	case profileMsg:
 		return m, m.applyProfileResult(msg)
 	case listsMsg:
@@ -732,6 +763,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.toggleSelectedLike()
 	case "t":
 		return m, m.toggleSelectedRepost()
+	case "B":
+		return m, m.toggleSelectedBookmark()
 	case "y":
 		return m, m.copySelectedLink()
 	}
@@ -783,6 +816,30 @@ func (m *Model) applyRepostResult(msg retweetMsg) tea.Cmd {
 		toast = "couldn't update repost"
 	case msg.reposted:
 		toast = "reposted ⟳"
+	}
+	cmd := m.showToast(toast)
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return cmd
+}
+
+// settleBookmark clears the in-flight marker and rolls an optimistic bookmark
+// back if the request failed.
+func (m *Model) settleBookmark(msg bookmarkMsg) {
+	delete(m.bookmarking, likeKey(msg.accountID, msg.id))
+	if msg.err != nil {
+		m.applyBookmark(msg.accountID, msg.id, !msg.bookmarked)
+	}
+}
+
+func (m *Model) applyBookmarkResult(msg bookmarkMsg) tea.Cmd {
+	m.settleBookmark(msg)
+	toast := "bookmark removed"
+	switch {
+	case msg.err != nil:
+		toast = "couldn't update bookmark"
+	case msg.bookmarked:
+		toast = "bookmarked 🔖"
 	}
 	cmd := m.showToast(toast)
 	m.syncViewport()
@@ -903,6 +960,25 @@ func (m *Model) toggleSelectedRepost() tea.Cmd {
 	m.syncViewport()
 	m.ensureSelectedVisible()
 	return setRetweet(m.requestContext(), c.accountID, accountID, post.ID, reposted)
+}
+
+func (m *Model) toggleSelectedBookmark() tea.Cmd {
+	post, ok := m.currentPost()
+	if !ok {
+		return nil
+	}
+	c := m.cur()
+	accountID := m.columnAccountID(c)
+	key := likeKey(accountID, post.ID)
+	if m.bookmarking[key] {
+		return nil
+	}
+	bookmarked := !post.Bookmarked
+	m.bookmarking[key] = true
+	m.applyBookmark(accountID, post.ID, bookmarked)
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return setBookmark(m.requestContext(), c.accountID, accountID, post.ID, bookmarked)
 }
 
 func (m *Model) copySelectedLink() tea.Cmd {
@@ -1330,6 +1406,29 @@ func (m *Model) applyRepost(accountID, id string, reposted bool) {
 		} else if post.RepostCount > 0 {
 			post.RepostCount--
 		}
+	}
+	for columnIndex := range m.columns {
+		c := &m.columns[columnIndex]
+		if m.columnAccountID(c) != accountID {
+			continue
+		}
+		for i := range c.posts {
+			apply(&c.posts[i])
+		}
+		for i := range c.threadPosts {
+			apply(&c.threadPosts[i].TimelinePost)
+		}
+	}
+}
+
+// applyBookmark mirrors applyRepost minus the counter: X keeps bookmark
+// counts private, so only the flag flips.
+func (m *Model) applyBookmark(accountID, id string, bookmarked bool) {
+	apply := func(post *api.TimelinePost) {
+		if post.ID != id || post.Bookmarked == bookmarked {
+			return
+		}
+		post.Bookmarked = bookmarked
 	}
 	for columnIndex := range m.columns {
 		c := &m.columns[columnIndex]
