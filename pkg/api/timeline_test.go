@@ -44,6 +44,40 @@ func TestParseTimeline(t *testing.T) {
 	}
 }
 
+func TestParseTimelineItemReadsArticlePlainText(t *testing.T) {
+	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+		"rest_id": "1", "legacy": map[string]any{"full_text": "preview blurb"},
+		"article": map[string]any{"article_results": map[string]any{"result": map[string]any{
+			"title":      "My Article",
+			"plain_text": "the full article body &amp; more",
+		}}},
+	}}}
+	post, ok := parseTimelineItem(item)
+	if !ok || post.Article == nil {
+		t.Fatalf("article not parsed: %+v", post)
+	}
+	if post.Article.Title != "My Article" || post.Article.Text != "the full article body & more" {
+		t.Fatalf("unexpected article: %+v", post.Article)
+	}
+	// The preview blurb stays on Text; the article body does not overwrite it.
+	if post.Text != "preview blurb" {
+		t.Fatalf("text=%q", post.Text)
+	}
+}
+
+func TestParseTimelineItemIgnoresArticlePreviewWithoutPlainText(t *testing.T) {
+	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+		"rest_id": "1", "legacy": map[string]any{"full_text": "preview blurb"},
+		"article": map[string]any{"article_results": map[string]any{"result": map[string]any{
+			"title": "My Article",
+		}}},
+	}}}
+	post, ok := parseTimelineItem(item)
+	if !ok || post.Article != nil {
+		t.Fatalf("preview-only article should not surface: %+v", post.Article)
+	}
+}
+
 func TestParseTimelineUnescapesText(t *testing.T) {
 	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
 		"rest_id": "1", "legacy": map[string]any{"full_text": "&gt; hello &amp; goodbye"},

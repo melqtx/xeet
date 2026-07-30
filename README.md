@@ -121,6 +121,18 @@ xeet post "a reply" --reply 1234567890
 xeet post "a quote" --quote 1234567890
 ```
 
+reading a single post without the tui — handy for scripts and AI agents:
+
+```bash
+xeet fetch https://x.com/alice/status/1234567890   # JSON on stdout
+xeet fetch 1234567890 | jq .text                   # just the body
+xeet fetch <url> --text                            # human-readable instead
+xeet fetch <url> --replies 5                       # include replies
+```
+
+long posts come through in full, and X long-form articles land under
+`article.title` / `article.text`.
+
 if your session feels off:
 
 ```bash

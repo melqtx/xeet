@@ -76,6 +76,9 @@ func TestFetchTweetDetailUsesConfiguredQueryIDAndVariables(t *testing.T) {
 				t.Fatalf("variables %s missing %s", variables, want)
 			}
 		}
+		if toggles := req.URL.Query().Get("fieldToggles"); !strings.Contains(toggles, `"withArticlePlainText":true`) {
+			t.Fatalf("fieldToggles %s missing article opt-in", toggles)
+		}
 		return response(http.StatusOK, `{"data":{"threaded_conversation_with_injections_v2":{"instructions":[]}}}`), nil
 	})}
 	page, err := client.FetchTweetDetail(context.Background(), "123", "next", 25)
