@@ -19,11 +19,12 @@ const (
 )
 
 type TimelineMedia struct {
-	URL     string
-	Type    string
-	AltText string
-	Width   int
-	Height  int
+	URL      string
+	Type     string
+	AltText  string
+	Width    int
+	Height   int
+	VideoURL string
 }
 
 type TimelinePost struct {
@@ -364,6 +365,9 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 					entry.Width = intValue(original["width"])
 					entry.Height = intValue(original["height"])
 				}
+				if entry.Type == "video" || entry.Type == "animated_gif" {
+					entry.VideoURL = bestVideoVariant(item)
+				}
 				post.Media = append(post.Media, entry)
 			}
 			post.MediaCount = len(post.Media)
@@ -387,6 +391,43 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 		post.Handle, _ = userLegacy["screen_name"].(string)
 	}
 	return post, true
+}
+
+// bestVideoVariant picks the highest-bitrate MP4 variant from a media item's
+// video_info. Twitter also lists an HLS (.m3u8) variant with no bitrate
+// field; that one is skipped since mpv is pointed at a direct file so it
+// doesn't have to negotiate a manifest first.
+func bestVideoVariant(item map[string]any) string {
+	videoInfo, ok := item["video_info"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	variants, ok := videoInfo["variants"].([]any)
+	if !ok {
+		return ""
+	}
+	bestURL := ""
+	bestBitrate := -1
+	for _, raw := range variants {
+		variant, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		contentType, _ := variant["content_type"].(string)
+		if contentType != "video/mp4" {
+			continue
+		}
+		url, _ := variant["url"].(string)
+		if url == "" {
+			continue
+		}
+		bitrate := intValue(variant["bitrate"])
+		if bitrate > bestBitrate {
+			bestBitrate = bitrate
+			bestURL = url
+		}
+	}
+	return bestURL
 }
 
 func intValue(value any) int {

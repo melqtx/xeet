@@ -544,6 +544,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.showAltText()
 	case "i":
 		return m, m.zoomSelected()
+	case "v":
+		return m, m.playSelectedVideo()
 	case "l":
 		return m, m.toggleSelectedLike()
 	case "y":
@@ -593,6 +595,18 @@ func (m *Model) applyPreview(msg previewMsg) tea.Cmd {
 	m.syncViewport()
 	m.ensureSelectedVisible()
 	return m.imageRepaint()
+}
+
+func (m *Model) playSelectedVideo() tea.Cmd {
+	post, ok := m.currentPost()
+	if !ok || len(post.Media) == 0 {
+		return nil
+	}
+	videoURL := post.Media[0].VideoURL
+	if videoURL == "" {
+		return m.showToast("selected post has no video")
+	}
+	return playVideo(videoURL)
 }
 
 func (m *Model) openSelected() tea.Cmd {
