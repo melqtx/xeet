@@ -22,6 +22,7 @@ func playVideo(videoURL string) tea.Cmd {
 		if err := cmd.Start(); err != nil {
 			return actionMsg{err: fmt.Errorf("play video: %w", err)}
 		}
+		go func() { _ = cmd.Wait() }()
 		return actionMsg{message: "playing in mpv"}
 	}
 }
