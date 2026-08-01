@@ -1,6 +1,7 @@
 # Build artifacts
 xeet
 xeet-bin
+xeet-video
 xeet.exe
 dist/
 private-dist/

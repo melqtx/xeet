@@ -9,7 +9,7 @@
 buildGoModule (finalAttrs: {
   pname = "xeet";
   # Keep in step with the latest release tag.
-  version = "0.1.9";
+  version = "0.1.10";
 
   src = lib.cleanSource ./.;
 
