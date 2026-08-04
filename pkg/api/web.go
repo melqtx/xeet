@@ -162,7 +162,8 @@ func isTransientStatus(status int) bool {
 }
 
 // needsQueryIDRefresh reports whether a response indicates the persisted-query
-// id rotated: a plain 404, or a 400 that names the persisted query problem.
+// ID rotated: a plain 404, a PersistedQueryNotFound GraphQL payload, or a 400
+// that identifies a missing query ID.
 func needsQueryIDRefresh(res *httpResult) bool {
 	if res == nil {
 		return false

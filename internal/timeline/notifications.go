@@ -62,6 +62,8 @@ func fetchNotifications(parent context.Context, cursor string, more, poll bool, 
 			page, err = fetchNotificationChanges(ctx, client, page, cfg.NotificationsDeliveredID, count)
 		}
 		if client.ApplyRefreshedQueryIDs(cfg) {
+			// Query ID caching is best effort. A persistence failure must not
+			// discard notifications that were fetched successfully.
 			_ = mgr.Save(cfg)
 		}
 		return notificationMsg{
