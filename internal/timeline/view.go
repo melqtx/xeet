@@ -31,6 +31,9 @@ func (m Model) View() string {
 	if m.mode == modeReply {
 		return m.viewReply()
 	}
+	if m.mode == modeNotifications {
+		return m.viewNotifications()
+	}
 	if m.mode == modeThread {
 		return m.viewThread()
 	}
@@ -75,6 +78,9 @@ func (m Model) shell(center, footer string) string {
 	w := m.contentWidth()
 	body := m.header(w) + "\n\n" + center + "\n" +
 		lipgloss.NewStyle().Foreground(muted).Width(w).Align(lipgloss.Center).Render(footer)
+	if m.notificationPopup != nil && m.canShowNotificationPopup() {
+		body = overlayBlock(body, m.notificationPopupView(), w, 0)
+	}
 	// Keep two columns clear on the right. Filling the terminal's final column
 	// triggers autowrap in multiplexers such as Zellij and corrupts frame diffs.
 	left := max(0, (m.width-w)/2)
@@ -93,18 +99,13 @@ func (m Model) contentWidth() int {
 }
 
 func (m Model) header(width int) string {
-	status := "for you"
-	switch m.feed {
-	case FeedForYou:
-		status = "for you"
-	case FeedFollowing:
-		status = "following"
-	case FeedBookmarks:
-		status = "bookmarks"
-	case FeedSearch:
+	status := m.feedSwitcher()
+	if m.feed == FeedSearch {
 		status = ansi.Truncate("search · “"+m.searchQuery+"”", max(9, width-12), "…")
 	}
-	if m.mode == modeThread {
+	if m.mode == modeNotifications {
+		status = "notifications"
+	} else if m.mode == modeThread {
 		status = "replies"
 		if root, ok := m.threadRootPost(); ok && root.Handle != "" {
 			status = truncateRunes("replies to @"+root.Handle, max(9, width-12))
@@ -112,6 +113,8 @@ func (m Model) header(width int) string {
 	}
 	if m.mode == modeThread && (m.threadLoading || m.threadMore) {
 		status = m.spinner.View() + " loading replies"
+	} else if m.mode == modeNotifications && (m.notificationLoading || m.notificationMore) {
+		status = m.spinner.View() + " loading notifications"
 	} else if m.refreshing {
 		status = m.spinner.View() + " refreshing"
 	} else if m.loadingMore {
@@ -121,11 +124,45 @@ func (m Model) header(width int) string {
 	if m.err != nil || (m.mode == modeThread && m.threadErr != nil) {
 		face = "( >.< )"
 	}
-	cat := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
-		lipgloss.NewStyle().Foreground(blue).Bold(true).Render("   xeet") + "\n" +
-		lipgloss.NewStyle().Foreground(pink).Render(face) +
-		lipgloss.NewStyle().Foreground(muted).Render("   "+status)
-	return lipgloss.NewStyle().Width(width).Render(cat)
+	brand := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
+		lipgloss.NewStyle().Foreground(blue).Bold(true).Render("   xeet")
+	indicator := m.notificationIndicator()
+	gap := max(1, width-ansi.StringWidth(brand)-ansi.StringWidth(indicator))
+	first := ansi.Truncate(brand+strings.Repeat(" ", gap)+indicator, width, "")
+	second := lipgloss.NewStyle().Foreground(pink).Render(face) + "   " + status
+	second = ansi.Truncate(second, width, "…")
+	return lipgloss.NewStyle().Width(width).Render(first + "\n" + second)
+}
+
+func (m Model) feedSwitcher() string {
+	items := []struct {
+		kind  FeedKind
+		label string
+	}{
+		{FeedForYou, "for you"},
+		{FeedFollowing, "following"},
+		{FeedBookmarks, "bookmarks"},
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		label := item.label
+		style := lipgloss.NewStyle().Foreground(muted)
+		if m.feed == item.kind {
+			label = "[" + label + "]"
+			style = lipgloss.NewStyle().Foreground(blue).Bold(true)
+		}
+		parts = append(parts, style.Render(label))
+	}
+	return strings.Join(parts, lipgloss.NewStyle().Foreground(muted).Render(" · "))
+}
+
+func (m Model) notificationIndicator() string {
+	style := lipgloss.NewStyle().Foreground(muted)
+	if m.unreadNotifications == 0 {
+		return style.Render("n ○")
+	}
+	return lipgloss.NewStyle().Foreground(lavender).Bold(true).
+		Render(fmt.Sprintf("n ●%d", m.unreadNotifications))
 }
 
 func (m Model) footer() string {
@@ -155,12 +192,12 @@ func (m Model) footer() string {
 		return footer
 	}
 	if m.contentWidth() < 50 || len(m.posts) == 0 {
-		return fmt.Sprintf("%d/%d  ·  ? help", position, len(m.posts))
+		return fmt.Sprintf("%d/%d  ·  n inbox  ·  ? help", position, len(m.posts))
 	}
 	if m.expanded {
 		return fmt.Sprintf("%d/%d · e collapse · o browser · ? help", position, len(m.posts))
 	}
-	return fmt.Sprintf("%d/%d · enter replies · e read · r reply · ? help", position, len(m.posts))
+	return fmt.Sprintf("%d/%d · enter replies · r reply · n inbox · ? help", position, len(m.posts))
 }
 
 func (m Model) errorFooter(includeQuit bool) string {
@@ -232,7 +269,7 @@ func (m Model) threadFooter() string {
 	if len(m.threadPosts) > 0 {
 		position = m.selected + 1
 	}
-	return fmt.Sprintf("%d/%d · r reply · e read · esc back · ? help", position, len(m.threadPosts))
+	return fmt.Sprintf("%d/%d · r reply · n inbox · esc back · ? help", position, len(m.threadPosts))
 }
 
 func (m Model) renderThreadContent() (string, []int, []int) {
@@ -663,6 +700,9 @@ func (m Model) searchBackLabel() string {
 	if m.searchReturn == modeThread {
 		return "back to replies"
 	}
+	if m.searchReturn == modeNotifications {
+		return "back to notifications"
+	}
 	switch m.feed {
 	case FeedFollowing:
 		return "back to following"
@@ -681,6 +721,9 @@ func (m Model) searchBackLabel() string {
 func (m Model) searchBackShortLabel() string {
 	if m.searchReturn == modeThread {
 		return "replies"
+	}
+	if m.searchReturn == modeNotifications {
+		return "notifications"
 	}
 	switch m.feed {
 	case FeedFollowing:
@@ -809,26 +852,87 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nf           for you / following\nb           bookmarks / for you\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+	}
+	if m.mode == modeNotifications {
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nr           reply\nR           refresh\nenter       open conversation\ne / space   read full post\no           open in browser\ny           copy link\nesc / n     back\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends · f feed\nl like · r reply · y copy\nenter replies · e read · i zoom · A alt text\nR refresh · o browser\nP new · / search · ^L redraw\nb bookmarks · q quit"
+		keys = "\n\nj/k move · g/G ends\ntab feeds · n inbox\nl like · r reply · y copy\nenter replies · e read\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
 		if m.mode == modeThread {
-			keys = "\n\nj/k move · g/G ends\nl like · r reply · y copy\ne read · i zoom · A alt text\nR refresh · o browser · / search\nesc back · q quit"
+			keys = "\n\nj/k move · g/G ends\nl like · r reply · n inbox\ny copy · e read · i zoom\nA alt · R refresh · o browser\n/ search · esc back · q quit"
+		} else if m.mode == modeNotifications {
+			keys = "\n\nj/k move · r reply · enter conversation\nR refresh · o browser · y copy\nesc/n back · q quit"
 		}
 	}
 	images := "images: " + string(m.imageMode)
 	if m.imageNote != "" && m.height >= 28 {
 		images += "\n" + m.imageNote
 	}
-	body := lipgloss.NewStyle().Foreground(pink).Bold(true).Render("timeline keys") + keys +
+	helpTitle := "timeline keys"
+	if m.mode == modeNotifications {
+		helpTitle = "notification keys"
+	}
+	body := lipgloss.NewStyle().Foreground(pink).Bold(true).Render(helpTitle) + keys +
 		"\n\n" + lipgloss.NewStyle().Foreground(muted).Width(max(20, w-12)).Render(images) +
 		"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("? or esc close")
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
 		Padding(1, 2).Width(w - 6).Render(body)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) notificationPopupView() string {
+	if m.notificationPopup == nil {
+		return ""
+	}
+	item := m.notificationPopup
+	w := min(44, m.contentWidth()-2)
+	if w < 34 {
+		line := fmt.Sprintf("↩ @%s · N reply · n inbox · x hide", item.Post.Handle)
+		return lipgloss.NewStyle().Foreground(bright).Background(dim).Width(m.contentWidth()).
+			Render(ansi.Truncate(line, m.contentWidth(), "…"))
+	}
+	kind := string(item.Kind)
+	titleText := kind + " from @" + item.Post.Handle
+	if m.notificationOverflow > 0 {
+		titleText += fmt.Sprintf(" · +%d more", m.notificationOverflow)
+	}
+	title := lipgloss.NewStyle().Foreground(lavender).Bold(true).Render(titleText)
+	text := lipgloss.NewStyle().Foreground(bright).Width(w - 4).Render(cleanText(item.Post.Text))
+	lines := strings.Split(text, "\n")
+	if len(lines) > 2 {
+		lines = lines[:2]
+		lines[1] = ansi.Truncate(lines[1], w-5, "…")
+	}
+	hints := lipgloss.NewStyle().Foreground(muted).Render("N reply · n inbox · x hide")
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
+		Padding(0, 1).Width(w - 2).Render(title + "\n" + strings.Join(lines, "\n") + "\n" + hints)
+}
+
+// overlayBlock replaces cells in base with overlay while preserving ANSI
+// styles and the base's line count. It is intentionally small and right-aligned
+// for notification cards rather than being a general compositor.
+func overlayBlock(base, overlay string, width, top int) string {
+	if overlay == "" {
+		return base
+	}
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+	overlayWidth := lipgloss.Width(overlay)
+	left := max(0, width-overlayWidth)
+	for i, over := range overlayLines {
+		row := top + i
+		if row < 0 || row >= len(baseLines) {
+			continue
+		}
+		line := lipgloss.NewStyle().Width(width).Render(baseLines[row])
+		prefix := ansi.Cut(line, 0, left)
+		suffix := ansi.Cut(line, min(width, left+overlayWidth), width)
+		baseLines[row] = prefix + over + suffix
+	}
+	return strings.Join(baseLines, "\n")
 }
 
 func truncateRunes(value string, maxLen int) string {

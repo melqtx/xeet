@@ -13,6 +13,16 @@ import (
 	"github.com/melqtx/xeet/pkg/config"
 )
 
+func TestTransactionIDCacheIsScopedToSession(t *testing.T) {
+	first := transactionIDsForSession("auth-a", "ct0-a")
+	if first != transactionIDsForSession("auth-a", "ct0-a") {
+		t.Fatal("same session did not reuse transaction state")
+	}
+	if first == transactionIDsForSession("auth-b", "ct0-b") {
+		t.Fatal("different sessions shared transaction state")
+	}
+}
+
 func TestEncodeTransactionIDShape(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")
 	id, err := encodeTransactionID("POST", "/i/api/graphql/id/CreateTweet",

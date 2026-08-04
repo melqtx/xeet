@@ -43,6 +43,53 @@ func (m *Model) requestThread(cursor string, more bool) tea.Cmd {
 	return fetchThread(m.requestContext(), m.threadRootID, cursor, more, m.threadSeq)
 }
 
+func (m Model) snapshotThread() *threadState {
+	return &threadState{
+		rootID: m.threadRootID, posts: append([]api.ConversationPost(nil), m.threadPosts...),
+		cursor: m.threadCursor, loading: m.threadLoading, more: m.threadMore,
+		err: m.threadErr, seq: m.threadSeq, returnTo: m.threadReturn, focusID: m.threadFocusID,
+	}
+}
+
+func (m *Model) restoreThread(state *threadState) {
+	if state == nil {
+		return
+	}
+	m.threadRootID = state.rootID
+	m.threadPosts = append([]api.ConversationPost(nil), state.posts...)
+	m.threadCursor = state.cursor
+	m.threadLoading = state.loading
+	m.threadMore = state.more
+	m.threadErr = state.err
+	m.threadSeq = state.seq
+	m.threadReturn = state.returnTo
+	m.threadFocusID = state.focusID
+}
+
+func (m Model) beginThread(post api.TimelinePost, returnTo mode) (tea.Model, tea.Cmd) {
+	m.threadReturn = returnTo
+	m.threadFocusID = post.ID
+	if returnTo == modeFeed {
+		m.feedSelected = m.selected
+	} else if returnTo == modeNotifications {
+		m.notificationSelected = m.selected
+	}
+	m.mode = modeThread
+	m.threadRootID = post.ID
+	if returnTo == modeNotifications && post.ConversationID != "" {
+		m.threadRootID = post.ConversationID
+	}
+	m.threadPosts = []api.ConversationPost{{TimelinePost: post}}
+	m.threadCursor = ""
+	m.threadLoading = true
+	m.threadErr = nil
+	m.selected = 0
+	m.expanded = false
+	m.viewport.YOffset = 0
+	m.syncViewport()
+	return m, m.imageRepaint(tea.Batch(m.spinner.Tick, m.requestThread("", false), m.requestPreviews()))
+}
+
 func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd) {
 	if msg.rootID != m.threadRootID || msg.seq != m.threadSeq {
 		return m, nil
@@ -84,6 +131,12 @@ func (m Model) applyThreadPage(msg threadMsg, repaint bool) (tea.Model, tea.Cmd)
 	m.normalizeThreadDepths()
 	m.threadCursor = msg.page.Cursor
 	m.selected = indexOfConversationPost(m.threadPosts, selectedID)
+	if m.threadFocusID != "" {
+		if focused := indexOfConversationPost(m.threadPosts, m.threadFocusID); focused >= 0 {
+			m.selected = focused
+			m.threadFocusID = ""
+		}
+	}
 	if m.selected < 0 {
 		m.selected = 0
 	}
@@ -194,22 +247,8 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		m.mode = modeFeed
-		m.selected = m.feedSelected
-		m.threadSeq++
-		m.threadRootID = ""
-		m.expanded = false
-		m.threadLoading = false
-		m.threadMore = false
-		// An expired session affects every request, not just this thread.
-		// Hand the error to the feed so its reconnect flow stays reachable.
-		if errors.Is(m.threadErr, api.ErrSessionExpired) {
-			m.err = m.threadErr
-		}
-		m.threadErr = nil
-		m.syncViewport()
-		m.ensureSelectedVisible()
-		return m, m.imageRepaint()
+		return m.leaveThread()
+
 	case "a":
 		if errors.Is(m.threadErr, api.ErrSessionExpired) {
 			m.action = Action{Kind: ActionAuthenticate}
@@ -239,6 +278,19 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "G", "end":
 		m.moveThreadSelection(len(m.threadPosts) - 1)
 		return m, m.imageRepaint(m.requestPreviews(), m.maybeLoadMoreThread())
+	case "n":
+		return m.beginNotifications()
+	case "N":
+		if m.notificationPopup != nil {
+			post := m.notificationPopup.Post
+			m.notificationPopup = nil
+			m.notificationPopupSeq++
+			return m.beginReply(post)
+		}
+	case "x":
+		if m.notificationPopup != nil {
+			return m, m.imageRepaint(m.dismissNotificationPopup())
+		}
 	case "R", "ctrl+r":
 		m.threadLoading = true
 		m.threadMore = false
@@ -269,6 +321,36 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.copySelectedLink()
 	}
 	return m, nil
+}
+
+func (m Model) leaveThread() (tea.Model, tea.Cmd) {
+	returnTo := m.threadReturn
+	if returnTo != modeNotifications {
+		returnTo = modeFeed
+	}
+	m.mode = returnTo
+	if returnTo == modeNotifications {
+		m.selected = m.notificationSelected
+		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+			m.notificationErr = m.threadErr
+		}
+	} else {
+		m.selected = m.feedSelected
+		// An expired session affects every request, not just this thread.
+		if errors.Is(m.threadErr, api.ErrSessionExpired) {
+			m.err = m.threadErr
+		}
+	}
+	m.threadSeq++
+	m.threadRootID = ""
+	m.threadFocusID = ""
+	m.expanded = false
+	m.threadLoading = false
+	m.threadMore = false
+	m.threadErr = nil
+	m.syncViewport()
+	m.ensureSelectedVisible()
+	return m, m.imageRepaint(m.activateNotificationPopup())
 }
 
 func (m *Model) moveThreadSelection(target int) {

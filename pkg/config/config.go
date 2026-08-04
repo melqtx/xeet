@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -21,23 +23,27 @@ import (
 // state: X's rotating GraphQL query ids and browser-session source metadata used
 // by `xeet doctor`.
 type Config struct {
-	AuthToken             string    `yaml:"-"`
-	CT0                   string    `yaml:"-"`
-	CreateTweetQID        string    `yaml:"create_tweet_qid"`
-	HomeTimelineQID       string    `yaml:"home_timeline_qid,omitempty"`
-	HomeLatestTimelineQID string    `yaml:"home_latest_timeline_qid,omitempty"`
-	BookmarksQID          string    `yaml:"bookmarks_qid,omitempty"`
-	SearchTimelineQID     string    `yaml:"search_timeline_qid,omitempty"`
-	FavoriteTweetQID      string    `yaml:"favorite_tweet_qid,omitempty"`
-	UnfavoriteTweetQID    string    `yaml:"unfavorite_tweet_qid,omitempty"`
-	ViewerQID             string    `yaml:"viewer_qid,omitempty"`
-	TweetDetailQID        string    `yaml:"tweet_detail_qid,omitempty"`
-	Theme                 string    `yaml:"theme,omitempty"`
-	SessionBrowser        string    `yaml:"session_browser,omitempty"`
-	SessionProfile        string    `yaml:"session_profile,omitempty"`
-	SessionDomain         string    `yaml:"session_domain,omitempty"`
-	SessionExpires        time.Time `yaml:"session_expires,omitempty"`
-	SessionImported       time.Time `yaml:"session_imported,omitempty"`
+	AuthToken                string    `yaml:"-"`
+	CT0                      string    `yaml:"-"`
+	CreateTweetQID           string    `yaml:"create_tweet_qid"`
+	HomeTimelineQID          string    `yaml:"home_timeline_qid,omitempty"`
+	HomeLatestTimelineQID    string    `yaml:"home_latest_timeline_qid,omitempty"`
+	BookmarksQID             string    `yaml:"bookmarks_qid,omitempty"`
+	SearchTimelineQID        string    `yaml:"search_timeline_qid,omitempty"`
+	FavoriteTweetQID         string    `yaml:"favorite_tweet_qid,omitempty"`
+	UnfavoriteTweetQID       string    `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID                string    `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID           string    `yaml:"tweet_detail_qid,omitempty"`
+	NotificationsQID         string    `yaml:"notifications_timeline_qid,omitempty"`
+	NotificationsDeliveredID string    `yaml:"notifications_delivered_id,omitempty"`
+	NotificationsReadID      string    `yaml:"notifications_read_id,omitempty"`
+	NotificationsAccountID   string    `yaml:"notifications_account_id,omitempty"`
+	Theme                    string    `yaml:"theme,omitempty"`
+	SessionBrowser           string    `yaml:"session_browser,omitempty"`
+	SessionProfile           string    `yaml:"session_profile,omitempty"`
+	SessionDomain            string    `yaml:"session_domain,omitempty"`
+	SessionExpires           time.Time `yaml:"session_expires,omitempty"`
+	SessionImported          time.Time `yaml:"session_imported,omitempty"`
 }
 
 // keyringService is the service name xeet registers its secrets under.
@@ -95,23 +101,27 @@ func (systemKeyring) Delete(key string) error {
 // fileConfig is the on-disk shape. auth_token and ct0 are only read for
 // migration from the pre-keyring layout and are never written back.
 type fileConfig struct {
-	AuthToken             string `yaml:"auth_token,omitempty"`
-	CT0                   string `yaml:"ct0,omitempty"`
-	CreateTweetQID        string `yaml:"create_tweet_qid,omitempty"`
-	HomeTimelineQID       string `yaml:"home_timeline_qid,omitempty"`
-	HomeLatestTimelineQID string `yaml:"home_latest_timeline_qid,omitempty"`
-	BookmarksQID          string `yaml:"bookmarks_qid,omitempty"`
-	SearchTimelineQID     string `yaml:"search_timeline_qid,omitempty"`
-	FavoriteTweetQID      string `yaml:"favorite_tweet_qid,omitempty"`
-	UnfavoriteTweetQID    string `yaml:"unfavorite_tweet_qid,omitempty"`
-	ViewerQID             string `yaml:"viewer_qid,omitempty"`
-	TweetDetailQID        string `yaml:"tweet_detail_qid,omitempty"`
-	Theme                 string `yaml:"theme,omitempty"`
-	SessionBrowser        string `yaml:"session_browser,omitempty"`
-	SessionProfile        string `yaml:"session_profile,omitempty"`
-	SessionDomain         string `yaml:"session_domain,omitempty"`
-	SessionExpires        string `yaml:"session_expires,omitempty"`
-	SessionImported       string `yaml:"session_imported,omitempty"`
+	AuthToken                string `yaml:"auth_token,omitempty"`
+	CT0                      string `yaml:"ct0,omitempty"`
+	CreateTweetQID           string `yaml:"create_tweet_qid,omitempty"`
+	HomeTimelineQID          string `yaml:"home_timeline_qid,omitempty"`
+	HomeLatestTimelineQID    string `yaml:"home_latest_timeline_qid,omitempty"`
+	BookmarksQID             string `yaml:"bookmarks_qid,omitempty"`
+	SearchTimelineQID        string `yaml:"search_timeline_qid,omitempty"`
+	FavoriteTweetQID         string `yaml:"favorite_tweet_qid,omitempty"`
+	UnfavoriteTweetQID       string `yaml:"unfavorite_tweet_qid,omitempty"`
+	ViewerQID                string `yaml:"viewer_qid,omitempty"`
+	TweetDetailQID           string `yaml:"tweet_detail_qid,omitempty"`
+	NotificationsQID         string `yaml:"notifications_timeline_qid,omitempty"`
+	NotificationsDeliveredID string `yaml:"notifications_delivered_id,omitempty"`
+	NotificationsReadID      string `yaml:"notifications_read_id,omitempty"`
+	NotificationsAccountID   string `yaml:"notifications_account_id,omitempty"`
+	Theme                    string `yaml:"theme,omitempty"`
+	SessionBrowser           string `yaml:"session_browser,omitempty"`
+	SessionProfile           string `yaml:"session_profile,omitempty"`
+	SessionDomain            string `yaml:"session_domain,omitempty"`
+	SessionExpires           string `yaml:"session_expires,omitempty"`
+	SessionImported          string `yaml:"session_imported,omitempty"`
 }
 
 type ConfigManager struct {
@@ -119,6 +129,8 @@ type ConfigManager struct {
 	legacyKeyPath string
 	secrets       SecretStore
 }
+
+var configWriteMu sync.Mutex
 
 func NewConfigManager() (*ConfigManager, error) {
 	homeDir, err := os.UserHomeDir()
@@ -143,19 +155,23 @@ func (cm *ConfigManager) Load() (*Config, error) {
 	}
 
 	config := &Config{
-		CreateTweetQID:        fc.CreateTweetQID,
-		HomeTimelineQID:       fc.HomeTimelineQID,
-		HomeLatestTimelineQID: fc.HomeLatestTimelineQID,
-		BookmarksQID:          fc.BookmarksQID,
-		SearchTimelineQID:     fc.SearchTimelineQID,
-		FavoriteTweetQID:      fc.FavoriteTweetQID,
-		UnfavoriteTweetQID:    fc.UnfavoriteTweetQID,
-		ViewerQID:             fc.ViewerQID,
-		TweetDetailQID:        fc.TweetDetailQID,
-		Theme:                 fc.Theme,
-		SessionBrowser:        fc.SessionBrowser,
-		SessionProfile:        fc.SessionProfile,
-		SessionDomain:         fc.SessionDomain,
+		CreateTweetQID:           fc.CreateTweetQID,
+		HomeTimelineQID:          fc.HomeTimelineQID,
+		HomeLatestTimelineQID:    fc.HomeLatestTimelineQID,
+		BookmarksQID:             fc.BookmarksQID,
+		SearchTimelineQID:        fc.SearchTimelineQID,
+		FavoriteTweetQID:         fc.FavoriteTweetQID,
+		UnfavoriteTweetQID:       fc.UnfavoriteTweetQID,
+		ViewerQID:                fc.ViewerQID,
+		TweetDetailQID:           fc.TweetDetailQID,
+		NotificationsQID:         fc.NotificationsQID,
+		NotificationsDeliveredID: fc.NotificationsDeliveredID,
+		NotificationsReadID:      fc.NotificationsReadID,
+		NotificationsAccountID:   fc.NotificationsAccountID,
+		Theme:                    fc.Theme,
+		SessionBrowser:           fc.SessionBrowser,
+		SessionProfile:           fc.SessionProfile,
+		SessionDomain:            fc.SessionDomain,
 	}
 	if fc.SessionExpires != "" {
 		if parsed, parseErr := time.Parse(time.RFC3339, fc.SessionExpires); parseErr == nil {
@@ -239,12 +255,28 @@ func (cm *ConfigManager) migrateLegacy(fc *fileConfig, config *Config) error {
 }
 
 func (cm *ConfigManager) Save(config *Config) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+	unlock, err := lockConfigFile(cm.configPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return cm.save(config)
+}
+
+func (cm *ConfigManager) save(config *Config) error {
 	if config == nil {
 		return errors.New("config is nil")
 	}
 	if (config.AuthToken == "") != (config.CT0 == "") {
 		return ErrSessionIncomplete
 	}
+	current, err := cm.readFile()
+	if err != nil {
+		return err
+	}
+	mergeNotificationState(config, current)
 	if config.AuthToken == "" {
 		return cm.writeFile(&fileConfig{
 			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
@@ -253,7 +285,11 @@ func (cm *ConfigManager) Save(config *Config) error {
 			SearchTimelineQID:     config.SearchTimelineQID,
 			FavoriteTweetQID:      config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
 			ViewerQID: config.ViewerQID, TweetDetailQID: config.TweetDetailQID,
-			Theme: config.Theme,
+			NotificationsQID:         config.NotificationsQID,
+			NotificationsDeliveredID: config.NotificationsDeliveredID,
+			NotificationsReadID:      config.NotificationsReadID,
+			NotificationsAccountID:   config.NotificationsAccountID,
+			Theme:                    config.Theme,
 		})
 	}
 
@@ -284,21 +320,93 @@ func (cm *ConfigManager) Save(config *Config) error {
 	return nil
 }
 
+func mergeNotificationState(config *Config, current *fileConfig) {
+	if config == nil || current == nil || current.NotificationsAccountID == "" {
+		return
+	}
+	if config.NotificationsAccountID == "" || config.NotificationsAccountID != current.NotificationsAccountID {
+		config.NotificationsAccountID = current.NotificationsAccountID
+		config.NotificationsDeliveredID = current.NotificationsDeliveredID
+		config.NotificationsReadID = current.NotificationsReadID
+		return
+	}
+	if numericIDAfter(current.NotificationsDeliveredID, config.NotificationsDeliveredID) {
+		config.NotificationsDeliveredID = current.NotificationsDeliveredID
+	}
+	if numericIDAfter(current.NotificationsReadID, config.NotificationsReadID) {
+		config.NotificationsReadID = current.NotificationsReadID
+	}
+}
+
+// SaveNotificationState updates only non-secret notification metadata. Unlike
+// Save it never reads or rewrites the OS keyring, and it skips unchanged files.
+func (cm *ConfigManager) SaveNotificationState(accountID, deliveredID, readID string) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+	unlock, err := lockConfigFile(cm.configPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	fc, err := cm.readFile()
+	if err != nil {
+		return err
+	}
+	before := *fc
+	if accountID != "" && fc.NotificationsAccountID != "" && fc.NotificationsAccountID != accountID {
+		fc.NotificationsDeliveredID = ""
+		fc.NotificationsReadID = ""
+	}
+	if accountID != "" {
+		fc.NotificationsAccountID = accountID
+	}
+	if numericIDAfter(deliveredID, fc.NotificationsDeliveredID) {
+		fc.NotificationsDeliveredID = deliveredID
+	}
+	if numericIDAfter(readID, fc.NotificationsReadID) {
+		fc.NotificationsReadID = readID
+	}
+	if *fc == before {
+		return nil
+	}
+	return cm.writeFile(fc)
+}
+
+func numericIDAfter(left, right string) bool {
+	left = strings.TrimLeft(left, "0")
+	right = strings.TrimLeft(right, "0")
+	if left == "" {
+		return false
+	}
+	if right == "" {
+		return true
+	}
+	if len(left) != len(right) {
+		return len(left) > len(right)
+	}
+	return left > right
+}
+
 func fileConfigFor(config *Config) *fileConfig {
 	result := &fileConfig{
-		CreateTweetQID:        config.CreateTweetQID,
-		HomeTimelineQID:       config.HomeTimelineQID,
-		HomeLatestTimelineQID: config.HomeLatestTimelineQID,
-		BookmarksQID:          config.BookmarksQID,
-		SearchTimelineQID:     config.SearchTimelineQID,
-		FavoriteTweetQID:      config.FavoriteTweetQID,
-		UnfavoriteTweetQID:    config.UnfavoriteTweetQID,
-		ViewerQID:             config.ViewerQID,
-		TweetDetailQID:        config.TweetDetailQID,
-		Theme:                 config.Theme,
-		SessionBrowser:        config.SessionBrowser,
-		SessionProfile:        config.SessionProfile,
-		SessionDomain:         config.SessionDomain,
+		CreateTweetQID:           config.CreateTweetQID,
+		HomeTimelineQID:          config.HomeTimelineQID,
+		HomeLatestTimelineQID:    config.HomeLatestTimelineQID,
+		BookmarksQID:             config.BookmarksQID,
+		SearchTimelineQID:        config.SearchTimelineQID,
+		FavoriteTweetQID:         config.FavoriteTweetQID,
+		UnfavoriteTweetQID:       config.UnfavoriteTweetQID,
+		ViewerQID:                config.ViewerQID,
+		TweetDetailQID:           config.TweetDetailQID,
+		NotificationsQID:         config.NotificationsQID,
+		NotificationsDeliveredID: config.NotificationsDeliveredID,
+		NotificationsReadID:      config.NotificationsReadID,
+		NotificationsAccountID:   config.NotificationsAccountID,
+		Theme:                    config.Theme,
+		SessionBrowser:           config.SessionBrowser,
+		SessionProfile:           config.SessionProfile,
+		SessionDomain:            config.SessionDomain,
 	}
 	if !config.SessionExpires.IsZero() {
 		result.SessionExpires = config.SessionExpires.UTC().Format(time.RFC3339)

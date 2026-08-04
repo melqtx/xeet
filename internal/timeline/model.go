@@ -67,7 +67,20 @@ const (
 	modeThread
 	modeReply
 	modeSearch
+	modeNotifications
 )
+
+type threadState struct {
+	rootID   string
+	posts    []api.ConversationPost
+	cursor   string
+	loading  bool
+	more     bool
+	err      error
+	seq      int
+	returnTo mode
+	focusID  string
+}
 
 type Model struct {
 	// ctx bounds every request this model starts. It carries the process's
@@ -121,6 +134,35 @@ type Model struct {
 	replyNotice   string
 	searchInput   textinput.Model
 	searchReturn  mode
+
+	notifications              []api.Notification
+	notificationCursor         string
+	notificationSelected       int
+	notificationLoading        bool
+	notificationMore           bool
+	notificationErr            error
+	notificationSeq            int
+	notificationTimerSeq       int
+	notificationPolling        bool
+	notificationBackoff        time.Duration
+	notificationIdlePolls      int
+	notificationReturn         mode
+	notificationReturnSelected int
+	notificationPopup          *api.Notification
+	notificationQueue          []api.Notification
+	notificationOverflow       int
+	notificationPopupSeq       int
+	notificationDeliveredID    string
+	notificationReadID         string
+	notificationAccountID      string
+	notificationStateLoaded    bool
+	notificationBaselineSet    bool
+	notificationStateDirty     bool
+	notificationThread         *threadState
+	unreadNotifications        int
+
+	threadReturn  mode
+	threadFocusID string
 }
 
 type pageMsg struct {
@@ -221,6 +263,7 @@ func NewWithImageMode(requested string) Model {
 		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
 		liking: map[string]bool{}, previews: map[string]previewState{},
 		spinner: s, viewport: vp, replyEditor: editor, searchInput: search,
+		notificationSeq: 1, notificationPolling: true,
 	}
 }
 
@@ -234,10 +277,11 @@ func (m Model) requestContext() context.Context {
 }
 
 func (m Model) Init() tea.Cmd {
+	initialNotifications := fetchNotifications(m.requestContext(), "", false, true, m.notificationSeq)
 	if m.feed == FeedSearch && m.searchQuery == "" {
-		return tea.Batch(m.searchInput.Focus(), clockTick())
+		return tea.Batch(m.searchInput.Focus(), clockTick(), initialNotifications)
 	}
-	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq), clockTick())
+	return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq), clockTick(), initialNotifications)
 }
 
 func Run(ctx context.Context, images string, feed FeedKind, query string) (Action, error) {
@@ -342,7 +386,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeFeed && !m.help {
 			m.syncViewport()
 		}
-		return m, clockTick()
+		return m, tea.Batch(clockTick(), m.activateNotificationPopup())
+	}
+	// Polling results are global so editors and overlays cannot drop them.
+	switch note := msg.(type) {
+	case notificationMsg:
+		return m, m.imageRepaint(m.applyNotificationPage(note))
+	case notificationPollTickMsg:
+		if note.seq != m.notificationTimerSeq {
+			return m, nil
+		}
+		if m.notificationPolling {
+			// A manual refresh or pagination request consumed this tick. Keep the
+			// background loop alive instead of silently stopping notification polling.
+			return m, m.scheduleNotificationPoll(notificationPollInterval)
+		}
+		return m, m.requestNotifications("", false, true)
+	case notificationPopupClearMsg:
+		if note.seq != m.notificationPopupSeq {
+			return m, nil
+		}
+		return m, m.imageRepaint(m.dismissNotificationPopup())
+	case notificationStateSavedMsg:
+		if note.err == nil && note.accountID == m.notificationAccountID &&
+			note.deliveredID == m.notificationDeliveredID && note.readID == m.notificationReadID {
+			m.notificationStateDirty = false
+		}
+		return m, nil
+	}
+	if thread, ok := msg.(threadMsg); ok && m.notificationThread != nil &&
+		thread.rootID == m.notificationThread.rootID && thread.seq == m.notificationThread.seq &&
+		(m.threadRootID != thread.rootID || m.threadSeq != thread.seq) {
+		return m.applyThreadPageBehindNotifications(thread)
 	}
 	if _, ok := msg.(wezRepaintMsg); ok {
 		if m.imageMode != imageModeWezTerm {
@@ -426,6 +501,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSearch(msg)
 	case modeThread:
 		return m.updateThread(msg)
+	case modeNotifications:
+		return m.updateNotifications(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -487,6 +564,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		m.syncViewport()
 		return m, func() tea.Msg { return tea.ClearScreen() }
+	case "tab":
+		return m, m.cycleFeed(1)
+	case "shift+tab":
+		return m, m.cycleFeed(-1)
 	case "f":
 		return m, m.switchFeed()
 	case "b":
@@ -496,6 +577,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.setFeed(FeedBookmarks)
 	case "/":
 		return m, m.beginSearch()
+	case "n":
+		return m.beginNotifications()
+	case "N":
+		if m.notificationPopup != nil {
+			post := m.notificationPopup.Post
+			m.notificationPopup = nil
+			m.notificationPopupSeq++
+			return m.beginReply(post)
+		}
+	case "x":
+		if m.notificationPopup != nil {
+			return m, m.imageRepaint(m.dismissNotificationPopup())
+		}
 	case "R", "ctrl+r":
 		if len(m.posts) == 0 {
 			m.loading = true
@@ -518,18 +612,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "enter":
 		if post, ok := m.currentPost(); ok {
-			m.feedSelected = m.selected
-			m.mode = modeThread
-			m.threadRootID = post.ID
-			m.threadPosts = []api.ConversationPost{{TimelinePost: post}}
-			m.threadCursor = ""
-			m.threadLoading = true
-			m.threadErr = nil
-			m.selected = 0
-			m.expanded = false
-			m.viewport.YOffset = 0
-			m.syncViewport()
-			return m, m.imageRepaint(tea.Batch(m.spinner.Tick, m.requestThread("", false), m.requestPreviews()))
+			return m.beginThread(post, modeFeed)
 		}
 	case " ", "e":
 		if len(m.posts) > 0 {
@@ -702,6 +785,27 @@ func (m *Model) setFeed(kind FeedKind) tea.Cmd {
 	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq)))
 }
 
+// cycleFeed moves through the three persistent feed tabs. Search results are
+// not a tab: tab leaves them for For You, while shift+tab leaves for Bookmarks.
+func (m *Model) cycleFeed(delta int) tea.Cmd {
+	feeds := []FeedKind{FeedForYou, FeedFollowing, FeedBookmarks}
+	index := -1
+	for i, feed := range feeds {
+		if m.feed == feed {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		if delta < 0 {
+			return m.setFeed(FeedBookmarks)
+		}
+		return m.setFeed(FeedForYou)
+	}
+	index = (index + delta + len(feeds)) % len(feeds)
+	return m.setFeed(feeds[index])
+}
+
 // switchFeed keeps the f-key semantics: toggle For You <-> Following.
 // From any other feed kind it returns to For You.
 func (m *Model) switchFeed() tea.Cmd {
@@ -733,9 +837,9 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.err = nil
-	threadContext := m.mode == modeThread ||
-		(m.mode == modeReply && m.replyReturn == modeThread) ||
-		(m.mode == modeSearch && m.searchReturn == modeThread)
+	threadContext := m.mode == modeThread || m.mode == modeNotifications ||
+		(m.mode == modeReply && m.replyReturn != modeFeed) ||
+		(m.mode == modeSearch && m.searchReturn != modeFeed)
 	feedIndex := m.selected
 	if threadContext {
 		feedIndex = m.feedSelected
@@ -822,6 +926,9 @@ func (m Model) imageFrameKey() string {
 	fmt.Fprintf(hash, "%d|%d|%d|%d|%v|%v|%v|%v|%v|",
 		m.viewport.YOffset, m.viewport.Width, m.viewport.Height,
 		m.mode, m.help, m.altText, m.zoom, m.expanded, m.loading)
+	if m.notificationPopup != nil {
+		fmt.Fprintf(hash, "notification:%s|", m.notificationPopup.ID)
+	}
 	for _, start := range m.starts {
 		fmt.Fprintf(hash, "%d,", start)
 	}
@@ -852,6 +959,8 @@ func (m *Model) syncViewport() {
 	var starts, ends []int
 	if m.mode == modeThread {
 		content, starts, ends = m.renderThreadContent()
+	} else if m.mode == modeNotifications {
+		content, starts, ends = m.renderNotificationContent()
 	} else {
 		content, starts, ends = m.renderFeedContent()
 	}
@@ -884,6 +993,13 @@ func (m *Model) ensureSelectedVisible() {
 }
 
 func (m Model) activePosts() []api.TimelinePost {
+	if m.mode == modeNotifications {
+		posts := make([]api.TimelinePost, len(m.notifications))
+		for i := range m.notifications {
+			posts[i] = m.notifications[i].Post
+		}
+		return posts
+	}
 	if m.mode == modeThread {
 		posts := make([]api.TimelinePost, len(m.threadPosts))
 		for i := range m.threadPosts {
@@ -895,6 +1011,12 @@ func (m Model) activePosts() []api.TimelinePost {
 }
 
 func (m Model) currentPost() (api.TimelinePost, bool) {
+	if m.mode == modeNotifications {
+		if m.selected < 0 || m.selected >= len(m.notifications) {
+			return api.TimelinePost{}, false
+		}
+		return m.notifications[m.selected].Post, true
+	}
 	if m.mode == modeThread {
 		if m.selected < 0 || m.selected >= len(m.threadPosts) {
 			return api.TimelinePost{}, false
@@ -924,6 +1046,9 @@ func (m *Model) applyLike(id string, liked bool) {
 	}
 	for i := range m.threadPosts {
 		apply(&m.threadPosts[i].TimelinePost)
+	}
+	for i := range m.notifications {
+		apply(&m.notifications[i].Post)
 	}
 }
 

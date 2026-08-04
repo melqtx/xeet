@@ -11,7 +11,7 @@
 ```
 
 post to x from your terminal. no api keys, no browser tab. browse your
-timeline with inline images, reply, like, done.
+timeline with inline images, get reply notifications, answer in place, like, done.
 
 > [!WARNING]
 > xeet uses the same internal endpoints the x website uses, with your
@@ -157,6 +157,7 @@ come back next time.
 | key | does |
 |---|---|
 | `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
+| `tab` / `shift+tab` | cycle forward / backward through For You, Following, and Bookmarks |
 | `f` | switch between the for you and following feeds |
 | `b` | switch between bookmarks and the for you feed |
 | `/` | search posts |
@@ -170,6 +171,8 @@ come back next time.
 | `y` | copy link |
 | `P` | write a new post |
 | `R` | refresh in place, new posts stack on top, you keep your spot |
+| `n` | open replies and mentions |
+| `N` | reply directly to the active notification popup |
 | `?` | key guide + which image renderer is active and why |
 
 more posts load automatically near the bottom; search results are just
@@ -177,6 +180,13 @@ another feed, so like, reply, and thread all work there too. inside a
 conversation, `j`/`k` moves through replies, `r` replies to the selected
 item, `R` reloads, and `esc` drops you back exactly where you were in the
 timeline.
+
+while the TUI is open, xeet checks for new replies and mentions every one to
+five minutes, slowing down while idle. a small in-terminal card lets you press `N` to answer immediately,
+`n` to open the notification panel, or `x` to hide the card. the panel keeps
+unread state across restarts and supports the same reply, conversation,
+browser, copy, like, and media actions as the timeline. this is active-session
+polling—not a desktop notification service—and does not run after xeet exits.
 
 **themes**
 
