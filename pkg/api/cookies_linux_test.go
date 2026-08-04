@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,5 +87,57 @@ func TestLinuxLockedKeyringErrorIsActionable(t *testing.T) {
 	_, _, err := importChromiumSession(browser)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "unlock") {
 		t.Fatalf("error = %v, want unlock guidance", err)
+	}
+}
+
+func TestWSLAddsOnlyWindowsFirefoxRoot(t *testing.T) {
+	home := t.TempDir()
+	appData := filepath.Join(t.TempDir(), "Users", "Ada Lovelace", "AppData", "Roaming")
+	browsers := geckoBrowsersAt(home, appData)
+
+	firefox, ok := findGeckoBrowser("Firefox", browsers)
+	if !ok {
+		t.Fatal("Firefox missing")
+	}
+	want := filepath.Join(appData, "Mozilla", "Firefox")
+	if firefox.windowsRoot != want || !slices.Contains(firefox.roots, want) {
+		t.Fatalf("Firefox roots = %#v, windows root = %q", firefox.roots, firefox.windowsRoot)
+	}
+
+	zen, ok := findGeckoBrowser("Zen", browsers)
+	if !ok {
+		t.Fatal("Zen missing")
+	}
+	if zen.windowsRoot != "" || slices.Contains(zen.roots, filepath.Join(appData, "Zen")) {
+		t.Fatalf("Windows roots leaked into Zen: %+v", zen)
+	}
+}
+
+func TestWSLFirefoxImportRecordsWindowsSource(t *testing.T) {
+	windowsRoot := filepath.Join(t.TempDir(), "Mozilla", "Firefox")
+	profile := filepath.Join(windowsRoot, "Profiles", "default-release")
+	if err := os.MkdirAll(profile, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "cookies.sqlite"), []byte("db"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	browser := geckoBrowser{
+		name:        "Firefox",
+		roots:       []string{windowsRoot},
+		windowsRoot: windowsRoot,
+		reader: func(string) ([]*kooky.Cookie, error) {
+			return []*kooky.Cookie{
+				{Cookie: http.Cookie{Name: "auth_token", Value: "token", Domain: ".x.com"}},
+				{Cookie: http.Cookie{Name: "ct0", Value: "csrf", Domain: ".x.com"}},
+			}, nil
+		},
+	}
+	result, name, err := importGeckoSession(browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Profile != "default-release" || name != "Firefox (Windows via WSL)" {
+		t.Fatalf("result = %+v, browser = %q", result, name)
 	}
 }

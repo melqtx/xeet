@@ -133,7 +133,7 @@ func verifyAndSave(ctx context.Context, result *api.LoginResult, browser string)
 
 // runAuthPlain is the scripted path: no picker, no spinner, one line per step.
 func runAuthPlain(ctx context.Context, out io.Writer, browser string) error {
-	fmt.Fprintf(out, "Reading your session from %s (your OS may ask to unlock its keyring)...\n", browser)
+	fmt.Fprintf(out, "Reading your session from %s (your OS may ask to unlock secure storage)...\n", browser)
 	result, resolved, err := api.ImportBrowserSession(browser)
 	if err != nil {
 		return err

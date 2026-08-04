@@ -22,9 +22,11 @@ output from an account you care about; redact first.
 
 ## Scope notes
 
-- Cookies are stored in the macOS Keychain or Linux Secret Service, never in
-  the YAML config file. Anything that causes them to be written to disk,
-  logs, or terminal output is a vulnerability.
+- Cookies are stored in the macOS Keychain or Linux Secret Service. Under WSL,
+  Windows DPAPI encrypts each value for the current Windows user before the
+  ciphertext is written to the Linux filesystem. Plaintext cookies never
+  belong in the YAML config file, another file, process arguments, environment
+  variables, logs, or terminal output.
 - Xeet talks only to X-operated hosts (`x.com`, `upload.twitter.com`,
   `*.twimg.com`, `t.co`). Any request to another host, especially one
   carrying cookies, would be a vulnerability.
