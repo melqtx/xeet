@@ -41,6 +41,17 @@ type transactionIDGenerator struct {
 	loadedAt     time.Time
 }
 
+// Transaction signing state is reusable across short-lived clients, but the
+// home page that supplies it is authenticated. Keep one cache per session so a
+// reauthentication cannot reuse another account's state.
+var transactionIDCaches sync.Map
+
+func transactionIDsForSession(authToken, ct0 string) *transactionIDGenerator {
+	key := sha256.Sum256([]byte(authToken + "\x00" + ct0))
+	cached, _ := transactionIDCaches.LoadOrStore(key, &transactionIDGenerator{})
+	return cached.(*transactionIDGenerator)
+}
+
 func (c *WebClient) generateTransactionID(ctx context.Context, method, path string) (string, error) {
 	if c.transactionIDs == nil {
 		c.transactionIDs = &transactionIDGenerator{}

@@ -28,6 +28,7 @@
 - Chunked upload for video and large media
 - Interactive `xeet auth` that marks which browsers hold an x.com session
 - Live-preview theme picker (`xeet theme`) and a grouped, colorized help
+- In-app reply and mention notifications with actionable popups, unread state, and a notification panel
 
 ## Next
 

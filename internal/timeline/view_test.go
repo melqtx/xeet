@@ -329,6 +329,22 @@ func TestIndentedReplyKeepsAWideCachedImageInsideTheFrame(t *testing.T) {
 	}
 }
 
+func TestHeaderShowsFeedTabsAndNotificationIndicator(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.width, m.height = 80, 24
+	m.feed = FeedFollowing
+	m.unreadNotifications = 3
+	header := ansi.Strip(m.header(m.contentWidth()))
+	for _, want := range []string{"for you", "[following]", "bookmarks", "n ●3"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("header missing %q:\n%s", want, header)
+		}
+	}
+	if lipgloss.Height(header) != 2 {
+		t.Fatalf("header grew to %d lines:\n%s", lipgloss.Height(header), header)
+	}
+}
+
 func TestThreadHeaderNamesTheFocalAuthor(t *testing.T) {
 	m := threadModel(1)
 	m.width, m.height = 80, 24

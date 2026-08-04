@@ -164,24 +164,28 @@ func isTransientStatus(status int) bool {
 // needsQueryIDRefresh reports whether a response indicates the persisted-query
 // id rotated: a plain 404, or a 400 that names the persisted query problem.
 func needsQueryIDRefresh(res *httpResult) bool {
+	if res == nil {
+		return false
+	}
 	if res.status == http.StatusNotFound {
 		return true
 	}
-	return res.status == http.StatusBadRequest &&
-		(bytes.Contains(res.body, []byte("PersistedQueryNotFound")) || bytes.Contains(res.body, []byte("queryId")))
+	persistedQueryMissing := bytes.Contains(res.body, []byte("PersistedQueryNotFound"))
+	return persistedQueryMissing || res.status == http.StatusBadRequest && bytes.Contains(res.body, []byte("queryId"))
 }
 
 func NewWebClient(cfg *config.Config) *WebClient {
 	operationQIDs := map[string]string{
-		"CreateTweet":        cfg.CreateTweetQID,
-		"HomeTimeline":       cfg.HomeTimelineQID,
-		"HomeLatestTimeline": cfg.HomeLatestTimelineQID,
-		"Bookmarks":          cfg.BookmarksQID,
-		"SearchTimeline":     cfg.SearchTimelineQID,
-		"FavoriteTweet":      cfg.FavoriteTweetQID,
-		"UnfavoriteTweet":    cfg.UnfavoriteTweetQID,
-		"Viewer":             cfg.ViewerQID,
-		"TweetDetail":        cfg.TweetDetailQID,
+		"CreateTweet":           cfg.CreateTweetQID,
+		"HomeTimeline":          cfg.HomeTimelineQID,
+		"HomeLatestTimeline":    cfg.HomeLatestTimelineQID,
+		"Bookmarks":             cfg.BookmarksQID,
+		"SearchTimeline":        cfg.SearchTimelineQID,
+		"FavoriteTweet":         cfg.FavoriteTweetQID,
+		"UnfavoriteTweet":       cfg.UnfavoriteTweetQID,
+		"Viewer":                cfg.ViewerQID,
+		"TweetDetail":           cfg.TweetDetailQID,
+		"NotificationsTimeline": cfg.NotificationsQID,
 	}
 	qid := operationQIDs["CreateTweet"]
 	if qid == "" {
@@ -197,6 +201,7 @@ func NewWebClient(cfg *config.Config) *WebClient {
 		ct0:                 cfg.CT0,
 		operationQIDs:       operationQIDs,
 		refreshedOperations: map[string]string{},
+		transactionIDs:      transactionIDsForSession(cfg.AuthToken, cfg.CT0),
 		reconcileDelay:      1500 * time.Millisecond,
 		userAgent:           chromiumUserAgent(runtime.GOOS),
 		clientPlatform:      chromiumClientPlatform(runtime.GOOS),
@@ -261,6 +266,8 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 			cfg.ViewerQID = qid
 		case "TweetDetail":
 			cfg.TweetDetailQID = qid
+		case "NotificationsTimeline":
+			cfg.NotificationsQID = qid
 		}
 	}
 	return true
