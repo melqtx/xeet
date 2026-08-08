@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"os"
 	"strings"
 	"time"
 
@@ -231,6 +232,7 @@ type previewState struct {
 	imageID    uint32
 	columns    int
 	rows       int
+	width      int
 	loading    bool
 	err        error
 }
@@ -243,6 +245,7 @@ type previewMsg struct {
 	imageID    uint32
 	columns    int
 	rows       int
+	width      int
 	err        error
 }
 
@@ -688,11 +691,23 @@ func (m *Model) applyLikeResult(msg likeMsg) tea.Cmd {
 func (m *Model) storePreview(msg previewMsg) {
 	m.previews[msg.postID] = previewState{
 		content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
-		columns: msg.columns, rows: msg.rows, err: msg.err,
+		columns: msg.columns, rows: msg.rows, width: msg.width, err: msg.err,
 	}
 }
 
 func (m *Model) applyPreview(msg previewMsg) tea.Cmd {
+	previous, exists := m.previews[msg.postID]
+	if !exists || previous.width != msg.width {
+		// A width change can start a replacement fetch before the old one
+		// returns. Do not let its stale dimensions replace the current preview.
+		if msg.nativePath != "" {
+			_ = os.Remove(msg.nativePath)
+		}
+		return nil
+	}
+	if previous.nativePath != "" && previous.nativePath != msg.nativePath {
+		_ = os.Remove(previous.nativePath)
+	}
 	m.storePreview(msg)
 	m.evictDistantPreviews()
 	m.syncViewport()

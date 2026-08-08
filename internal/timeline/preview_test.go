@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"os"
 	"strings"
 	"testing"
 
@@ -405,6 +406,77 @@ func TestThreadRefetchesAPreviewTooWideForItsRail(t *testing.T) {
 	m.previews["root"] = previewState{columns: m.contentWidth() - 4 - 2*maxRailDepth}
 	if cmd := m.requestPreviews(); cmd != nil {
 		t.Fatalf("a preview that fits was refetched: %+v", m.previews["root"])
+	}
+}
+
+func TestFeedWidthChangeRefetchesCachedPreview(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.width, m.height = 120, 24
+	m.posts = mediaPosts(1)
+	m.resize()
+	initialWidth := m.contentWidth() - 4
+	m.previews["p0"] = previewState{content: "preview", columns: initialWidth, width: initialWidth}
+
+	if !m.adjustFeedWidth(feedWidthStep) {
+		t.Fatal("feed width did not increase")
+	}
+	if cmd := m.requestPreviews(); cmd == nil {
+		t.Fatal("widened feed did not request a replacement preview")
+	}
+	preview := m.previews["p0"]
+	if !preview.loading || preview.width != initialWidth+feedWidthStep {
+		t.Fatalf("replacement preview=%+v", preview)
+	}
+
+	if !m.adjustFeedWidth(-feedWidthStep) {
+		t.Fatal("feed width did not decrease")
+	}
+	if cmd := m.requestPreviews(); cmd == nil {
+		t.Fatal("narrowed feed did not request a replacement preview")
+	}
+	preview = m.previews["p0"]
+	if !preview.loading || preview.width != initialWidth {
+		t.Fatalf("narrowed replacement preview=%+v", preview)
+	}
+}
+
+func TestApplyPreviewDiscardsStaleWidthAndCleansNativeFile(t *testing.T) {
+	m := New()
+	stalePath := t.TempDir() + "/stale.png"
+	if err := os.WriteFile(stalePath, []byte("preview"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.previews["p0"] = previewState{loading: true, width: 84}
+
+	m.applyPreview(previewMsg{postID: "p0", nativePath: stalePath, width: 76})
+	if preview := m.previews["p0"]; !preview.loading || preview.width != 84 {
+		t.Fatalf("stale preview replaced current request: %+v", preview)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale native preview was not removed: %v", err)
+	}
+}
+
+func TestApplyPreviewReplacesNativeFile(t *testing.T) {
+	m := New()
+	dir := t.TempDir()
+	oldPath := dir + "/old.png"
+	newPath := dir + "/new.png"
+	if err := os.WriteFile(oldPath, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.previews["p0"] = previewState{nativePath: oldPath, width: 84}
+
+	m.applyPreview(previewMsg{postID: "p0", nativePath: newPath, width: 84})
+	if preview := m.previews["p0"]; preview.nativePath != newPath {
+		t.Fatalf("replacement preview=%+v", preview)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("replaced native preview was not removed: %v", err)
 	}
 }
 
