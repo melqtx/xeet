@@ -157,6 +157,7 @@ come back next time.
 | key | does |
 |---|---|
 | `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
+| `[` / `]` | narrow / widen the feed for this session |
 | `tab` / `shift+tab` | cycle forward / backward through For You, Following, and Bookmarks |
 | `f` | switch between the for you and following feeds |
 | `b` | switch between bookmarks and the for you feed |
