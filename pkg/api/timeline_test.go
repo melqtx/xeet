@@ -90,6 +90,40 @@ func TestParseTimelineVisibilityWrapper(t *testing.T) {
 	}
 }
 
+func TestParseTimelineIncludesEmbeddedQuote(t *testing.T) {
+	quote := map[string]any{
+		"rest_id": "quoted",
+		"legacy": map[string]any{"full_text": "the quoted post", "extended_entities": map[string]any{
+			"media": []any{map[string]any{"type": "photo", "media_url_https": "https://pbs.twimg.com/media/quoted"}},
+		}},
+		"core": map[string]any{"user_results": map[string]any{"result": map[string]any{"core": map[string]any{
+			"name": "Quoted Author", "screen_name": "quoted",
+		}}}},
+	}
+	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+		"rest_id": "outer", "legacy": map[string]any{"full_text": "my comment"},
+		"quoted_status_result": map[string]any{"result": quote},
+	}}}
+	post, ok := parseTimelineItem(item)
+	if !ok || post.Quote == nil {
+		t.Fatalf("quote was not parsed: %+v", post)
+	}
+	if post.Quote.ID != "quoted" || post.Quote.Handle != "quoted" || post.Quote.Text != "the quoted post" || len(post.Quote.Media) != 1 {
+		t.Fatalf("quote = %+v", post.Quote)
+	}
+}
+
+func TestParseTimelineOmitsUnavailableQuote(t *testing.T) {
+	item := map[string]any{"tweet_results": map[string]any{"result": map[string]any{
+		"rest_id": "outer", "legacy": map[string]any{"full_text": "my comment"},
+		"quoted_status_result": map[string]any{"result": map[string]any{"__typename": "TweetTombstone"}},
+	}}}
+	post, ok := parseTimelineItem(item)
+	if !ok || post.Quote != nil {
+		t.Fatalf("unavailable quote = %+v", post)
+	}
+}
+
 func TestParseTimelineMultipleImages(t *testing.T) {
 	fixture := `{"entries":[{"itemContent":{"tweet_results":{"result":{
 	  "rest_id":"photos","legacy":{"full_text":"album","extended_entities":{"media":[

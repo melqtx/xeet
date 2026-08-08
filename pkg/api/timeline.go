@@ -40,6 +40,7 @@ type TimelinePost struct {
 	MediaCount     int
 	Media          []TimelineMedia
 	Liked          bool
+	Quote          *TimelinePost
 	InReplyToID    string
 	ConversationID string
 }
@@ -317,6 +318,13 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 	}
 	tweetResults, _ := item["tweet_results"].(map[string]any)
 	result, _ := tweetResults["result"].(map[string]any)
+	return parseTimelineResult(result, true)
+}
+
+// parseTimelineResult decodes a tweet result shared by timeline posts and the
+// embedded result of a quote. Quotes are decoded only one level deep so a
+// chain of quote cards cannot consume the entire frame.
+func parseTimelineResult(result map[string]any, includeQuote bool) (TimelinePost, bool) {
 	if nested, ok := result["tweet"].(map[string]any); ok {
 		result = nested
 	}
@@ -389,6 +397,15 @@ func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
 	}
 	if post.Handle == "" {
 		post.Handle, _ = userLegacy["screen_name"].(string)
+	}
+	if includeQuote {
+		if quotedResult, ok := result["quoted_status_result"].(map[string]any); ok {
+			if quoted, ok := quotedResult["result"].(map[string]any); ok {
+				if quote, ok := parseTimelineResult(quoted, false); ok {
+					post.Quote = &quote
+				}
+			}
+		}
 	}
 	return post, true
 }

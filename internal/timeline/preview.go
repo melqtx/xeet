@@ -51,6 +51,12 @@ const (
 	imageModeOff     imageMode = "off"
 )
 
+// quotePreviewKey scopes an embedded preview to its parent. The quoted post can
+// also appear as a regular feed item at a different width in the same frame.
+func quotePreviewKey(parentID, quoteID string) string {
+	return "quote:" + parentID + ":" + quoteID
+}
+
 // resolveImageMode picks the renderer and explains any downgrade from the
 // terminal's native graphics so the help overlay can show why images look
 // the way they do.
@@ -141,28 +147,38 @@ func (m *Model) requestPreviews() tea.Cmd {
 			}
 		}
 	}
-	for i := from; i <= to; i++ {
-		post := posts[i]
-		if len(post.Media) == 0 {
-			continue
-		}
-		if state, exists := m.previews[post.ID]; exists {
+	queue := func(key string, media api.TimelineMedia, previewWidth int, selected bool) {
+		if state, exists := m.previews[key]; exists {
 			// A preview cached at a wider frame -- from the feed, before a
 			// thread indented its post behind a rail, or from before the window
 			// shrank -- would spill past the right edge, so it is fetched again
 			// at the width it now has to fit. Both renderers cap themselves at
 			// the width they are given, so the refetch cannot repeat.
-			tooWide := !state.loading && state.err == nil && previewColumns(state) > width
+			tooWide := !state.loading && state.err == nil && previewColumns(state) > previewWidth
 			// A failed fetch retries only once its post is selected again.
-			if !tooWide && (i != m.selected || state.loading || state.err == nil) {
-				continue
+			if !tooWide && (!selected || state.loading || state.err == nil) {
+				return
 			}
 		}
-		m.previews[post.ID] = previewState{loading: true}
-		if i == m.selected {
+		m.previews[key] = previewState{loading: true}
+		if selected {
 			selectedChanged = true
 		}
-		cmds = append(cmds, fetchPreview(m.requestContext(), post.ID, post.Media[0], width, rows, m.imageMode))
+		cmds = append(cmds, fetchPreview(m.requestContext(), key, media, previewWidth, rows, m.imageMode))
+	}
+	for i := from; i <= to; i++ {
+		post := posts[i]
+		selected := i == m.selected
+		if len(post.Media) > 0 {
+			queue(post.ID, post.Media[0], width, selected)
+		}
+		if post.Quote != nil && len(post.Quote.Media) > 0 {
+			quoteWidth := max(10, width-4)
+			if m.imageMode == imageModeNative {
+				quoteWidth = min(quoteWidth, len(kittyDiacritics))
+			}
+			queue(quotePreviewKey(post.ID, post.Quote.ID), post.Quote.Media[0], quoteWidth, selected)
+		}
 	}
 	if selectedChanged {
 		m.syncViewport()
@@ -216,6 +232,9 @@ func (m *Model) evictDistantPreviews() {
 	index := make(map[string]int, len(posts))
 	for i := range posts {
 		index[posts[i].ID] = i
+		if posts[i].Quote != nil {
+			index[quotePreviewKey(posts[i].ID, posts[i].Quote.ID)] = i
+		}
 	}
 	activeZoom := ""
 	if post, ok := m.currentPost(); ok && m.zoom {

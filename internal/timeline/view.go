@@ -485,9 +485,62 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 		}
 		parts = append(parts, indent+lipgloss.NewStyle().Foreground(muted).Render(chip))
 	}
+	if post.Quote != nil {
+		parts = append(parts, m.renderQuoteCard(post.ID, *post.Quote, indent, width, nearSelection))
+	}
 
 	parts = append(parts, indent+m.actionLine(post))
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// renderQuoteCard keeps an embedded quote visually separate from its authoring
+// post while using the same preview formats as the main timeline.
+func (m Model) renderQuoteCard(parentID string, quote api.TimelinePost, indent string, width int, showPreview bool) string {
+	cardWidth := max(10, width-lipgloss.Width(indent)-2)
+	handle := quote.Handle
+	if handle == "" {
+		handle = "unknown"
+	}
+	name := quote.AuthorName
+	if name == "" {
+		name = "someone"
+	}
+	header := ansi.Truncate(name+"  @"+handle, max(8, cardWidth-1), "…")
+	lines := []string{
+		indent + lipgloss.NewStyle().Foreground(muted).Render("╭─ "+header),
+	}
+	text := strings.Split(lipgloss.NewStyle().Width(cardWidth).Render(cleanText(quote.Text)), "\n")
+	if len(text) > 3 {
+		text = text[:3]
+		text[2] = ansi.Truncate(text[2], max(2, cardWidth-1), "…")
+	}
+	for _, line := range text {
+		lines = append(lines, indent+"│ "+lipgloss.NewStyle().Foreground(muted).Render(line))
+	}
+
+	preview, hasPreview := m.previews[quotePreviewKey(parentID, quote.ID)]
+	imageShown := false
+	if len(quote.Media) > 0 && showPreview && hasPreview {
+		imageBlock := ""
+		switch {
+		case preview.nativePath != "":
+			imageBlock = m.nativePreviewBlock(preview)
+		case preview.nativeData != "":
+			imageBlock = m.wezTermPreviewBlock(preview)
+		case preview.content != "":
+			imageBlock = preview.content
+		}
+		if imageBlock != "" {
+			lines = append(lines, indent+"│")
+			lines = append(lines, prefixLines(imageBlock, indent+"│ "))
+			imageShown = true
+		}
+	}
+	if len(quote.Media) > 0 && !imageShown {
+		lines = append(lines, indent+"│ "+lipgloss.NewStyle().Foreground(muted).Render(mediaChip(quote)))
+	}
+	lines = append(lines, indent+lipgloss.NewStyle().Foreground(muted).Render("╰─"))
+	return strings.Join(lines, "\n")
 }
 
 // imagePrefix keeps a preview inside the frame. Previews are cached per post at
