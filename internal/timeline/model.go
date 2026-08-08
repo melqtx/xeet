@@ -50,6 +50,12 @@ const (
 
 type Action struct{ Kind ActionKind }
 
+const (
+	minFeedWidth     = 30
+	defaultFeedWidth = 76
+	feedWidthStep    = 8
+)
+
 // FeedKind identifies which timeline the feed pane is showing.
 type FeedKind int
 
@@ -88,6 +94,7 @@ type Model struct {
 	// instead of leaving them to run out their own timeouts.
 	ctx           context.Context
 	width, height int
+	feedWidthCap  int
 	imageMode     imageMode
 	imageNote     string
 	feed          FeedKind
@@ -259,9 +266,14 @@ func NewWithImageMode(requested string) Model {
 	search.CharLimit = 512
 	mode, note := resolveImageMode(requested)
 	return Model{
-		ctx:   context.Background(),
-		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
-		liking: map[string]bool{}, previews: map[string]previewState{},
+		ctx:          context.Background(),
+		width:        80,
+		height:       24,
+		feedWidthCap: defaultFeedWidth,
+		imageMode:    mode,
+		imageNote:    note,
+		loading:      true,
+		liking:       map[string]bool{}, previews: map[string]previewState{},
 		spinner: s, viewport: vp, replyEditor: editor, searchInput: search,
 		notificationSeq: 1, notificationPolling: true,
 	}
@@ -564,6 +576,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		m.syncViewport()
 		return m, func() tea.Msg { return tea.ClearScreen() }
+	case "[":
+		if m.adjustFeedWidth(-feedWidthStep) {
+			return m, m.imageRepaint(m.requestPreviews(), m.showToast(fmt.Sprintf("feed width: %d columns", m.contentWidth())))
+		}
+	case "]":
+		if m.adjustFeedWidth(feedWidthStep) {
+			return m, m.imageRepaint(m.requestPreviews(), m.showToast(fmt.Sprintf("feed width: %d columns", m.contentWidth())))
+		}
 	case "tab":
 		return m, m.cycleFeed(1)
 	case "shift+tab":
@@ -952,6 +972,23 @@ func (m *Model) resize() {
 	m.searchInput.SetCursor(m.searchInput.Position())
 	m.syncViewport()
 	m.ensureSelectedVisible()
+}
+
+// adjustFeedWidth changes the session-only cap without letting it exceed the
+// usable terminal width. resize reflows text and repositions native previews.
+func (m *Model) adjustFeedWidth(delta int) bool {
+	cap := m.feedWidthCap
+	if cap == 0 {
+		cap = defaultFeedWidth
+	}
+	maxCap := max(minFeedWidth, m.width-4)
+	next := max(minFeedWidth, min(maxCap, cap+delta))
+	if next == cap {
+		return false
+	}
+	m.feedWidthCap = next
+	m.resize()
+	return true
 }
 
 func (m *Model) syncViewport() {
