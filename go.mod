@@ -1,11 +1,10 @@
 module github.com/melqtx/xeet
 
-// The patch version is deliberate, not incidental: go1.26.5 is the release
-// that fixes GO-2026-5856 (an Encrypted Client Hello privacy leak in
-// crypto/tls) along with GO-2026-5039 and GO-2026-5037. Relaxing this to
+// The patch version is deliberate, not incidental: go1.26.6 includes the
+// latest standard-library security fixes. Relaxing this to
 // "go 1.26" lets an older toolchain build xeet against a vulnerable TLS
 // stack, and CI's govulncheck job fails when it happens.
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/browserutils/kooky v0.2.10
@@ -19,7 +18,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/zalando/go-keyring v0.2.8
 	golang.design/x/clipboard v0.8.0
-	golang.org/x/image v0.44.0
+	golang.org/x/image v0.45.0
 	golang.org/x/net v0.57.0
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -56,7 +55,7 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp/shiny v0.0.0-20250606033433-dcc06ee1d476 // indirect
 	golang.org/x/mobile v0.0.0-20250606033058-a2a15c67f36f // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
 )

@@ -75,8 +75,15 @@ func TestAppDataUsesWindowsAndWSLPathTools(t *testing.T) {
 	runner := &fakeRunner{}
 	runner.run = func(call runCall) ([]byte, error) {
 		switch call.name {
-		case "/interop/cmd.exe":
-			return []byte("C:\\Users\\Zoë Lovelace\\AppData\\Roaming\r\n"), nil
+		case "/interop/powershell.exe":
+			if !slices.Equal(call.args, []string{
+				"-NoLogo", "-NoProfile", "-NonInteractive",
+				"-EncodedCommand", encodedAppDataScript,
+			}) {
+				t.Fatalf("PowerShell args = %#v", call.args)
+			}
+			path := []byte("C:\\Users\\Zoë Lovelace\\AppData\\Roaming")
+			return []byte(base64.StdEncoding.EncodeToString(path)), nil
 		case "/interop/wslpath":
 			if !slices.Equal(call.args, []string{"-u", `C:\Users\Zoë Lovelace\AppData\Roaming`}) {
 				t.Fatalf("wslpath args = %#v", call.args)
@@ -98,7 +105,7 @@ func TestAppDataUsesWindowsAndWSLPathTools(t *testing.T) {
 
 func TestAppDataFailsClosed(t *testing.T) {
 	runner := &fakeRunner{run: func(runCall) ([]byte, error) {
-		return []byte("%APPDATA%\r\n"), nil
+		return []byte("not base64"), nil
 	}}
 	_, err := activeBridge(runner).appData(context.Background())
 	if !errors.Is(err, ErrUnavailable) {

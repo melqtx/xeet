@@ -105,8 +105,8 @@ windows side:
 xeet auth --browser firefox
 ```
 
-windows command interoperability must be enabled, with `cmd.exe`,
-`powershell.exe`, and `wslpath` available on `PATH`. xeet asks windows for the
+windows command interoperability must be enabled, with `powershell.exe` and
+`wslpath` available on `PATH`. xeet asks windows for the
 current user's firefox profile instead of assuming windows is mounted at
 `/mnt/c`. its copy of the two session values is encrypted with windows dpapi
 for that windows user; plaintext values are never written to the linux

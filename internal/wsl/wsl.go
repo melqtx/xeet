@@ -82,18 +82,22 @@ func (b bridge) appData(ctx context.Context) (string, error) {
 	if !b.active() {
 		return "", ErrUnavailable
 	}
-	cmdPath, err := b.lookPath("cmd.exe")
+	powershell, err := b.lookPath("powershell.exe")
 	if err != nil {
-		return "", fmt.Errorf("%w: cmd.exe is not on PATH", ErrUnavailable)
+		return "", fmt.Errorf("%w: powershell.exe is not on PATH", ErrUnavailable)
 	}
-	out, err := b.runner.Run(ctx, cmdPath, []string{"/d", "/c", "echo %APPDATA%"}, nil)
+	out, err := b.runner.Run(ctx, powershell, []string{
+		"-NoLogo", "-NoProfile", "-NonInteractive",
+		"-EncodedCommand", encodedAppDataScript,
+	}, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: could not query %%APPDATA%%", ErrUnavailable)
+		return "", fmt.Errorf("%w: could not query Windows AppData", ErrUnavailable)
 	}
-	windowsPath := strings.TrimSpace(strings.ReplaceAll(string(out), "\r", ""))
-	if windowsPath == "" || strings.Contains(windowsPath, "%APPDATA%") {
-		return "", fmt.Errorf("%w: Windows did not return %%APPDATA%%", ErrUnavailable)
+	windowsPathBytes, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
+	if err != nil || len(windowsPathBytes) == 0 {
+		return "", fmt.Errorf("%w: Windows returned an invalid AppData path", ErrUnavailable)
 	}
+	windowsPath := string(windowsPathBytes)
 
 	wslpath, err := b.lookPath("wslpath")
 	if err != nil {
@@ -209,6 +213,20 @@ try {
         throw 'invalid operation'
     }
     [Console]::Out.Write([Convert]::ToBase64String($result))
+} catch {
+    exit 1
+}
+`)
+
+var encodedAppDataScript = encodePowerShell(`
+$ErrorActionPreference = 'Stop'
+try {
+    $path = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        throw 'AppData is unavailable'
+    }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($path)
+    [Console]::Out.Write([Convert]::ToBase64String($bytes))
 } catch {
     exit 1
 }
