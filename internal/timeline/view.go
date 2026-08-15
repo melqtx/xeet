@@ -89,11 +89,15 @@ func (m Model) shell(center, footer string) string {
 
 func (m Model) contentWidth() int {
 	w := m.width - 4
-	if w > 76 {
-		w = 76
+	cap := m.feedWidthCap
+	if cap == 0 {
+		cap = defaultFeedWidth
 	}
-	if w < 30 {
-		w = 30
+	if w > cap {
+		w = cap
+	}
+	if w < minFeedWidth {
+		w = minFeedWidth
 	}
 	return w
 }
@@ -852,7 +856,7 @@ func (m Model) viewHelp() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n[ / ]       narrow / widen feed\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
 		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
@@ -860,7 +864,7 @@ func (m Model) viewHelp() string {
 		keys = "\n\n↑ / k       previous\n↓ / j       next\nr           reply\nR           refresh\nenter       open conversation\ne / space   read full post\no           open in browser\ny           copy link\nesc / n     back\nq           quit"
 	}
 	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends\ntab feeds · n inbox\nl like · r reply · y copy\nenter replies · e read\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
+		keys = "\n\nj/k move · g/G ends [/]\ntab feeds · n inbox\nl like · r reply · y copy\nenter replies · e read\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
 		if m.mode == modeThread {
 			keys = "\n\nj/k move · g/G ends\nl like · r reply · n inbox\ny copy · e read · i zoom\nA alt · R refresh · o browser\n/ search · esc back · q quit"
 		} else if m.mode == modeNotifications {

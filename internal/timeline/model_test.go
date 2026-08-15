@@ -646,6 +646,47 @@ func TestHalfPageJumpAndScrolloff(t *testing.T) {
 	}
 }
 
+func TestFeedWidthBindingsReflowTheCurrentSession(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.posts = posts(1)
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	if got := m.contentWidth(); got != defaultFeedWidth {
+		t.Fatalf("default feed width=%d, want %d", got, defaultFeedWidth)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if got := m.contentWidth(); got != defaultFeedWidth+feedWidthStep {
+		t.Fatalf("widened feed width=%d, want %d", got, defaultFeedWidth+feedWidthStep)
+	}
+	if m.viewport.Width != m.contentWidth() {
+		t.Fatalf("viewport width=%d, want %d", m.viewport.Width, m.contentWidth())
+	}
+	if m.toast != "feed width: 84 columns" {
+		t.Fatalf("width toast=%q", m.toast)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	if got := m.contentWidth(); got != defaultFeedWidth {
+		t.Fatalf("narrowed feed width=%d, want %d", got, defaultFeedWidth)
+	}
+
+	m.feedWidthCap = minFeedWidth
+	m.resize()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	if got := m.contentWidth(); got != minFeedWidth {
+		t.Fatalf("minimum feed width=%d, want %d", got, minFeedWidth)
+	}
+}
+
+func TestFeedWidthBindingIsListedInHelp(t *testing.T) {
+	m := New()
+	m.help = true
+	if view := m.View(); !strings.Contains(view, "g/G ends [/]") {
+		t.Fatalf("feed-width binding missing from help:\n%s", view)
+	}
+}
+
 func TestPaginationDeduplicates(t *testing.T) {
 	m := New()
 	m = update(t, m, pageMsg{page: &api.TimelinePage{Posts: posts(2), Cursor: "one"}})

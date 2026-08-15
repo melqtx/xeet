@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"os"
 	"strings"
 	"time"
 
@@ -50,6 +51,12 @@ const (
 
 type Action struct{ Kind ActionKind }
 
+const (
+	minFeedWidth     = 30
+	defaultFeedWidth = 76
+	feedWidthStep    = 8
+)
+
 // FeedKind identifies which timeline the feed pane is showing.
 type FeedKind int
 
@@ -88,6 +95,7 @@ type Model struct {
 	// instead of leaving them to run out their own timeouts.
 	ctx           context.Context
 	width, height int
+	feedWidthCap  int
 	imageMode     imageMode
 	imageNote     string
 	feed          FeedKind
@@ -224,6 +232,7 @@ type previewState struct {
 	imageID    uint32
 	columns    int
 	rows       int
+	width      int
 	loading    bool
 	err        error
 }
@@ -236,6 +245,7 @@ type previewMsg struct {
 	imageID    uint32
 	columns    int
 	rows       int
+	width      int
 	err        error
 }
 
@@ -259,9 +269,14 @@ func NewWithImageMode(requested string) Model {
 	search.CharLimit = 512
 	mode, note := resolveImageMode(requested)
 	return Model{
-		ctx:   context.Background(),
-		width: 80, height: 24, imageMode: mode, imageNote: note, loading: true,
-		liking: map[string]bool{}, previews: map[string]previewState{},
+		ctx:          context.Background(),
+		width:        80,
+		height:       24,
+		feedWidthCap: defaultFeedWidth,
+		imageMode:    mode,
+		imageNote:    note,
+		loading:      true,
+		liking:       map[string]bool{}, previews: map[string]previewState{},
 		spinner: s, viewport: vp, replyEditor: editor, searchInput: search,
 		notificationSeq: 1, notificationPolling: true,
 	}
@@ -564,6 +579,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		m.syncViewport()
 		return m, func() tea.Msg { return tea.ClearScreen() }
+	case "[":
+		if m.adjustFeedWidth(-feedWidthStep) {
+			return m, m.imageRepaint(m.requestPreviews(), m.showToast(fmt.Sprintf("feed width: %d columns", m.contentWidth())))
+		}
+	case "]":
+		if m.adjustFeedWidth(feedWidthStep) {
+			return m, m.imageRepaint(m.requestPreviews(), m.showToast(fmt.Sprintf("feed width: %d columns", m.contentWidth())))
+		}
 	case "tab":
 		return m, m.cycleFeed(1)
 	case "shift+tab":
@@ -668,11 +691,23 @@ func (m *Model) applyLikeResult(msg likeMsg) tea.Cmd {
 func (m *Model) storePreview(msg previewMsg) {
 	m.previews[msg.postID] = previewState{
 		content: msg.content, nativePath: msg.nativePath, nativeData: msg.nativeData, imageID: msg.imageID,
-		columns: msg.columns, rows: msg.rows, err: msg.err,
+		columns: msg.columns, rows: msg.rows, width: msg.width, err: msg.err,
 	}
 }
 
 func (m *Model) applyPreview(msg previewMsg) tea.Cmd {
+	previous, exists := m.previews[msg.postID]
+	if !exists || previous.width != msg.width {
+		// A width change can start a replacement fetch before the old one
+		// returns. Do not let its stale dimensions replace the current preview.
+		if msg.nativePath != "" {
+			_ = os.Remove(msg.nativePath)
+		}
+		return nil
+	}
+	if previous.nativePath != "" && previous.nativePath != msg.nativePath {
+		_ = os.Remove(previous.nativePath)
+	}
 	m.storePreview(msg)
 	m.evictDistantPreviews()
 	m.syncViewport()
@@ -952,6 +987,23 @@ func (m *Model) resize() {
 	m.searchInput.SetCursor(m.searchInput.Position())
 	m.syncViewport()
 	m.ensureSelectedVisible()
+}
+
+// adjustFeedWidth changes the session-only cap without letting it exceed the
+// usable terminal width. resize reflows text and repositions native previews.
+func (m *Model) adjustFeedWidth(delta int) bool {
+	cap := m.feedWidthCap
+	if cap == 0 {
+		cap = defaultFeedWidth
+	}
+	maxCap := max(minFeedWidth, m.width-4)
+	next := max(minFeedWidth, min(maxCap, cap+delta))
+	if next == cap {
+		return false
+	}
+	m.feedWidthCap = next
+	m.resize()
+	return true
 }
 
 func (m *Model) syncViewport() {
