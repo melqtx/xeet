@@ -81,8 +81,8 @@ func TestAuthPickerEnterStartsTheImport(t *testing.T) {
 	if p.chosen != p.browsers[0] {
 		t.Fatalf("chose %q, want %q", p.chosen, p.browsers[0])
 	}
-	if !strings.Contains(p.View(), "unlock its keyring") {
-		t.Error("the import step should warn about the keyring prompt")
+	if !strings.Contains(p.View(), "unlock secure storage") {
+		t.Error("the import step should warn about the secure-storage prompt")
 	}
 }
 

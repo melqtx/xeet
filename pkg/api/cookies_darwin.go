@@ -51,8 +51,8 @@ func chromiumBrowsers(home string) []chromiumBrowser {
 func geckoBrowsers(home string) []geckoBrowser {
 	appSup := filepath.Join(home, "Library", "Application Support")
 	return []geckoBrowser{
-		{"Firefox", []string{filepath.Join(appSup, "Firefox", "Profiles")}},
-		{"Zen", []string{filepath.Join(appSup, "zen", "Profiles")}},
+		{name: "Firefox", roots: []string{filepath.Join(appSup, "Firefox", "Profiles")}},
+		{name: "Zen", roots: []string{filepath.Join(appSup, "zen", "Profiles")}},
 	}
 }
 

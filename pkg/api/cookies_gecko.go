@@ -17,8 +17,10 @@ import (
 // geckoBrowser describes Firefox and Firefox-derived browsers. Their cookies
 // are stored in plain SQLite files, so no browser keyring access is needed.
 type geckoBrowser struct {
-	name  string
-	roots []string
+	name        string
+	roots       []string
+	windowsRoot string
+	reader      func(string) ([]*kooky.Cookie, error)
 }
 
 func (b geckoBrowser) cookieDBs() []string {
@@ -81,13 +83,18 @@ func importGeckoSession(b geckoBrowser) (*LoginResult, string, error) {
 
 	var lastErr error
 	var best *LoginResult
+	bestBrowser := b.name
+	reader := b.reader
+	if reader == nil {
+		reader = readGeckoXCookies
+	}
 	for _, db := range dbs {
 		tmp, copied, err := copyDBAs(db, "cookies.sqlite")
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		cookies, readErr := readGeckoXCookies(copied)
+		cookies, readErr := reader(copied)
 		os.RemoveAll(tmp)
 		if readErr != nil {
 			lastErr = readErr
@@ -102,17 +109,29 @@ func importGeckoSession(b geckoBrowser) (*LoginResult, string, error) {
 			}
 			if betterLoginResult(result, best) {
 				best = result
+				bestBrowser = b.name
+				if withinRoot(db, b.windowsRoot) {
+					bestBrowser += " (Windows via WSL)"
+				}
 			}
 		}
 	}
 	if best != nil {
-		return best, b.name, nil
+		return best, bestBrowser, nil
 	}
 
 	if lastErr != nil {
 		return nil, "", fmt.Errorf("couldn't read %s cookies: %w", b.name, lastErr)
 	}
 	return nil, "", fmt.Errorf("no logged-in x.com session found in %s; open x.com in it, log in, then try again", b.name)
+}
+
+func withinRoot(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func sessionFromCookies(cookies []*kooky.Cookie) *LoginResult {

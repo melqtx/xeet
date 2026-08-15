@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/browserutils/kooky"
 	"github.com/browserutils/kooky/browser/brave"
 	"github.com/browserutils/kooky/browser/chrome"
 	"github.com/browserutils/kooky/browser/chromium"
+	"github.com/melqtx/xeet/internal/wsl"
 )
 
 type chromiumCookieReader func(context.Context, string, ...kooky.Filter) ([]*kooky.Cookie, error)
@@ -44,14 +46,36 @@ func chromiumBrowsers(home string) []chromiumBrowser {
 }
 
 func geckoBrowsers(home string) []geckoBrowser {
+	browsers, _ := geckoBrowsersForEnvironment(home)
+	return browsers
+}
+
+func geckoBrowsersForEnvironment(home string) ([]geckoBrowser, error) {
+	var windowsAppData string
+	var interopErr error
+	if wsl.Active() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		windowsAppData, interopErr = wsl.AppData(ctx)
+	}
+	return geckoBrowsersAt(home, windowsAppData), interopErr
+}
+
+func geckoBrowsersAt(home, windowsAppData string) []geckoBrowser {
 	flatpak := filepath.Join(home, ".var", "app")
+	firefoxRoots := []string{
+		filepath.Join(home, ".mozilla", "firefox"),
+		filepath.Join(home, "snap", "firefox", "common", ".mozilla", "firefox"),
+		filepath.Join(flatpak, "org.mozilla.firefox", ".mozilla", "firefox"),
+	}
+	var windowsFirefoxRoot string
+	if windowsAppData != "" {
+		windowsFirefoxRoot = filepath.Join(windowsAppData, "Mozilla", "Firefox")
+		firefoxRoots = append(firefoxRoots, windowsFirefoxRoot)
+	}
 	return []geckoBrowser{
-		{"Firefox", []string{
-			filepath.Join(home, ".mozilla", "firefox"),
-			filepath.Join(home, "snap", "firefox", "common", ".mozilla", "firefox"),
-			filepath.Join(flatpak, "org.mozilla.firefox", ".mozilla", "firefox"),
-		}},
-		{"Zen", []string{
+		{name: "Firefox", roots: firefoxRoots, windowsRoot: windowsFirefoxRoot},
+		{name: "Zen", roots: []string{
 			filepath.Join(home, ".zen"),
 			filepath.Join(flatpak, "app.zen_browser.zen", ".zen"),
 			filepath.Join(flatpak, "io.github.zen_browser.zen", ".zen"),
@@ -87,8 +111,13 @@ func ImportBrowserSession(name string) (*LoginResult, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if browser, ok := findGeckoBrowser(name, geckoBrowsers(home)); ok {
-		return importGeckoSession(browser)
+	gecko, interopErr := geckoBrowsersForEnvironment(home)
+	if browser, ok := findGeckoBrowser(name, gecko); ok {
+		result, resolved, err := importGeckoSession(browser)
+		if err != nil && interopErr != nil {
+			return nil, "", fmt.Errorf("%w; WSL detected but Windows Firefox could not be checked: %v", err, interopErr)
+		}
+		return result, resolved, err
 	}
 	if browser, ok := findChromiumBrowser(name, chromiumBrowsers(home)); ok {
 		return importChromiumSession(browser)

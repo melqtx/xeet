@@ -1,12 +1,23 @@
 { lib
 , buildGoModule
+, fetchurl
+, go_1_26
 , wl-clipboard
 , libx11
 , makeWrapper
 , stdenv
 }:
 
-buildGoModule (finalAttrs: {
+let
+  go_1_26_6 = go_1_26.overrideAttrs (_: {
+    version = "1.26.6";
+    src = fetchurl {
+      url = "https://go.dev/dl/go1.26.6.src.tar.gz";
+      hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
+    };
+  });
+in
+(buildGoModule.override { go = go_1_26_6; }) (finalAttrs: {
   pname = "xeet";
   # Keep in step with the latest release tag.
   version = "0.1.11";
@@ -16,7 +27,7 @@ buildGoModule (finalAttrs: {
   # Regenerate whenever go.mod or go.sum changes (including on dependabot
   # bumps): set this to lib.fakeHash, run `nix build .#default`, and copy the
   # hash nix reports. CI's nix job fails when it goes stale.
-  vendorHash = "sha256-Hij56rK+qINQYCjGdLUgM/5N7e0XAfh/zvcOYDs6gek=";
+  vendorHash = "sha256-OD+Zi8PgMtYPYeCTHC3L2AO20MrL5bkHvsTkR3Hs0D0=";
 
   # main.go reads these through -X; without them the binary reports "dev".
   ldflags = [

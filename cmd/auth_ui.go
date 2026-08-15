@@ -230,7 +230,7 @@ func (p authPicker) View() string {
 	switch p.phase {
 	case authPhaseImport:
 		return head + p.renderWorking(w, "reading your x.com session from "+p.chosen+"…",
-			"your OS may ask to unlock its keyring")
+			"your OS may ask to unlock secure storage")
 	case authPhaseVerify:
 		return head + p.renderWorking(w, "asking X to verify the session…", "")
 	case authPhaseDone:
