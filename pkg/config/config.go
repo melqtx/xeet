@@ -144,7 +144,7 @@ func NewConfigManager() (*ConfigManager, error) {
 
 func secretStoreFor(homeDir string, isWSL bool) SecretStore {
 	if isWSL {
-		return newWSLSecretStore(homeDir)
+		return newWSLCompatibleSecretStore(homeDir)
 	}
 	return systemKeyring{}
 }
@@ -205,6 +205,13 @@ func (cm *ConfigManager) Load() (*Config, error) {
 		}
 		config.AuthToken = token
 		config.CT0 = ct0
+		if promoter, ok := cm.secrets.(interface {
+			Promote(string, string) error
+		}); ok {
+			// Migration is best-effort: a WSL user without Windows
+			// interoperability must still be able to use Linux Secret Service.
+			_ = promoter.Promote(token, ct0)
+		}
 	case errors.Is(err, ErrSecretNotFound):
 		// A leftover ct0 without auth_token is also corruption.
 		if ct0, ct0Err := cm.secrets.Get(keyCT0); ct0Err == nil && ct0 != "" {

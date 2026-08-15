@@ -196,6 +196,7 @@ func encodePowerShell(script string) string {
 var encodedDPAPIScript = encodePowerShell(`
 $ErrorActionPreference = 'Stop'
 try {
+    Add-Type -AssemblyName System.Security
     $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $payload = [Convert]::FromBase64String([string]$request.payload)
     $sha = [System.Security.Cryptography.SHA256]::Create()

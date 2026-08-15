@@ -43,7 +43,7 @@ nix profile install github:melqtx/xeet   # install
 nix run github:melqtx/xeet               # or just try it
 ```
 
-**with go** (1.26.5+, for the patched tls stack):
+**with go** (1.26.6+, for the patched tls stack):
 
 ```bash
 go install github.com/melqtx/xeet@latest
@@ -105,14 +105,17 @@ windows side:
 xeet auth --browser firefox
 ```
 
-windows command interoperability must be enabled, with `powershell.exe` and
-`wslpath` available on `PATH`. xeet asks windows for the
+to import from windows firefox, windows command interoperability must be
+enabled, with `powershell.exe` and `wslpath` available on `PATH`. xeet asks windows for the
 current user's firefox profile instead of assuming windows is mounted at
 `/mnt/c`. its copy of the two session values is encrypted with windows dpapi
 for that windows user; plaintext values are never written to the linux
 filesystem. windows chrome, brave, helium, zen, and edge profiles are not
 supported from wsl. browsers installed inside the linux distribution continue
-to use their normal linux profile locations.
+to use their normal linux profile locations and can fall back to linux secret
+service when windows interoperability is unavailable. an existing complete
+secret-service session is copied to dpapi only after both values are safely
+encrypted; `xeet logout` cleans both stores.
 
 then just:
 
@@ -262,9 +265,10 @@ xeet reuses the x.com session already in your browser and speaks the same
 unsupported internal graphql endpoints the website does. the imported
 `auth_token` and `ct0` cookies grant account-level access, so treat them
 like a password. they live in the macos keychain or linux secret service, never
-in the yaml config file. on wsl, windows dpapi encrypts xeet's copy before the
-ciphertext reaches the linux filesystem. `xeet logout` deletes xeet's copy
-(your browser stays logged in).
+in the yaml config file. on wsl, xeet prefers windows dpapi and falls back to
+linux secret service when windows interoperability is unavailable. dpapi
+encrypts xeet's copy before the ciphertext reaches the linux filesystem.
+`xeet logout` deletes xeet's copy (your browser stays logged in).
 
 <details>
 <summary>details: query ids and retries</summary>

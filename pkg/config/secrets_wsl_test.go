@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/melqtx/xeet/internal/wsl"
 )
 
 type xorProtector struct {
@@ -179,10 +181,154 @@ func TestWSLSecretStoreTimesOut(t *testing.T) {
 
 func TestWSLBackendSelectionIsDeterministic(t *testing.T) {
 	home := t.TempDir()
-	if _, ok := secretStoreFor(home, true).(*wslSecretStore); !ok {
-		t.Fatal("WSL did not select DPAPI store")
+	if _, ok := secretStoreFor(home, true).(*wslCompatibleSecretStore); !ok {
+		t.Fatal("WSL did not select the DPAPI-compatible fallback store")
 	}
 	if _, ok := secretStoreFor(home, false).(systemKeyring); !ok {
 		t.Fatal("ordinary platform did not select system keyring")
+	}
+}
+
+type setFailStore struct {
+	*fakeStore
+	err error
+}
+
+func (s *setFailStore) Set(string, string) error { return s.err }
+
+type unavailableStore struct{ err error }
+
+func (s unavailableStore) Get(string) (string, error) { return "", s.err }
+func (s unavailableStore) Set(string, string) error   { return s.err }
+func (s unavailableStore) Delete(string) error        { return nil }
+
+func TestWSLWithoutSecretServiceUsesDPAPI(t *testing.T) {
+	dpapi := newFakeStore()
+	store := &wslCompatibleSecretStore{
+		dpapi:         dpapi,
+		secretService: unavailableStore{err: errors.New("secret service unavailable")},
+	}
+	manager := newConfigManagerAt(t.TempDir(), store)
+	if err := manager.Save(&Config{AuthToken: "auth", CT0: "csrf"}); err != nil {
+		t.Fatal(err)
+	}
+	if dpapi.data[keyAuthToken] != "auth" || dpapi.data[keyCT0] != "csrf" {
+		t.Fatalf("DPAPI session = %#v", dpapi.data)
+	}
+}
+
+func TestWSLFallsBackWhenDPAPIIsUnavailable(t *testing.T) {
+	dpapi := &setFailStore{fakeStore: newFakeStore(), err: wsl.ErrUnavailable}
+	service := newFakeStore()
+	store := &wslCompatibleSecretStore{dpapi: dpapi, secretService: service}
+	manager := newConfigManagerAt(t.TempDir(), store)
+
+	want := &Config{AuthToken: "auth", CT0: "csrf", SessionBrowser: "Firefox"}
+	if err := manager.Save(want); err != nil {
+		t.Fatal(err)
+	}
+	if service.data[keyAuthToken] != "auth" || service.data[keyCT0] != "csrf" {
+		t.Fatalf("Secret Service fallback = %#v", service.data)
+	}
+	got, err := manager.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AuthToken != want.AuthToken || got.CT0 != want.CT0 {
+		t.Fatalf("Load = %+v, want session from Secret Service", got)
+	}
+}
+
+func TestWSLPromotesExistingSecretServicePairToDPAPI(t *testing.T) {
+	dpapi := newFakeStore()
+	service := newFakeStore()
+	service.data[keyAuthToken] = "legacy-auth"
+	service.data[keyCT0] = "legacy-csrf"
+	store := &wslCompatibleSecretStore{dpapi: dpapi, secretService: service}
+	manager := newConfigManagerAt(t.TempDir(), store)
+
+	got, err := manager.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AuthToken != "legacy-auth" || got.CT0 != "legacy-csrf" {
+		t.Fatalf("Load = %+v, want existing Secret Service session", got)
+	}
+	if dpapi.data[keyAuthToken] != "legacy-auth" || dpapi.data[keyCT0] != "legacy-csrf" {
+		t.Fatalf("DPAPI migration = %#v", dpapi.data)
+	}
+	if len(service.data) != 0 {
+		t.Fatalf("Secret Service entries remain after migration: %#v", service.data)
+	}
+}
+
+func TestWSLPromotionFailureKeepsSecretServicePair(t *testing.T) {
+	dpapi := &setFailStore{fakeStore: newFakeStore(), err: wsl.ErrUnavailable}
+	service := newFakeStore()
+	service.data[keyAuthToken] = "auth"
+	service.data[keyCT0] = "csrf"
+	store := &wslCompatibleSecretStore{dpapi: dpapi, secretService: service}
+	manager := newConfigManagerAt(t.TempDir(), store)
+
+	got, err := manager.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AuthToken != "auth" || got.CT0 != "csrf" {
+		t.Fatalf("Load = %+v, want Secret Service session", got)
+	}
+	if service.data[keyAuthToken] != "auth" || service.data[keyCT0] != "csrf" {
+		t.Fatalf("failed migration damaged Secret Service: %#v", service.data)
+	}
+}
+
+type deleteFailStore struct {
+	*fakeStore
+	failKey string
+}
+
+func (s *deleteFailStore) Delete(key string) error {
+	if key == s.failKey {
+		return errors.New("delete failed")
+	}
+	return s.fakeStore.Delete(key)
+}
+
+func TestWSLPromotionCleanupFailureKeepsACompletePairInBothStores(t *testing.T) {
+	dpapi := newFakeStore()
+	base := newFakeStore()
+	base.data[keyAuthToken] = "auth"
+	base.data[keyCT0] = "csrf"
+	service := &deleteFailStore{fakeStore: base, failKey: keyCT0}
+	manager := newConfigManagerAt(t.TempDir(), &wslCompatibleSecretStore{
+		dpapi: dpapi, secretService: service,
+	})
+
+	if _, err := manager.Load(); err != nil {
+		t.Fatal(err)
+	}
+	for name, store := range map[string]*fakeStore{"DPAPI": dpapi, "SecretService": base} {
+		if store.data[keyAuthToken] != "auth" || store.data[keyCT0] != "csrf" {
+			t.Fatalf("%s pair after cleanup failure = %#v", name, store.data)
+		}
+	}
+}
+
+func TestWSLEraseDeletesBothBackends(t *testing.T) {
+	dpapi := newFakeStore()
+	service := newFakeStore()
+	for _, store := range []*fakeStore{dpapi, service} {
+		store.data[keyAuthToken] = "auth"
+		store.data[keyCT0] = "csrf"
+		store.data[keyLegacySessionCookies] = "legacy"
+	}
+	manager := newConfigManagerAt(t.TempDir(), &wslCompatibleSecretStore{
+		dpapi: dpapi, secretService: service,
+	})
+	if err := manager.Erase(); err != nil {
+		t.Fatal(err)
+	}
+	if len(dpapi.data) != 0 || len(service.data) != 0 {
+		t.Fatalf("Erase left DPAPI=%#v SecretService=%#v", dpapi.data, service.data)
 	}
 }
