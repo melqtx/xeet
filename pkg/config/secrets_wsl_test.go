@@ -200,7 +200,7 @@ type unavailableStore struct{ err error }
 
 func (s unavailableStore) Get(string) (string, error) { return "", s.err }
 func (s unavailableStore) Set(string, string) error   { return s.err }
-func (s unavailableStore) Delete(string) error        { return nil }
+func (s unavailableStore) Delete(string) error        { return s.err }
 
 func TestWSLWithoutSecretServiceUsesDPAPI(t *testing.T) {
 	dpapi := newFakeStore()
@@ -214,6 +214,26 @@ func TestWSLWithoutSecretServiceUsesDPAPI(t *testing.T) {
 	}
 	if dpapi.data[keyAuthToken] != "auth" || dpapi.data[keyCT0] != "csrf" {
 		t.Fatalf("DPAPI session = %#v", dpapi.data)
+	}
+}
+
+func TestWSLEraseIgnoresUnavailableSecretService(t *testing.T) {
+	dpapi := newFakeStore()
+	for _, key := range []string{keyAuthToken, keyCT0, keyLegacySessionCookies} {
+		dpapi.data[key] = "secret"
+	}
+	manager := newConfigManagerAt(t.TempDir(), &wslCompatibleSecretStore{
+		dpapi: dpapi,
+		secretService: unavailableStore{
+			err: errors.New("secret service unavailable"),
+		},
+	})
+
+	if err := manager.Erase(); err != nil {
+		t.Fatalf("Erase with unavailable Secret Service = %v", err)
+	}
+	if len(dpapi.data) != 0 {
+		t.Fatalf("Erase left DPAPI secrets = %#v", dpapi.data)
 	}
 }
 
@@ -330,5 +350,22 @@ func TestWSLEraseDeletesBothBackends(t *testing.T) {
 	}
 	if len(dpapi.data) != 0 || len(service.data) != 0 {
 		t.Fatalf("Erase left DPAPI=%#v SecretService=%#v", dpapi.data, service.data)
+	}
+}
+
+func TestWSLEraseReportsDeleteFailureForSecretServiceSession(t *testing.T) {
+	service := newFakeStore()
+	service.data[keyAuthToken] = "auth"
+	service.data[keyCT0] = "csrf"
+	manager := newConfigManagerAt(t.TempDir(), &wslCompatibleSecretStore{
+		dpapi: newFakeStore(),
+		secretService: &deleteFailStore{
+			fakeStore: service,
+			failKey:   keyAuthToken,
+		},
+	})
+
+	if err := manager.Erase(); err == nil {
+		t.Fatal("Erase ignored a delete failure for a Secret Service session")
 	}
 }

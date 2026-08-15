@@ -165,7 +165,14 @@ func (s *wslCompatibleSecretStore) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	dpapiErr := s.dpapi.Delete(key)
-	serviceErr := s.secretService.Delete(key)
+	var serviceErr error
+	if _, err := s.secretService.Get(key); err == nil {
+		// Secret Service is an optional WSL fallback. Only surface a delete
+		// failure after proving that this key exists there; an unavailable
+		// service must not turn an otherwise successful logout into a partial
+		// one.
+		serviceErr = s.secretService.Delete(key)
+	}
 	s.selected = backendUnselected
 	return errors.Join(dpapiErr, serviceErr)
 }
