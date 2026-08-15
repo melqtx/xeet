@@ -47,7 +47,8 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 		AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789",
 		HomeTimelineQID: "home123", BookmarksQID: "bookmarks123", SearchTimelineQID: "search123",
 		FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123",
-		TweetDetailQID: "detail123",
+		TweetDetailQID: "detail123", NotificationsQID: "notifications123",
+		NotificationsDeliveredID: "200", NotificationsReadID: "190", NotificationsAccountID: "42",
 		SessionBrowser: "Firefox", SessionProfile: "default-release", SessionDomain: "x.com",
 		SessionExpires:  time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC),
 		SessionImported: time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC),
@@ -410,6 +411,56 @@ func TestThemeReadsTheFileWithoutTouchingTheKeyring(t *testing.T) {
 	}
 	if store.gets != 0 {
 		t.Fatalf("Theme() made %d keyring reads; drawing in the right colors must not prompt for secrets", store.gets)
+	}
+}
+
+func TestFullSaveDoesNotRegressConcurrentNotificationState(t *testing.T) {
+	dir := t.TempDir()
+	store := newFakeStore()
+	cm := newConfigManagerAt(dir, store)
+	original := &Config{AuthToken: "auth", CT0: "ct0", NotificationsAccountID: "viewer", NotificationsDeliveredID: "200", NotificationsReadID: "190"}
+	if err := cm.Save(original); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := cm.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.SaveNotificationState("viewer", "300", "290"); err != nil {
+		t.Fatal(err)
+	}
+	stale.NotificationsQID = "fresh-qid"
+	if err := cm.Save(stale); err != nil {
+		t.Fatal(err)
+	}
+	fc, err := cm.readFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.NotificationsDeliveredID != "300" || fc.NotificationsReadID != "290" || fc.NotificationsQID != "fresh-qid" {
+		t.Fatalf("full save regressed notification state: %+v", fc)
+	}
+}
+
+func TestSaveNotificationStateSkipsKeyringAndKeepsNewestIDs(t *testing.T) {
+	dir := t.TempDir()
+	store := &countingStore{fakeStore: newFakeStore()}
+	cm := newConfigManagerAt(dir, store)
+	if err := cm.Save(&Config{Theme: "nord"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.SaveNotificationState("viewer", "200", "190"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.SaveNotificationState("viewer", "199", "180"); err != nil {
+		t.Fatal(err)
+	}
+	fc, err := cm.readFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.gets != 0 || fc.NotificationsAccountID != "viewer" || fc.NotificationsDeliveredID != "200" || fc.NotificationsReadID != "190" || fc.Theme != "nord" {
+		t.Fatalf("gets=%d config=%+v", store.gets, fc)
 	}
 }
 

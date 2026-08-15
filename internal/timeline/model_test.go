@@ -3,8 +3,10 @@ package timeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melqtx/xeet/pkg/api"
 
@@ -172,6 +174,22 @@ func TestHelpProcessesBackgroundResults(t *testing.T) {
 	}
 	if m.liking["1"] || m.posts[0].Liked || m.posts[0].LikeCount != 0 {
 		t.Fatalf("like result was dropped: liking=%v post=%+v", m.liking, m.posts[0])
+	}
+}
+
+func TestTabCyclesFeedsInBothDirections(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.posts = posts(2)
+	for _, test := range []struct {
+		key  tea.KeyType
+		feed FeedKind
+	}{{tea.KeyTab, FeedFollowing}, {tea.KeyTab, FeedBookmarks}, {tea.KeyTab, FeedForYou}, {tea.KeyShiftTab, FeedBookmarks}} {
+		next, cmd := m.Update(tea.KeyMsg{Type: test.key})
+		m = next.(Model)
+		if cmd == nil || m.feed != test.feed || !m.loading {
+			t.Fatalf("key %v: feed=%v loading=%v cmd=%v", test.key, m.feed, m.loading, cmd)
+		}
 	}
 }
 
@@ -656,6 +674,308 @@ func TestViewIsFixedHeightAndDoesNotDuplicateRows(t *testing.T) {
 		if lines := strings.Count(view, "\n") + 1; lines != size.height {
 			t.Fatalf("%dx%d: view has %d lines", size.width, size.height, lines)
 		}
+	}
+}
+
+func TestEmptyNotificationBaselineDoesNotSwallowFirstArrival(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.posts = posts(1)
+	m.syncViewport()
+	m = update(t, m, notificationMsg{seq: 1, poll: true, page: &api.NotificationPage{AccountID: "viewer"}})
+	if !m.notificationBaselineSet || m.notificationDeliveredID != "" {
+		t.Fatalf("empty baseline was not recorded: set=%v delivered=%q", m.notificationBaselineSet, m.notificationDeliveredID)
+	}
+	m.notificationSeq = 2
+	m = update(t, m, notificationMsg{seq: 2, poll: true, page: &api.NotificationPage{AccountID: "viewer", Notifications: []api.Notification{{
+		ID: "201", Kind: api.NotificationMention, Post: api.TimelinePost{ID: "201", Handle: "bob", Text: "hello"},
+	}}}})
+	if m.notificationPopup == nil || m.notificationPopup.ID != "201" || m.unreadNotifications != 1 {
+		t.Fatalf("first arrival after empty baseline was swallowed: popup=%+v unread=%d", m.notificationPopup, m.unreadNotifications)
+	}
+}
+
+func TestNotificationBaselineThenNewReplyPopup(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.posts = posts(1)
+	m.syncViewport()
+	baseline := &api.NotificationPage{AccountID: "viewer", Notifications: []api.Notification{{
+		ID: "200", Kind: api.NotificationReply,
+		Post: api.TimelinePost{ID: "200", Handle: "alice", Text: "first reply", InReplyToID: "100"},
+	}}}
+	m = update(t, m, notificationMsg{seq: 1, poll: true, page: baseline})
+	if m.notificationPopup != nil || m.notificationDeliveredID != "200" || m.notificationReadID != "200" {
+		t.Fatalf("baseline surfaced old history: popup=%+v delivered=%q read=%q", m.notificationPopup, m.notificationDeliveredID, m.notificationReadID)
+	}
+
+	m.notificationSeq = 2
+	page := &api.NotificationPage{AccountID: "viewer", Notifications: []api.Notification{{
+		ID: "201", Kind: api.NotificationReply,
+		Post: api.TimelinePost{ID: "201", Handle: "bob", Text: "a new reply", InReplyToID: "100"},
+	}}}
+	m = update(t, m, notificationMsg{seq: 2, poll: true, page: page})
+	if m.notificationPopup == nil || m.notificationPopup.ID != "201" || m.unreadNotifications != 1 {
+		t.Fatalf("new reply did not surface: popup=%+v unread=%d", m.notificationPopup, m.unreadNotifications)
+	}
+	if view := m.View(); !strings.Contains(view, "reply from @bob") || !strings.Contains(view, "N reply") {
+		t.Fatalf("popup is missing content/actions:\n%s", view)
+	}
+}
+
+func TestPopupDirectReplyAndNotificationPanel(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.posts = posts(1)
+	note := api.Notification{ID: "201", Kind: api.NotificationReply, Post: api.TimelinePost{
+		ID: "201", Handle: "bob", Text: "a new reply", InReplyToID: "100",
+	}}
+	m.notifications = []api.Notification{note}
+	m.notificationPopup = &note
+	m.unreadNotifications = 1
+	m.syncViewport()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if m.mode != modeReply || m.replyPost.ID != "201" {
+		t.Fatalf("N did not reply to popup: mode=%v target=%q", m.mode, m.replyPost.ID)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if m.mode != modeNotifications || m.unreadNotifications != 0 || !strings.Contains(m.View(), "notifications") {
+		t.Fatalf("notification panel did not open/read: mode=%v unread=%d", m.mode, m.unreadNotifications)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeFeed || m.selected != 0 {
+		t.Fatalf("panel did not restore feed: mode=%v selected=%d", m.mode, m.selected)
+	}
+}
+
+func TestNotificationThreadReturnsToPanel(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.mode = modeNotifications
+	m.notifications = []api.Notification{{ID: "201", Kind: api.NotificationReply, Post: api.TimelinePost{
+		ID: "201", ConversationID: "100", Handle: "bob", Text: "reply", InReplyToID: "100",
+	}}}
+	m.syncViewport()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeThread || m.threadRootID != "100" || m.threadReturn != modeNotifications {
+		t.Fatalf("notification did not open conversation: mode=%v root=%q return=%v", m.mode, m.threadRootID, m.threadReturn)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeNotifications || m.selected != 0 {
+		t.Fatalf("thread did not return to panel: mode=%v selected=%d", m.mode, m.selected)
+	}
+}
+
+func TestNestedNotificationThreadRestoresOriginThread(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.mode = modeThread
+	m.threadReturn = modeFeed
+	m.threadRootID = "thread-a"
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "thread-a", Text: "A"}}}
+	m.threadSeq = 7
+	m.threadLoading = true
+	m.selected = 0
+	m.notifications = []api.Notification{{ID: "note-b", Post: api.TimelinePost{
+		ID: "note-b", ConversationID: "thread-b", Text: "B",
+	}}}
+	m.syncViewport()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeThread || m.threadRootID != "thread-b" {
+		t.Fatalf("notification conversation did not open: mode=%v root=%q", m.mode, m.threadRootID)
+	}
+	m = update(t, m, threadMsg{rootID: "thread-a", seq: 7, page: &api.ConversationPage{Posts: []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "thread-a", Text: "A"}},
+		{TimelinePost: api.TimelinePost{ID: "thread-a-child", Text: "child", InReplyToID: "thread-a"}, Depth: 1},
+	}}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeThread || m.threadRootID != "thread-a" || m.threadLoading || len(m.threadPosts) != 2 || m.threadPosts[0].ID != "thread-a" || m.threadSeq != 7 {
+		t.Fatalf("origin thread was not restored: mode=%v root=%q posts=%+v seq=%d", m.mode, m.threadRootID, m.threadPosts, m.threadSeq)
+	}
+}
+
+func TestThreadResultCompletesBehindNotificationPanel(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.mode = modeThread
+	m.threadRootID = "root"
+	m.threadSeq = 1
+	m.threadLoading = true
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m.selected = 0
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, page: &api.ConversationPage{Posts: []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}},
+		{TimelinePost: api.TimelinePost{ID: "reply", Text: "reply", InReplyToID: "root"}, Depth: 1},
+	}}})
+	if m.mode != modeNotifications || m.threadLoading || len(m.threadPosts) != 2 {
+		t.Fatalf("thread result was dropped behind panel: mode=%v loading=%v posts=%d", m.mode, m.threadLoading, len(m.threadPosts))
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeThread || len(m.threadPosts) != 2 {
+		t.Fatalf("panel did not restore completed thread: mode=%v posts=%d", m.mode, len(m.threadPosts))
+	}
+}
+
+func TestThreadResultCompletesBehindNotificationReplyEditor(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.mode = modeThread
+	m.threadReturn = modeFeed
+	m.threadRootID = "root"
+	m.threadSeq = 1
+	m.threadLoading = true
+	m.threadPosts = []api.ConversationPost{{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}}}
+	m.notifications = []api.Notification{{ID: "note", Post: api.TimelinePost{ID: "note", Text: "mention"}}}
+	m.syncViewport()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = update(t, m, threadMsg{rootID: "root", seq: 1, page: &api.ConversationPage{Posts: []api.ConversationPost{
+		{TimelinePost: api.TimelinePost{ID: "root", Text: "root"}},
+		{TimelinePost: api.TimelinePost{ID: "child", Text: "child", InReplyToID: "root"}, Depth: 1},
+	}}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeThread || m.threadLoading || len(m.threadPosts) != 2 {
+		t.Fatalf("thread result was lost behind notification reply: mode=%v loading=%v posts=%d", m.mode, m.threadLoading, len(m.threadPosts))
+	}
+}
+
+func TestNotificationResultAppliesWhileReplyEditorOpen(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.mode = modeReply
+	m.replyReturn = modeFeed
+	m.notificationStateLoaded = true
+	m.notificationDeliveredID = "200"
+	m.notificationReadID = "200"
+	m.notificationSeq = 2
+	m.notificationPolling = true
+	m = update(t, m, notificationMsg{seq: 2, poll: true, page: &api.NotificationPage{Notifications: []api.Notification{{
+		ID: "201", Kind: api.NotificationMention, Post: api.TimelinePost{ID: "201", Text: "hello @me"},
+	}}}})
+	if m.mode != modeReply || len(m.notifications) != 1 || m.notificationPopup != nil || len(m.notificationQueue) != 1 {
+		t.Fatalf("background notification mishandled: mode=%v notes=%d popup=%+v queue=%d", m.mode, len(m.notifications), m.notificationPopup, len(m.notificationQueue))
+	}
+}
+
+func TestNotificationPopupKeepsViewFixedHeight(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.loading = false
+	m.posts = posts(8)
+	note := api.Notification{ID: "201", Kind: api.NotificationReply, Post: api.TimelinePost{ID: "201", Handle: "bob", Text: strings.Repeat("reply words ", 12)}}
+	m.notificationPopup = &note
+	for _, size := range []struct{ w, h int }{{42, 15}, {80, 24}} {
+		m = update(t, m, tea.WindowSizeMsg{Width: size.w, Height: size.h})
+		if lines := strings.Count(m.View(), "\n") + 1; lines != size.h {
+			t.Fatalf("%dx%d popup view has %d lines", size.w, size.h, lines)
+		}
+	}
+}
+
+func TestNotificationBurstKeepsNewestBoundedPopups(t *testing.T) {
+	m := NewWithImageMode("off")
+	fresh := make([]api.Notification, 5)
+	for i, id := range []string{"205", "204", "203", "202", "201"} {
+		fresh[i] = api.Notification{ID: id, Post: api.TimelinePost{ID: id}}
+	}
+	m.enqueueNotifications(fresh)
+	if len(m.notificationQueue) != notificationPopupQueue || m.notificationOverflow != 2 {
+		t.Fatalf("queue=%d overflow=%d", len(m.notificationQueue), m.notificationOverflow)
+	}
+	for i, want := range []string{"203", "204", "205"} {
+		if m.notificationQueue[i].ID != want {
+			t.Fatalf("queue[%d]=%q want %q", i, m.notificationQueue[i].ID, want)
+		}
+	}
+}
+
+func TestNotificationHistoryIsBounded(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.notifications = make([]api.Notification, notificationHistoryLimit)
+	for i := range m.notifications {
+		id := fmt.Sprintf("%03d", notificationHistoryLimit-i)
+		m.notifications[i] = api.Notification{ID: id, Post: api.TimelinePost{ID: id}}
+	}
+	m.notificationCursor = "more"
+	m.mergeNotificationsOnTop([]api.Notification{{ID: "999", Post: api.TimelinePost{ID: "999"}}})
+	if len(m.notifications) != notificationHistoryLimit || m.notifications[0].ID != "999" || m.notificationCursor != "" {
+		t.Fatalf("history was not bounded: len=%d first=%q cursor=%q", len(m.notifications), m.notifications[0].ID, m.notificationCursor)
+	}
+}
+
+func TestNotificationPopupClearIsSequenceSafe(t *testing.T) {
+	m := NewWithImageMode("off")
+	first := api.Notification{ID: "1", Post: api.TimelinePost{ID: "1"}}
+	second := api.Notification{ID: "2", Post: api.TimelinePost{ID: "2"}}
+	m.notificationPopup = &first
+	m.notificationPopupSeq = 1
+	m.notificationQueue = []api.Notification{second}
+	m = update(t, m, notificationPopupClearMsg{seq: 1})
+	if m.notificationPopup == nil || m.notificationPopup.ID != "2" {
+		t.Fatalf("next popup was not activated: %+v", m.notificationPopup)
+	}
+	m = update(t, m, notificationPopupClearMsg{seq: 1})
+	if m.notificationPopup == nil || m.notificationPopup.ID != "2" {
+		t.Fatal("stale clear removed the newer popup")
+	}
+}
+
+func TestNotificationPollDoesNotOverlap(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.notificationTimerSeq = 4
+	m.notificationPolling = true
+	next, cmd := m.Update(notificationPollTickMsg{seq: 4})
+	m = next.(Model)
+	if cmd == nil || !m.notificationPolling || m.notificationTimerSeq != 5 {
+		t.Fatal("overlapping request did not keep the notification timer alive")
+	}
+	m.notificationPolling = false
+	next, cmd = m.Update(notificationPollTickMsg{seq: 5})
+	m = next.(Model)
+	if cmd == nil || !m.notificationPolling || m.notificationSeq != 2 {
+		t.Fatalf("idle timer did not start poll: polling=%v seq=%d cmd=%v", m.notificationPolling, m.notificationSeq, cmd)
+	}
+}
+
+func TestNotificationStateSaveOnlyClearsMatchingDirtyState(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.notificationStateDirty = true
+	m.notificationAccountID = "viewer"
+	m.notificationDeliveredID = "200"
+	m.notificationReadID = "190"
+	m = update(t, m, notificationStateSavedMsg{err: errors.New("disk full"), accountID: "viewer", deliveredID: "200", readID: "190"})
+	if !m.notificationStateDirty {
+		t.Fatal("failed save cleared dirty notification state")
+	}
+	m = update(t, m, notificationStateSavedMsg{accountID: "viewer", deliveredID: "199", readID: "190"})
+	if !m.notificationStateDirty {
+		t.Fatal("stale save cleared newer notification state")
+	}
+	m = update(t, m, notificationStateSavedMsg{accountID: "viewer", deliveredID: "200", readID: "190"})
+	if m.notificationStateDirty {
+		t.Fatal("matching successful save left notification state dirty")
+	}
+}
+
+func TestNotificationPollingSlowsDownWhileIdle(t *testing.T) {
+	m := NewWithImageMode("off")
+	for i, want := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute} {
+		if got := m.nextNotificationPollDelay(false); got != want {
+			t.Fatalf("idle poll %d delay=%s want %s", i+1, got, want)
+		}
+	}
+	if got := m.nextNotificationPollDelay(true); got != time.Minute || m.notificationIdlePolls != 0 {
+		t.Fatalf("fresh notification did not reset polling: delay=%s idle=%d", got, m.notificationIdlePolls)
+	}
+}
+
+func TestSnowflakeComparisonDoesNotOverflow(t *testing.T) {
+	if !snowflakeAfter("100000000000000000000", "99999999999999999999") || snowflakeAfter("0010", "10") || snowflakeAfter("9", "10") {
+		t.Fatal("snowflake ordering is not numeric")
 	}
 }
 

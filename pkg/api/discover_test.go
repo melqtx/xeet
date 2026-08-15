@@ -54,6 +54,7 @@ func TestOperationHintSelectsTheBundleForEachOperationFamily(t *testing.T) {
 		{operation: "HomeTimeline", want: "HomeTimeline"},
 		{operation: "CreateTweet", want: "Compose"},
 		{operation: "SearchTimeline", want: "SearchTimeline"},
+		{operation: "NotificationsTimeline", want: "Notifications"},
 		{operation: "Bookmarks", want: "Bookmarks"},
 	}
 	for _, test := range tests {

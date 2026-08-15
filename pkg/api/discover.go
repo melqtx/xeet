@@ -112,6 +112,9 @@ func operationHint(operation string) string {
 	if operation == "SearchTimeline" {
 		return "SearchTimeline"
 	}
+	if operation == "NotificationsTimeline" {
+		return "Notifications"
+	}
 	if strings.Contains(operation, "Tweet") {
 		return "Compose"
 	}

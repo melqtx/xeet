@@ -51,10 +51,13 @@ func (m Model) beginReply(post api.TimelinePost) (tea.Model, tea.Cmd) {
 func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case threadMsg:
-		if m.replyReturn != modeThread {
-			return m, nil
+		if m.replyReturn == modeThread {
+			return m.applyThreadPage(msg, false)
 		}
-		return m.applyThreadPage(msg, false)
+		if m.replyReturn == modeNotifications && m.notificationReturn == modeThread {
+			return m.applyThreadPageBehindNotifications(msg)
+		}
+		return m, nil
 	case pageMsg:
 		return m.applyFeedPage(msg)
 	case likeMsg:
