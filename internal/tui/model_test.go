@@ -280,3 +280,17 @@ func TestClipboardUnavailableKeepsFileAttachPath(t *testing.T) {
 		t.Fatalf("clipboard error is not actionable: %q", message)
 	}
 }
+
+func TestLongDraftIsPreservedAndOversizeCannotPost(t *testing.T) {
+	m := New(nil)
+	text := strings.Repeat("界\n", 150) + strings.Repeat("x", 25000)
+	m.editor.SetValue(text)
+	if m.editor.Value() != text {
+		t.Fatal("draft was truncated")
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(Model)
+	if got.screen != screenCompose || got.lastErr == nil || got.editor.Value() != text {
+		t.Fatal("oversize draft should remain editable with an error")
+	}
+}

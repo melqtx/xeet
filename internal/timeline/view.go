@@ -634,15 +634,15 @@ func (m Model) viewReply() string {
 	}
 	editor := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).
 		Padding(0, 1).Width(w - 4).Render(m.replyEditor.View())
-	length := m.replyEditor.Length()
+	length := api.PostTextLength(m.replyEditor.Value())
 	counterColor := muted
 	switch {
-	case length >= 280:
+	case length > api.LongPostLimit:
 		counterColor = red
-	case length >= 260:
+	case length > api.StandardPostLimit:
 		counterColor = yellow
 	}
-	status := lipgloss.NewStyle().Foreground(counterColor).Render(fmt.Sprintf("%d/280", length)) +
+	status := lipgloss.NewStyle().Foreground(counterColor).Render(api.PostTextCounter(m.replyEditor.Value())) +
 		lipgloss.NewStyle().Foreground(muted).Render("    enter reply  ·  alt+enter newline  ·  esc cancel")
 	if m.replyPosting {
 		status = lipgloss.NewStyle().Foreground(muted).Render(m.spinner.View() + " sending reply…")

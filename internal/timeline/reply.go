@@ -125,6 +125,10 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.replyErr = fmt.Errorf("write a reply first")
 				return m, nil
 			}
+			if err := api.ValidatePostText(m.replyEditor.Value()); err != nil {
+				m.replyErr = err
+				return m, nil
+			}
 			m.replyPosting = true
 			m.replyErr = nil
 			m.replyNotice = ""

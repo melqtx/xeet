@@ -996,3 +996,19 @@ func TestRequestContextCarriesCancellation(t *testing.T) {
 		t.Fatal("zero-value model has no request context")
 	}
 }
+
+func TestLongReplyIsPreservedAndOversizeCannotPost(t *testing.T) {
+	m := New()
+	next, _ := m.beginReply(api.TimelinePost{ID: "parent"})
+	m = next.(Model)
+	text := strings.Repeat("界\n", 150) + strings.Repeat("x", 25000)
+	m.replyEditor.SetValue(text)
+	if m.replyEditor.Value() != text {
+		t.Fatal("reply was truncated")
+	}
+	next, _ = m.updateReply(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(Model)
+	if got.replyPosting || got.replyErr == nil || got.replyEditor.Value() != text {
+		t.Fatal("oversize reply should remain editable with an error")
+	}
+}

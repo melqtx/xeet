@@ -28,6 +28,7 @@ type Config struct {
 	AuthToken                string    `yaml:"-"`
 	CT0                      string    `yaml:"-"`
 	CreateTweetQID           string    `yaml:"create_tweet_qid"`
+	CreateNoteTweetQID       string    `yaml:"create_note_tweet_qid"`
 	HomeTimelineQID          string    `yaml:"home_timeline_qid,omitempty"`
 	HomeLatestTimelineQID    string    `yaml:"home_latest_timeline_qid,omitempty"`
 	BookmarksQID             string    `yaml:"bookmarks_qid,omitempty"`
@@ -106,6 +107,7 @@ type fileConfig struct {
 	AuthToken                string `yaml:"auth_token,omitempty"`
 	CT0                      string `yaml:"ct0,omitempty"`
 	CreateTweetQID           string `yaml:"create_tweet_qid,omitempty"`
+	CreateNoteTweetQID       string `yaml:"create_note_tweet_qid,omitempty"`
 	HomeTimelineQID          string `yaml:"home_timeline_qid,omitempty"`
 	HomeLatestTimelineQID    string `yaml:"home_latest_timeline_qid,omitempty"`
 	BookmarksQID             string `yaml:"bookmarks_qid,omitempty"`
@@ -165,6 +167,7 @@ func (cm *ConfigManager) Load() (*Config, error) {
 
 	config := &Config{
 		CreateTweetQID:           fc.CreateTweetQID,
+		CreateNoteTweetQID:       fc.CreateNoteTweetQID,
 		HomeTimelineQID:          fc.HomeTimelineQID,
 		HomeLatestTimelineQID:    fc.HomeLatestTimelineQID,
 		BookmarksQID:             fc.BookmarksQID,
@@ -296,6 +299,7 @@ func (cm *ConfigManager) save(config *Config) error {
 	if config.AuthToken == "" {
 		return cm.writeFile(&fileConfig{
 			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
+			CreateNoteTweetQID:    config.CreateNoteTweetQID,
 			HomeLatestTimelineQID: config.HomeLatestTimelineQID,
 			BookmarksQID:          config.BookmarksQID,
 			SearchTimelineQID:     config.SearchTimelineQID,
@@ -407,6 +411,7 @@ func numericIDAfter(left, right string) bool {
 func fileConfigFor(config *Config) *fileConfig {
 	result := &fileConfig{
 		CreateTweetQID:           config.CreateTweetQID,
+		CreateNoteTweetQID:       config.CreateNoteTweetQID,
 		HomeTimelineQID:          config.HomeTimelineQID,
 		HomeLatestTimelineQID:    config.HomeLatestTimelineQID,
 		BookmarksQID:             config.BookmarksQID,

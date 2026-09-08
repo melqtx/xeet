@@ -107,10 +107,13 @@ func (m Model) viewComposer() string {
 	}
 
 	countColor := muted
-	if m.editor.Length() >= 260 {
+	if api.PostTextLength(m.editor.Value()) > api.StandardPostLimit {
 		countColor = pink
 	}
-	status := lipgloss.NewStyle().Foreground(countColor).Render(fmt.Sprintf("%d/280", m.editor.Length()))
+	if api.PostTextLength(m.editor.Value()) > api.LongPostLimit {
+		countColor = red
+	}
+	status := lipgloss.NewStyle().Foreground(countColor).Render(api.PostTextCounter(m.editor.Value()))
 	if len(m.attachments) > 0 {
 		status += lipgloss.NewStyle().Foreground(muted).Render(fmt.Sprintf("  •  %d pic%s", len(m.attachments), plural(len(m.attachments))))
 	}

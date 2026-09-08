@@ -101,7 +101,9 @@ func newWithDraftStore(clip clipboardReader, drafts draftStore) Model {
 	editor := textarea.New()
 	editor.Placeholder = "what are you thinking?"
 	editor.Prompt = ""
-	editor.CharLimit = 280
+	// Preserve pasted and recovered drafts; validate explicitly before posting.
+	editor.CharLimit = 0
+	editor.MaxHeight = 0
 	editor.SetWidth(56)
 	editor.SetHeight(7)
 	editor.ShowLineNumbers = false
