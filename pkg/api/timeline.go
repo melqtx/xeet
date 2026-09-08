@@ -182,7 +182,7 @@ func (c *WebClient) fetchTimelineOp(
 func timelineVariables(cursor string, count int) map[string]any {
 	variables := map[string]any{
 		"count":                  count,
-		"includePromotedContent": true,
+		"includePromotedContent": false,
 		"latestControlAvailable": true,
 		"requestContext":         "launch",
 		"seenTweetIds":           []string{},
@@ -261,12 +261,15 @@ func parseEntries(payload any) (posts []TimelinePost, bottomCursor string) {
 
 	parseEntry := func(raw any) {
 		entry, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || isPromotedEntry(entry) {
 			return
 		}
 		content, _ := entry["content"].(map[string]any)
 		if content == nil {
 			content = entry
+		}
+		if isPromotedEntry(content) {
+			return
 		}
 		parseCursor(content)
 		if item, ok := content["itemContent"].(map[string]any); ok {
@@ -276,9 +279,15 @@ func parseEntries(payload any) (posts []TimelinePost, bottomCursor string) {
 		if items, ok := content["items"].([]any); ok {
 			for _, rawItem := range items {
 				moduleItem, _ := rawItem.(map[string]any)
+				if isPromotedEntry(moduleItem) {
+					continue
+				}
 				item, _ := moduleItem["item"].(map[string]any)
 				if item == nil {
 					item = moduleItem
+				}
+				if isPromotedEntry(item) {
+					continue
 				}
 				if itemContent, ok := item["itemContent"].(map[string]any); ok {
 					parseCursor(itemContent)
@@ -312,7 +321,7 @@ func parseEntries(payload any) (posts []TimelinePost, bottomCursor string) {
 }
 
 func parseTimelineItem(item map[string]any) (TimelinePost, bool) {
-	if _, promoted := item["promoted_metadata"]; promoted {
+	if isPromotedEntry(item) {
 		return TimelinePost{}, false
 	}
 	tweetResults, _ := item["tweet_results"].(map[string]any)
@@ -439,4 +448,15 @@ func intValue(value any) int {
 		return int(result)
 	}
 	return 0
+}
+
+// Inspect only placement metadata, never post text or quoted posts.
+func isPromotedEntry(item map[string]any) bool {
+	for _, key := range []string{"promotedMetadata", "promoted_metadata"} {
+		if value, exists := item[key]; exists && value != nil {
+			return true
+		}
+	}
+	id, _ := item["entryId"].(string)
+	return strings.HasPrefix(id, "promoted-")
 }
