@@ -250,7 +250,9 @@ func NewWithImageMode(requested string) Model {
 	editor := textarea.New()
 	editor.Prompt = ""
 	editor.Placeholder = "write your reply…"
-	editor.CharLimit = 280
+	// Preserve pasted and recovered drafts; validate explicitly before posting.
+	editor.CharLimit = 0
+	editor.MaxHeight = 0
 	editor.ShowLineNumbers = false
 	editor.SetWidth(60)
 	editor.SetHeight(6)

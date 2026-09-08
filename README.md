@@ -150,6 +150,19 @@ example for each; `xeet <command> --help` goes deeper on any one of them.
 
 ## the tui
 
+**long posts**
+
+X Premium subscribers can publish posts and replies up to 25,000 characters
+from the CLI or either editor. No local Premium toggle is needed: X checks
+eligibility. Xeet first submits a standard post and switches to the long-post
+endpoint only after X explicitly rejects its length. This preserves X's own
+URL shortening and Unicode counting rules. Other failures never trigger that
+fallback.
+
+The editor counter shows Unicode code points, so it can differ from X's weighted
+count. Pasting and draft recovery preserve text beyond 280 characters; drafts
+above 25,000 stay editable and must be shortened before sending.
+
 **composer**
 
 | key | does |

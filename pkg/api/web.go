@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/melqtx/xeet/pkg/config"
@@ -178,6 +179,7 @@ func needsQueryIDRefresh(res *httpResult) bool {
 func NewWebClient(cfg *config.Config) *WebClient {
 	operationQIDs := map[string]string{
 		"CreateTweet":           cfg.CreateTweetQID,
+		"CreateNoteTweet":       cfg.CreateNoteTweetQID,
 		"HomeTimeline":          cfg.HomeTimelineQID,
 		"HomeLatestTimeline":    cfg.HomeLatestTimelineQID,
 		"Bookmarks":             cfg.BookmarksQID,
@@ -251,6 +253,8 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 		switch operation {
 		case "CreateTweet":
 			cfg.CreateTweetQID = qid
+		case "CreateNoteTweet":
+			cfg.CreateNoteTweetQID = qid
 		case "HomeTimeline":
 			cfg.HomeTimelineQID = qid
 		case "HomeLatestTimeline":
@@ -465,7 +469,7 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	if len(uploads) > 4 {
 		return "", fmt.Errorf("a post can have at most 4 attachments")
 	}
-	if text == "" && len(uploads) == 0 {
+	if strings.TrimSpace(text) == "" && len(uploads) == 0 {
 		return "", fmt.Errorf("post has no text or media")
 	}
 	videos := 0
@@ -479,6 +483,9 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	}
 	if videos > 0 && len(uploads) > 1 {
 		return "", fmt.Errorf("a video must be the only attachment")
+	}
+	if err := ValidatePostText(text); err != nil {
+		return "", err
 	}
 	vars := newCreateTweetVariables(text)
 	for i, upload := range uploads {
@@ -513,32 +520,52 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	attemptedAt := time.Now()
-	res, err := c.doCreateTweet(ctx, vars, c.createTweetQueryID())
-	if err != nil {
-		return c.finishAmbiguousCreate(
-			ctx, text, replyToID, len(uploads), attemptedAt,
-			createTransportDiagnostic(err), progress,
-		)
-	}
-
-	// A 404 (or a 400 blaming the persisted query) means the query id rotated.
-	// Discover the current one from X's live JS bundles, cache it, retry once.
-	if needsQueryIDRefresh(res) {
-		emitProgress(progress, PostEvent{Stage: PostStageDiscovering})
-		fresh, derr := c.discoverOperation(ctx, "CreateTweet")
-		if derr != nil {
-			return "", fmt.Errorf("the CreateTweet endpoint id is stale and auto-discovery failed (%v).\n"+
-				"Grab it manually: open x.com, post a tweet, in DevTools > Network find the 'CreateTweet' request,\n"+
-				"copy the id in its URL, then run:  xeet setqid <id>", derr)
-		}
+	operation, queryID := "CreateTweet", c.createTweetQueryID()
+	var res *httpResult
+	var err error
+	var attemptedAt time.Time
+	for {
 		attemptedAt = time.Now()
-		res, err = c.doCreateTweet(ctx, vars, fresh)
+		res, err = c.doCreatePost(ctx, vars, queryID, operation)
 		if err != nil {
 			return c.finishAmbiguousCreate(
 				ctx, text, replyToID, len(uploads), attemptedAt,
 				createTransportDiagnostic(err), progress,
 			)
+		}
+
+		// A 404 (or a 400 blaming the persisted query) means the query id rotated.
+		// Discover the current one from X's live JS bundles, cache it, retry once.
+		if needsQueryIDRefresh(res) {
+			emitProgress(progress, PostEvent{Stage: PostStageDiscovering})
+			fresh, derr := c.discoverOperation(ctx, operation)
+			if derr != nil {
+				return "", fmt.Errorf("the %s endpoint id is stale and auto-discovery failed: %w", operation, derr)
+			}
+			attemptedAt = time.Now()
+			res, err = c.doCreatePost(ctx, vars, fresh, operation)
+			if err != nil {
+				return c.finishAmbiguousCreate(
+					ctx, text, replyToID, len(uploads), attemptedAt,
+					createTransportDiagnostic(err), progress,
+				)
+			}
+		}
+
+		// Only an explicit length rejection permits switching mutations.
+		// X counts URLs and Unicode itself; no heuristic can accidentally
+		// require Premium for an otherwise valid standard post.
+		if operation != "CreateTweet" || !postLengthRejected(res) {
+			break
+		}
+		operation = "CreateNoteTweet"
+		queryID = c.operationQIDs[operation]
+		if queryID == "" {
+			emitProgress(progress, PostEvent{Stage: PostStageDiscovering})
+			queryID, err = c.discoverOperation(ctx, operation)
+			if err != nil {
+				return "", fmt.Errorf("long posts require X Premium; discover long-post endpoint: %w", err)
+			}
 		}
 	}
 
@@ -551,6 +578,9 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 		)
 	}
 	if outcome.err != nil {
+		if operation == "CreateNoteTweet" {
+			return "", fmt.Errorf("long post rejected (requires an eligible X Premium subscription): %w", outcome.err)
+		}
 		return "", outcome.err
 	}
 
@@ -564,21 +594,36 @@ func emitProgress(progress ProgressFunc, event PostEvent) {
 	}
 }
 
-// doCreateTweet issues one CreateTweet GraphQL request with the given query
-// id. It is a mutation, so transient failures are never auto-retried: a
-// timed-out request may still have posted, and retrying risks a double post.
-func (c *WebClient) doCreateTweet(ctx context.Context, vars createTweetVariables, queryID string) (*httpResult, error) {
+// doCreatePost never retries transient failures: a timeout may have posted.
+func (c *WebClient) doCreatePost(ctx context.Context, vars createTweetVariables, queryID, operation string) (*httpResult, error) {
 	payload := map[string]any{
 		"variables": vars,
 		"features":  createTweetFeatures,
 		"queryId":   queryID,
+	}
+	if operation == "CreateNoteTweet" {
+		features := make(map[string]bool, len(createTweetFeatures)+3)
+		for key, value := range createTweetFeatures {
+			features[key] = value
+		}
+		features["longform_notetweets_inline_media_enabled"] = true
+		features["communities_web_enable_tweet_community_results_fetch"] = true
+		features["responsive_web_graphql_exclude_directive_enabled"] = true
+		payload["features"] = features
+		payload["variables"] = map[string]any{
+			"tweet_text": vars.TweetText, "dark_request": false,
+			"media": vars.Media, "semantic_annotation_ids": vars.SemanticAnnotationIDs,
+		}
+		if vars.Reply != nil {
+			payload["variables"].(map[string]any)["reply"] = vars.Reply
+		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("https://x.com/i/api/graphql/%s/CreateTweet", queryID)
+	endpoint := fmt.Sprintf("https://x.com/i/api/graphql/%s/%s", queryID, operation)
 	return c.send(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {

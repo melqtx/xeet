@@ -137,6 +137,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toast = "Write something or attach an image first"
 				return m, nil
 			}
+			if err := api.ValidatePostText(m.editor.Value()); err != nil {
+				m.lastErr = err
+				return m, nil
+			}
 			if err := m.saveDraft(); err != nil {
 				m.lastErr = fmt.Errorf("save draft before posting: %w", err)
 				return m, nil

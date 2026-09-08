@@ -26,3 +26,20 @@ func TestDiscoverLive(t *testing.T) {
 		t.Fatalf("suspicious queryId: %q", id)
 	}
 }
+
+// Read-only discovery check for the Premium posting endpoint.
+func TestDiscoverNoteLive(t *testing.T) {
+	if os.Getenv("XEET_LIVE_DISCOVER") != "1" {
+		t.Skip("set XEET_LIVE_DISCOVER=1 to run the live discovery test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	id, err := DiscoverOperationQueryID(ctx, "", "", "CreateNoteTweet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(id) < 8 {
+		t.Fatalf("suspicious queryId: %q", id)
+	}
+	t.Logf("discovered CreateNoteTweet queryId: %s", id)
+}

@@ -106,12 +106,19 @@ func createdPostID(payload any) (string, string) {
 	root, _ := payload.(map[string]any)
 	data, _ := root["data"].(map[string]any)
 	create, _ := data["create_tweet"].(map[string]any)
+	if create == nil {
+		create, _ = data["notetweet_create"].(map[string]any)
+	}
 	results, _ := create["tweet_results"].(map[string]any)
 	result := results["result"]
 	if result == nil {
 		return "", ""
 	}
-	return trustedPostID(result, "data.create_tweet.tweet_results.result", 0)
+	path := "data.create_tweet.tweet_results.result"
+	if data["create_tweet"] == nil {
+		path = "data.notetweet_create.tweet_results.result"
+	}
+	return trustedPostID(result, path, 0)
 }
 
 // trustedPostID follows only result-wrapper keys. A generic recursive search
@@ -222,6 +229,9 @@ func createTweetReason(payload any) string {
 	root, _ := payload.(map[string]any)
 	data, _ := root["data"].(map[string]any)
 	create, _ := data["create_tweet"].(map[string]any)
+	if create == nil {
+		create, _ = data["notetweet_create"].(map[string]any)
+	}
 	var find func(any, int) string
 	find = func(node any, depth int) string {
 		if depth > 5 {
@@ -314,6 +324,9 @@ func createTweetShape(payload any) string {
 		return "no_data"
 	}
 	create, _ := data["create_tweet"].(map[string]any)
+	if create == nil {
+		create, _ = data["notetweet_create"].(map[string]any)
+	}
 	if create == nil {
 		return "no_create_tweet"
 	}
