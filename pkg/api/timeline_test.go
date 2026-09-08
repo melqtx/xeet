@@ -140,3 +140,42 @@ func TestParseTimelinePreservesDirectAndModuleItemOrderAndShowMoreCursor(t *test
 		}
 	}
 }
+
+func TestPromotedPlacementsFilteredWithoutLosingOrganicPostsOrCursor(t *testing.T) {
+	fixture := `{"entries":[
+  {"entryId":"promoted-tweet-1","content":{"itemContent":{"tweet_results":{"result":{"rest_id":"1","legacy":{"full_text":"ad","in_reply_to_status_id_str":"organic"}}}}}},
+  {"content":{"itemContent":{"promotedMetadata":{},"tweet_results":{"result":{"rest_id":"2","legacy":{"full_text":"ad","in_reply_to_status_id_str":"organic"}}}}}},
+  {"content":{"items":[
+   {"entryId":"promoted-tweet-3","item":{"itemContent":{"tweet_results":{"result":{"rest_id":"3","legacy":{"full_text":"ad","in_reply_to_status_id_str":"organic"}}}}}},
+   {"item":{"itemContent":{"promotedMetadata":{},"tweet_results":{"result":{"rest_id":"4","legacy":{"full_text":"ad","in_reply_to_status_id_str":"organic"}}}}}},
+   {"item":{"itemContent":{"tweet_results":{"result":{"rest_id":"organic","legacy":{"full_text":"I am discussing ads and promotedMetadata"}}}}}}
+  ]}},
+  {"content":{"itemContent":{"promotedMetadata":null,"tweet_results":{"result":{"rest_id":"normal","legacy":{"full_text":"regular post"}}}}}},
+  {"content":{"cursorType":"Bottom","value":"next-page"}}
+ ]}`
+	var payload any
+	if err := json.Unmarshal([]byte(fixture), &payload); err != nil {
+		t.Fatal(err)
+	}
+	page := parseTimeline(payload)
+	if len(page.Posts) != 2 || page.Posts[0].ID != "organic" || page.Posts[1].ID != "normal" || page.Cursor != "next-page" {
+		t.Fatalf("page=%+v", page)
+	}
+	conversation := parseConversation(payload, "organic")
+	if conversation.Cursor != "next-page" {
+		t.Fatalf("conversation cursor=%q", conversation.Cursor)
+	}
+	// The focal post remains available after filtering module siblings.
+	if len(conversation.Posts) != 1 || conversation.Posts[0].ID != "organic" || len(conversation.Unresolved) != 0 {
+		t.Fatalf("conversation=%+v", conversation)
+	}
+}
+
+func TestTimelineRequestsExcludePromotedContent(t *testing.T) {
+	for _, cursor := range []string{"", "next-page"} {
+		variables := timelineVariables(cursor, 20)
+		if variables["includePromotedContent"] != false {
+			t.Fatal("timeline requested ads")
+		}
+	}
+}

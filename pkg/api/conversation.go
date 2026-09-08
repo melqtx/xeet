@@ -138,7 +138,7 @@ func parseConversation(payload any, focalID string) ConversationPage {
 
 	parseEntry := func(raw any) {
 		entry, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || isPromotedEntry(entry) {
 			return
 		}
 		content, _ := entry["content"].(map[string]any)
@@ -154,6 +154,9 @@ func parseConversation(payload any, focalID string) ConversationPage {
 				}
 			}
 		}
+		if isPromotedEntry(content) {
+			return
+		}
 		parseCursor(content)
 		if item, ok := content["itemContent"].(map[string]any); ok {
 			parseCursor(item)
@@ -162,9 +165,15 @@ func parseConversation(payload any, focalID string) ConversationPage {
 		if items, ok := content["items"].([]any); ok {
 			for _, rawItem := range items {
 				moduleItem, _ := rawItem.(map[string]any)
+				if isPromotedEntry(moduleItem) {
+					continue
+				}
 				item, _ := moduleItem["item"].(map[string]any)
 				if item == nil {
 					item = moduleItem
+				}
+				if isPromotedEntry(item) {
+					continue
 				}
 				if itemContent, ok := item["itemContent"].(map[string]any); ok {
 					parseCursor(itemContent)
