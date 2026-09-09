@@ -18,10 +18,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func sendReply(parent context.Context, tweetID, text string, attachments ...media.Attachment) tea.Cmd {
-	return sendReplyOrQuote(parent, tweetID, text, false, attachments...)
-}
-
 func sendReplyOrQuote(parent context.Context, tweetID, text string, quote bool, attachments ...media.Attachment) tea.Cmd {
 	attachments = append([]media.Attachment(nil), attachments...)
 	return func() tea.Msg {
