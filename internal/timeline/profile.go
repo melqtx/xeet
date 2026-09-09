@@ -3,6 +3,7 @@ package timeline
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -271,34 +272,90 @@ func (m Model) updateProfile(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) renderProfileContent() (string, []int, []int) {
 	p, w := m.profile.info, m.contentWidth()
-	title := lipgloss.NewStyle().Foreground(blue).Bold(true).Render(">>@" + cleanText(p.Handle))
-	title += "  " + lipgloss.NewStyle().Foreground(bright).Bold(true).Render(cleanText(p.Name))
-	lines := []string{ansi.Truncate(title, w, "…")}
+	dimmed := lipgloss.NewStyle().Foreground(muted)
+	accent := lipgloss.NewStyle().Foreground(blue)
+	name := cleanText(p.Name)
+	if name == "" {
+		name = "@" + cleanText(p.Handle)
+	}
+	lines := []string{lipgloss.NewStyle().Foreground(bright).Bold(true).Render(ansi.Truncate(name, w, "…"))}
+	identity := "@" + cleanText(p.Handle)
+	badges := []string{}
+	if p.Verified {
+		badges = append(badges, "verified")
+	}
 	if p.Protected {
-		lines = append(lines, lipgloss.NewStyle().Foreground(muted).Render("[ protected account ]"))
+		badges = append(badges, "protected")
+	}
+	if p.FollowsYou {
+		badges = append(badges, "follows you")
+	}
+	if p.YouFollow {
+		badges = append(badges, "following")
+	}
+	lines = append(lines, accent.Render(ansi.Truncate(identity, w, "…")))
+	if len(badges) > 0 {
+		lines = append(lines, dimmed.Render(ansi.Wrap(strings.Join(badges, " · "), w, "")))
 	}
 	if p.Bio != "" {
-		for _, line := range strings.Split(ansi.Wrap(cleanText(p.Bio), w-2, ""), "\n") {
-			lines = append(lines, lipgloss.NewStyle().Foreground(green).Render("> "+line))
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(bright).Render(ansi.Wrap(cleanText(p.Bio), w, "")))
+	}
+	if p.ID != "" {
+		lines = append(lines, "")
+		stats := []struct {
+			label     string
+			value     int
+			available bool
+		}{
+			{"followers", p.Followers, p.HasFollowers},
+			{"following", p.Following, p.HasFollowing},
+			{"posts", p.Posts, p.HasPosts},
+		}
+		cells := []string{}
+		for _, stat := range stats {
+			value := profileCount(stat.value, stat.available)
+			if w >= 48 {
+				cells = append(cells, lipgloss.NewStyle().Width(w/3).Render(accent.Bold(true).Render(value)+"\n"+dimmed.Render(stat.label)))
+			} else {
+				cells = append(cells, accent.Bold(true).Render(value)+" "+dimmed.Render(stat.label))
+			}
+		}
+		if w >= 48 {
+			lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
+		} else {
+			lines = append(lines, ansi.Wrap(strings.Join(cells, " · "), w, ""))
 		}
 	}
 	details := []string{}
-	if p.Location != "" {
-		details = append(details, cleanText(p.Location))
+	addDetail := func(label, value string) {
+		if value == "" {
+			return
+		}
+		prefix := label + "  "
+		wrapped := strings.Split(ansi.Wrap(cleanText(value), max(1, w-len(prefix)), ""), "\n")
+		for i, line := range wrapped {
+			if i == 0 {
+				details = append(details, dimmed.Render(prefix)+line)
+			} else {
+				details = append(details, strings.Repeat(" ", len(prefix))+line)
+			}
+		}
 	}
+	addDetail("based in", p.Location)
+	addDetail("website ", p.Website)
 	if joined, err := time.Parse(time.RubyDate, p.Joined); err == nil {
-		details = append(details, "joined "+joined.Format("Jan 2006"))
+		addDetail("joined  ", joined.Format("January 2006"))
 	}
 	if len(details) > 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(muted).Render(ansi.Wrap(strings.Join(details, " · "), w, "")))
+		lines = append(lines, "", strings.Join(details, "\n"))
 	}
-	if p.Website != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(blue).Render(ansi.Wrap(cleanText(p.Website), w, "")))
+	lines = append(lines, "")
+	section := "posts"
+	if len(m.profile.posts) > 0 {
+		section += fmt.Sprintf(" · %d loaded", len(m.profile.posts))
 	}
-	if p.ID != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(muted).Render(ansi.Wrap(fmt.Sprintf("%s posts · %s followers · %s following", profileCount(p.Posts, p.HasPosts), profileCount(p.Followers, p.HasFollowers), profileCount(p.Following, p.HasFollowing)), w, "")))
-	}
-	lines = append(lines, lipgloss.NewStyle().Foreground(muted).Render(strings.Repeat("─", w)), "[ posts ]")
+	rule := strings.Repeat("─", max(0, w-ansi.StringWidth(section)-3))
+	lines = append(lines, accent.Bold(true).Render(section)+dimmed.Render("  "+rule))
 	if m.profile.loading {
 		lines = append(lines, m.spinner.View()+" loading posts…")
 	}
@@ -327,5 +384,9 @@ func profileCount(value int, available bool) string {
 	if !available {
 		return "—"
 	}
-	return formatCount(value)
+	digits := strconv.Itoa(value)
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return digits
 }

@@ -64,7 +64,7 @@ func TestProfilePagesDeduplicateAndThreadReturns(t *testing.T) {
 }
 
 func TestProfileHeaderFitsAndPostOffsetsMatch(t *testing.T) {
-	for _, width := range []int{34, 60, 80} {
+	for _, width := range []int{34, 44, 52, 60, 80, 120} {
 		m := NewWithImageMode("off")
 		m.mode = modeProfile
 		m.width = width
@@ -79,8 +79,8 @@ func TestProfileHeaderFitsAndPostOffsetsMatch(t *testing.T) {
 		if len(starts) != 1 || !strings.Contains(lines[starts[0]], "@alice") {
 			t.Fatal("post offset did not account for header")
 		}
-		if !strings.Contains(content, ">>@alice") || !strings.Contains(content, "> old forums") {
-			t.Fatal("missing forum header")
+		if !strings.Contains(ansi.Strip(content), "Alice\n@alice") || !strings.Contains(content, "old forums") {
+			t.Fatal("missing profile identity or bio")
 		}
 	}
 }
@@ -131,14 +131,34 @@ func TestProfileUnknownCountsAreNotRenderedAsZeros(t *testing.T) {
 	m.width = 80
 	m.profile.info = api.Profile{Account: api.Account{ID: "42", Handle: "alice"}}
 	content, _, _ := m.renderProfileContent()
-	if !strings.Contains(content, "— posts · — followers · — following") {
+	if !strings.Contains(ansi.Strip(content), "—") || strings.Contains(ansi.Strip(content), "0") {
 		t.Fatal("missing counts should be unavailable")
 	}
 	m.profile.info.HasPosts = true
 	m.profile.info.HasFollowers = true
 	m.profile.info.HasFollowing = true
 	content, _, _ = m.renderProfileContent()
-	if !strings.Contains(content, "0 posts · 0 followers · 0 following") {
+	if !strings.Contains(ansi.Strip(content), "0") || strings.Contains(ansi.Strip(content), "—") {
 		t.Fatal("genuine zero counts should remain zero")
 	}
+}
+
+func TestProfileDetailsAndExactCounts(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.width = 80
+	m.profile.info = api.Profile{
+		Account:  api.Account{ID: "42", Name: "Alice Chen", Handle: "alice", Verified: true},
+		Bio:      "Making small things for the web.\nUsually with a cup of tea.",
+		Location: "London", Website: "https://alice.example", Joined: "Fri Sep 29 20:18:58 +0000 2023",
+		Followers: 12345, Following: 128, Posts: 2048, HasFollowers: true, HasFollowing: true, HasPosts: true,
+		FollowsYou: true, YouFollow: true,
+	}
+	content, _, _ := m.renderProfileContent()
+	plain := ansi.Strip(content)
+	for _, want := range []string{"verified · follows you · following", "12,345", "2,048", "based in  London", "website   https://alice.example", "joined    September 2023", "Usually with a cup of tea."} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q in:\n%s", want, plain)
+		}
+	}
+	t.Log("\n" + plain)
 }

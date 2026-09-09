@@ -334,9 +334,11 @@ mass-posting. out of scope, will not be added.
 
 ### profiles
 
-Press `u` on a post to open its author: bio, location, website, follower counts,
-and a paginated list of posts. Profiles use the same forum-style text and media
-previews as the feed. `enter` opens replies, `r` replies, and `l` / `t` like or
+Press `u` on a post to open its author: a readable bio, exact follower/following
+and post counts, location, website, and join date. Verification, protected status,
+and follow relationships appear when available. Stats sit side by side on wider
+terminals and wrap on smaller screens, above a paginated list of posts with the
+same text and media previews as the feed. `enter` opens replies, `r` replies, and `l` / `t` like or
 repost. `R` refreshes or retries; `g` returns to the profile header. `esc` restores
 the previous screen and reading position, including when browsing another author.
 
