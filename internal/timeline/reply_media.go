@@ -72,5 +72,12 @@ func (m *Model) saveReplyDraft() {
 	if m.replyDrafts == nil {
 		m.replyDrafts = map[string]replyDraft{}
 	}
-	m.replyDrafts[m.replyPost.ID] = replyDraft{m.replyEditor.Value(), append([]media.Attachment(nil), m.replyAttachments...)}
+	m.replyDrafts[m.replyDraftKey()] = replyDraft{m.replyEditor.Value(), append([]media.Attachment(nil), m.replyAttachments...)}
+}
+
+func (m Model) replyDraftKey() string {
+	if m.replyQuote {
+		return "quote:" + m.replyPost.ID
+	}
+	return m.replyPost.ID
 }

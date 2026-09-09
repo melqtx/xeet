@@ -502,6 +502,9 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 	}
 	if post.Quote != nil {
 		parts = append(parts, m.renderQuoteCard(post.ID, *post.Quote, indent, width, nearSelection))
+		if selected {
+			parts = append(parts, indent+lipgloss.NewStyle().Foreground(muted).Render("Q open quote"))
+		}
 	}
 
 	parts = append(parts, indent+m.actionLine(post))
@@ -725,7 +728,12 @@ func (m Model) viewReply() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 	}
 
+	verb := "reply"
 	title := "replying to @" + m.replyPost.Handle
+	if m.replyQuote {
+		verb = "quote"
+		title = "quote >>@" + cleanText(m.replyPost.Handle)
+	}
 	original := lipgloss.NewStyle().Foreground(muted).Width(max(20, w-8)).Render(cleanText(m.replyPost.Text))
 	originalLines := strings.Split(original, "\n")
 	if len(originalLines) > 2 {
@@ -733,11 +741,20 @@ func (m Model) viewReply() string {
 		originalLines[1] = truncateRunes(originalLines[1], max(2, w-10)) + "…"
 	}
 
+	if m.replyQuote {
+		for i, line := range originalLines {
+			originalLines[i] = lipgloss.NewStyle().Foreground(green).Render("> " + strings.TrimRight(ansi.Strip(line), " "))
+		}
+	}
 	border := blue
 	if m.replyErr != nil {
 		border = red
 	}
-	editor := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).
+	editorBorder := lipgloss.RoundedBorder()
+	if m.replyQuote {
+		editorBorder = lipgloss.NormalBorder()
+	}
+	editor := lipgloss.NewStyle().Border(editorBorder).BorderForeground(border).
 		Padding(0, 1).Width(w - 4).Render(m.replyEditor.View())
 	length := api.PostTextLength(m.replyEditor.Value())
 	counterColor := muted
@@ -748,9 +765,15 @@ func (m Model) viewReply() string {
 		counterColor = yellow
 	}
 	status := lipgloss.NewStyle().Foreground(counterColor).Render(api.PostTextCounter(m.replyEditor.Value())) +
-		lipgloss.NewStyle().Foreground(muted).Render(" · enter reply")
+		lipgloss.NewStyle().Foreground(muted).Render(" · enter "+verb)
+	if m.replyQuote {
+		status = lipgloss.NewStyle().Foreground(counterColor).Render(fmt.Sprintf("%d chars · enter quote", length))
+		if length > api.StandardPostLimit {
+			status += "\npremium · 25,000 max"
+		}
+	}
 	if m.replyPosting {
-		status = lipgloss.NewStyle().Foreground(muted).Render(m.spinner.View() + " sending reply…")
+		status = lipgloss.NewStyle().Foreground(muted).Render(m.spinner.View() + " sending " + verb + "…")
 	} else if m.replyMediaLoading {
 		status = "loading image…"
 	} else if m.replyErr != nil {
@@ -766,6 +789,12 @@ func (m Model) viewReply() string {
 		}
 		if len(m.replyAttachments) > 0 && canOpenReplyInX(m.replyErr) {
 			message = "reply not confirmed; check X before retrying · draft kept"
+		}
+		if m.replyQuote {
+			message = m.replyErr.Error()
+			if canOpenReplyInX(m.replyErr) {
+				message = "quote not confirmed; check X before retrying · draft kept"
+			}
 		}
 		status = lipgloss.NewStyle().Foreground(red).Width(w - 4).Render(message)
 	} else if m.replyNotice != "" {
@@ -989,22 +1018,22 @@ func (m Model) helpContent() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n1 / 2 / 3   jump to feed\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nu           author profile\nl           like / unlike\nt           repost / undo repost\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n1 / 2 / 3   jump to feed\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nQ           open quoted post\nalt+q       quote selected post\nu           author profile\nl           like / unlike\nt           repost / undo repost\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeProfile {
-		keys = "\n\nj/k move · g/G ends\nu author profile · esc back\nenter replies · r reply\nl like · t repost · c compose\ne expand · pgup/down scroll\ni image · v video · A alt\no browser · y copy post link\nR refresh/retry · q quit"
+		keys = "\n\nj/k move · g/G ends\nQ open quote · alt+q quote\nu author profile · esc back\nenter replies · r reply\nl like · t repost · c compose\ne expand · pgup/down scroll\ni image · v video · A alt\no browser · y copy post link\nR refresh/retry · q quit"
 	}
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nu           author profile\nl           like / unlike\nt           repost / undo repost\nr           reply to selected\nR           refresh replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nQ           open quoted post\nalt+q       quote selected post\nu           author profile\nl           like / unlike\nt           repost / undo repost\nr           reply to selected\nR           refresh replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.mode == modeNotifications {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nr           reply\nR           refresh\nenter       open conversation\ne / space   read full post\npgup/down   scroll expanded post\no           open in browser\ny           copy link\nesc / n     back\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nQ           open quoted post\nalt+q       quote selected post\nr           reply\nR           refresh\nenter       open conversation\ne / space   read full post\npgup/down   scroll expanded post\no           open in browser\ny           copy link\nesc / n     back\nq           quit"
 	}
 	if (m.height < 38 || m.width < 50) && m.mode != modeProfile {
-		keys = "\n\nj/k move · g/G ends\n1/2/3 tabs · n inbox\nl like · r reply · u profile\ny copy · enter replies · e read\npgup/down scroll full post\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
+		keys = "\n\nj/k move · g/G ends\nQ open quote · alt+q quote\n1/2/3 tabs · n inbox\nl like · r reply · u profile\ny copy · enter replies · e read\npgup/down scroll full post\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
 		if m.mode == modeThread {
-			keys = "\n\nj/k move · g/G ends\nl like · r reply · n inbox\ny copy · e read · i zoom\nA alt · R refresh · o browser\n/ search · esc back · q quit"
+			keys = "\n\nj/k move · g/G ends\nQ open quote · alt+q quote\nl like · r reply · n inbox\ny copy · e read · i zoom\nA alt · R refresh · o browser\n/ search · esc back · q quit"
 		} else if m.mode == modeNotifications {
-			keys = "\n\nj/k move · r reply · enter conversation\nR refresh · o browser · y copy\nesc/n back · q quit"
+			keys = "\n\nj/k move · r reply · enter conversation\nQ open quote · alt+q quote\nR refresh · o browser · y copy\nesc/n back · q quit"
 		}
 	}
 	images := "images: " + string(m.imageMode)

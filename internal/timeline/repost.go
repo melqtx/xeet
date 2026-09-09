@@ -68,6 +68,13 @@ func (m *Model) applyRepost(id string, reposted bool) {
 	for i := range m.profile.posts {
 		apply(&m.profile.posts[i])
 	}
+	for j := range m.quoteStack {
+		if state := m.quoteStack[j].thread; state != nil {
+			for i := range state.posts {
+				apply(&state.posts[i].TimelinePost)
+			}
+		}
+	}
 	for j := range m.profileStack {
 		if state := m.profileStack[j].thread; state != nil {
 			for i := range state.posts {
