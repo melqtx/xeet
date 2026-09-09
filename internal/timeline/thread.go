@@ -326,11 +326,13 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) leaveThread() (tea.Model, tea.Cmd) {
 	returnTo := m.threadReturn
-	if returnTo != modeNotifications {
+	if returnTo != modeNotifications && returnTo != modeProfile {
 		returnTo = modeFeed
 	}
 	m.mode = returnTo
-	if returnTo == modeNotifications {
+	if returnTo == modeProfile {
+		m.selected = m.profileSelected
+	} else if returnTo == modeNotifications {
 		m.selected = m.notificationSelected
 		if errors.Is(m.threadErr, api.ErrSessionExpired) {
 			m.notificationErr = m.threadErr
@@ -351,6 +353,9 @@ func (m Model) leaveThread() (tea.Model, tea.Cmd) {
 	m.threadErr = nil
 	m.syncViewport()
 	m.ensureSelectedVisible()
+	if returnTo == modeProfile {
+		m.viewport.SetYOffset(m.profileOffset)
+	}
 	return m, m.imageRepaint(m.activateNotificationPopup())
 }
 

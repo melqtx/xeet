@@ -211,6 +211,7 @@ come back next time.
 | `e` / `space` | read a truncated post in full |
 | `i` | zoom the post's image to the whole terminal |
 | `A` | read image descriptions (works with previews off) |
+| `u` | open the selected author’s profile (`esc` returns) |
 | `l` | like / unlike |
 | `t` | repost / undo repost |
 | `r` | reply in place |
@@ -330,3 +331,11 @@ mass-posting. out of scope, will not be added.
 ---
 
 [MIT](LICENSE) · not affiliated with x corp · bugs go [here](https://github.com/melqtx/xeet/issues) · security goes [here](SECURITY.md)
+
+### profiles
+
+Press `u` on a post to open its author: bio, location, website, follower counts,
+and a paginated list of posts. Profiles use the same forum-style text and media
+previews as the feed. `enter` opens replies, `r` replies, and `l` / `t` like or
+repost. `R` refreshes or retries; `g` returns to the profile header. `esc` restores
+the previous screen and reading position, including when browsing another author.
