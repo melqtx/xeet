@@ -28,6 +28,7 @@ var (
 	muted    lipgloss.Color
 	red      lipgloss.Color
 	yellow   lipgloss.Color
+	green    lipgloss.Color
 	bright   lipgloss.Color
 	dim      lipgloss.Color
 )
@@ -38,6 +39,7 @@ func init() { ApplyTheme(theme.Default()) }
 func ApplyTheme(p theme.Palette) {
 	blue, lavender, pink, muted = p.Blue, p.Lavender, p.Pink, p.Muted
 	red, yellow, bright, dim = p.Red, p.Yellow, p.Bright, p.Dim
+	green = p.Green
 }
 
 type ActionKind int

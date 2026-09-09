@@ -493,10 +493,10 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// renderQuoteCard keeps an embedded quote visually separate from its authoring
-// post while using the same preview formats as the main timeline.
+// renderQuoteCard uses an imageboard reference and greentext for embedded posts.
 func (m Model) renderQuoteCard(parentID string, quote api.TimelinePost, indent string, width int, showPreview bool) string {
-	cardWidth := max(10, width-lipgloss.Width(indent)-2)
+	available := max(3, width-lipgloss.Width(indent))
+	cardWidth := available - 2
 	handle := quote.Handle
 	if handle == "" {
 		handle = "unknown"
@@ -505,17 +505,28 @@ func (m Model) renderQuoteCard(parentID string, quote api.TimelinePost, indent s
 	if name == "" {
 		name = "someone"
 	}
-	header := ansi.Truncate(name+"  @"+handle, max(8, cardWidth-1), "…")
+	header := lipgloss.NewStyle().Foreground(blue).Bold(true).Render(">>@"+handle) +
+		"  " + lipgloss.NewStyle().Foreground(bright).Render(name)
+	if when := relativeTime(quote.CreatedAt); when != "" {
+		header += lipgloss.NewStyle().Foreground(muted).Render(" · " + when)
+	}
 	lines := []string{
-		indent + lipgloss.NewStyle().Foreground(muted).Render("╭─ "+header),
+		indent + ansi.Truncate(header, available, "…"),
 	}
-	text := strings.Split(lipgloss.NewStyle().Width(cardWidth).Render(cleanText(quote.Text)), "\n")
-	if len(text) > 3 {
-		text = text[:3]
-		text[2] = ansi.Truncate(text[2], max(2, cardWidth-1), "…")
+	body := strings.TrimSpace(cleanText(quote.Text))
+	if len(quote.Media) > 0 {
+		body = stripTrailingMediaLink(body)
 	}
-	for _, line := range text {
-		lines = append(lines, indent+"│ "+lipgloss.NewStyle().Foreground(muted).Render(line))
+	if body != "" {
+		text := strings.Split(ansi.Wrap(body, cardWidth, ""), "\n")
+		if len(text) > 4 {
+			text = text[:4]
+			text[3] = strings.TrimRight(ansi.Truncate(text[3], max(0, cardWidth-2), ""), " ") + " …"
+			text[3] = ansi.Truncate(text[3], cardWidth, "…")
+		}
+		for _, line := range text {
+			lines = append(lines, indent+lipgloss.NewStyle().Foreground(green).Render("> "+line))
+		}
 	}
 
 	preview, hasPreview := m.previews[quotePreviewKey(parentID, quote.ID)]
@@ -531,15 +542,14 @@ func (m Model) renderQuoteCard(parentID string, quote api.TimelinePost, indent s
 			imageBlock = preview.content
 		}
 		if imageBlock != "" {
-			lines = append(lines, indent+"│")
-			lines = append(lines, prefixLines(imageBlock, indent+"│ "))
+			prefix := imagePrefix(indent+"  ", indent, width, previewColumns(preview))
+			lines = append(lines, prefixLines(imageBlock, prefix))
 			imageShown = true
 		}
 	}
 	if len(quote.Media) > 0 && !imageShown {
-		lines = append(lines, indent+"│ "+lipgloss.NewStyle().Foreground(muted).Render(mediaChip(quote)))
+		lines = append(lines, indent+"  "+lipgloss.NewStyle().Foreground(muted).Render(mediaChip(quote)))
 	}
-	lines = append(lines, indent+lipgloss.NewStyle().Foreground(muted).Render("╰─"))
 	return strings.Join(lines, "\n")
 }
 
