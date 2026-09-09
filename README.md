@@ -150,6 +150,12 @@ example for each; `xeet <command> --help` goes deeper on any one of them.
 
 ## the tui
 
+Feed tabs remember their loaded posts and reading position for the current
+session. Returning to a tab restores it immediately; press `R` for fresh posts.
+The active tab stays visible during loading, and long posts retain their
+paragraph breaks (`e` expands the selected post; `pgup`/`pgdown` or
+`ctrl+u`/`ctrl+d` scroll inside it).
+
 **long posts**
 
 X Premium subscribers can publish posts and replies up to 25,000 characters
@@ -180,6 +186,13 @@ above 25,000 stay editable and must be shortened before sending.
 
 up to four png/jpeg/gif/webp images per post, or one mp4/mov video (up
 to 512 MiB, uploaded in chunks straight from disk with live progress).
+Replies also support up to four images: `ctrl+o` attaches a file and `ctrl+v`
+pastes an image or text. Use `tab` to select attachments, arrows to choose one,
+and `delete` to remove it. Image-only replies work too. `esc` returns to the
+feed and keeps the reply draft for that post until the app closes; reopen it
+with `r`. While sending, `esc` cancels the request. Failed sends keep the text
+and attachments for editing. Reply attachments currently support images only.
+
 the composer shows real format, dimensions, and size before anything
 uploads. unfinished drafts autosave (including clipboard images) and
 come back next time.
@@ -189,7 +202,8 @@ come back next time.
 | key | does |
 |---|---|
 | `j` / `k` / arrows | move (`ctrl+d`/`ctrl+u` jumps five) |
-| `tab` / `shift+tab` | cycle forward / backward through For You, Following, and Bookmarks |
+| `1` / `2` / `3` | jump to For You, Following, or Bookmarks |
+| `tab` / `shift+tab` | cycle forward / backward through the feeds |
 | `f` | switch between the for you and following feeds |
 | `b` | switch between bookmarks and the for you feed |
 | `/` | search posts |
@@ -198,10 +212,11 @@ come back next time.
 | `i` | zoom the post's image to the whole terminal |
 | `A` | read image descriptions (works with previews off) |
 | `l` | like / unlike |
+| `t` | repost / undo repost |
 | `r` | reply in place |
 | `o` | open in browser |
 | `y` | copy link |
-| `P` | write a new post |
+| `c` / `P` | write a new post |
 | `R` | refresh in place, new posts stack on top, you keep your spot |
 | `n` | open replies and mentions |
 | `N` | reply directly to the active notification popup |

@@ -187,7 +187,7 @@ func TestTabCyclesFeedsInBothDirections(t *testing.T) {
 	}{{tea.KeyTab, FeedFollowing}, {tea.KeyTab, FeedBookmarks}, {tea.KeyTab, FeedForYou}, {tea.KeyShiftTab, FeedBookmarks}} {
 		next, cmd := m.Update(tea.KeyMsg{Type: test.key})
 		m = next.(Model)
-		if cmd == nil || m.feed != test.feed || !m.loading {
+		if m.feed != test.feed || (test.feed != FeedForYou && (cmd == nil || !m.loading)) {
 			t.Fatalf("key %v: feed=%v loading=%v cmd=%v", test.key, m.feed, m.loading, cmd)
 		}
 	}

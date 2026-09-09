@@ -180,6 +180,8 @@ func NewWebClient(cfg *config.Config) *WebClient {
 	operationQIDs := map[string]string{
 		"CreateTweet":           cfg.CreateTweetQID,
 		"CreateNoteTweet":       cfg.CreateNoteTweetQID,
+		"CreateRetweet":         cfg.CreateRetweetQID,
+		"DeleteRetweet":         cfg.DeleteRetweetQID,
 		"HomeTimeline":          cfg.HomeTimelineQID,
 		"HomeLatestTimeline":    cfg.HomeLatestTimelineQID,
 		"Bookmarks":             cfg.BookmarksQID,
@@ -253,6 +255,10 @@ func (c *WebClient) ApplyRefreshedQueryIDs(cfg *config.Config) bool {
 		switch operation {
 		case "CreateTweet":
 			cfg.CreateTweetQID = qid
+		case "CreateRetweet":
+			cfg.CreateRetweetQID = qid
+		case "DeleteRetweet":
+			cfg.DeleteRetweetQID = qid
 		case "CreateNoteTweet":
 			cfg.CreateNoteTweetQID = qid
 		case "HomeTimeline":

@@ -39,6 +39,7 @@ type TimelinePost struct {
 	ViewCount      string
 	MediaCount     int
 	Media          []TimelineMedia
+	Reposted       bool
 	Liked          bool
 	Quote          *TimelinePost
 	InReplyToID    string
@@ -359,6 +360,7 @@ func parseTimelineResult(result map[string]any, includeQuote bool) (TimelinePost
 	post.RepostCount = intValue(legacy["retweet_count"])
 	post.LikeCount = intValue(legacy["favorite_count"])
 	post.Liked, _ = legacy["favorited"].(bool)
+	post.Reposted, _ = legacy["retweeted"].(bool)
 	post.InReplyToID, _ = legacy["in_reply_to_status_id_str"].(string)
 	post.ConversationID, _ = legacy["conversation_id_str"].(string)
 	if created, _ := legacy["created_at"].(string); created != "" {

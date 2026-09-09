@@ -70,6 +70,7 @@ func (m Model) beginThread(post api.TimelinePost, returnTo mode) (tea.Model, tea
 	m.threadReturn = returnTo
 	m.threadFocusID = post.ID
 	if returnTo == modeFeed {
+		m.rememberFeed()
 		m.feedSelected = m.selected
 	} else if returnTo == modeNotifications {
 		m.notificationSelected = m.selected

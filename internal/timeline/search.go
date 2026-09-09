@@ -62,8 +62,9 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.searchQuery = query
 			m.searchInput.Blur()
+			cmd := m.setFeed(FeedSearch)
 			m.mode = modeFeed
-			return m, m.setFeed(FeedSearch)
+			return m, cmd
 		}
 	}
 

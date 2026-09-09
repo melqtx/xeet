@@ -397,6 +397,7 @@ func (m Model) beginNotifications() (tea.Model, tea.Cmd) {
 	m.notificationReturn = m.mode
 	m.notificationReturnSelected = m.selected
 	if m.mode == modeFeed {
+		m.rememberFeed()
 		m.feedSelected = m.selected
 		m.notificationThread = nil
 	} else if m.mode == modeThread {
@@ -595,11 +596,7 @@ func (m Model) notificationFooter() string {
 		}
 		return "R retry  ·  esc back"
 	}
-	position := 0
-	if len(m.notifications) > 0 {
-		position = m.selected + 1
-	}
-	return fmt.Sprintf("%d/%d · r reply · enter conversation · esc back", position, len(m.notifications))
+	return m.primaryActions()
 }
 
 func (m Model) renderNotificationContent() (string, []int, []int) {

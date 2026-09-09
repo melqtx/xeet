@@ -44,7 +44,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	cm := newConfigManagerAt(dir, store)
 
 	in := &Config{
-		AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789", CreateNoteTweetQID: "note123",
+		AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789", CreateNoteTweetQID: "note123", CreateRetweetQID: "rt123", DeleteRetweetQID: "undo123",
 		HomeTimelineQID: "home123", BookmarksQID: "bookmarks123", SearchTimelineQID: "search123",
 		FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123",
 		TweetDetailQID: "detail123", NotificationsQID: "notifications123",
