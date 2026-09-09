@@ -20,7 +20,7 @@ in
 (buildGoModule.override { go = go_1_26_6; }) (finalAttrs: {
   pname = "xeet";
   # Keep in step with the latest release tag.
-  version = "0.1.11";
+  version = "0.1.12";
 
   src = lib.cleanSource ./.;
 
