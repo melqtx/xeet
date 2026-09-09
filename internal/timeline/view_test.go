@@ -88,7 +88,7 @@ func TestQuoteCardRendersTextAndInlinePreview(t *testing.T) {
 	m.previews[quotePreviewKey("outer", "quoted")] = previewState{content: "QUOTE-IMAGE"}
 	content, _, _ := m.renderFeedContent()
 	plain := ansi.Strip(content)
-	for _, want := range []string{"╭─ Quoted Author  @quoted", "the quoted post", "QUOTE-IMAGE", "╰─"} {
+	for _, want := range []string{">>@quoted  Quoted Author", "> the quoted post", "QUOTE-IMAGE"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("quote card is missing %q:\n%s", want, plain)
 		}

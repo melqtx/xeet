@@ -43,3 +43,22 @@ func TestDiscoverNoteLive(t *testing.T) {
 	}
 	t.Logf("discovered CreateNoteTweet queryId: %s", id)
 }
+
+func TestDiscoverRepostLive(t *testing.T) {
+	if os.Getenv("XEET_LIVE_DISCOVER") != "1" {
+		t.Skip("set XEET_LIVE_DISCOVER=1 to run")
+	}
+	for _, operation := range []string{"CreateRetweet", "DeleteRetweet"} {
+		t.Run(operation, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+			defer cancel()
+			id, err := DiscoverOperationQueryID(ctx, "", "", operation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(id) < 8 {
+				t.Fatalf("invalid query id %q", id)
+			}
+		})
+	}
+}

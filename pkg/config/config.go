@@ -29,6 +29,8 @@ type Config struct {
 	CT0                      string    `yaml:"-"`
 	CreateTweetQID           string    `yaml:"create_tweet_qid"`
 	CreateNoteTweetQID       string    `yaml:"create_note_tweet_qid"`
+	CreateRetweetQID         string    `yaml:"create_retweet_qid"`
+	DeleteRetweetQID         string    `yaml:"delete_retweet_qid"`
 	HomeTimelineQID          string    `yaml:"home_timeline_qid,omitempty"`
 	HomeLatestTimelineQID    string    `yaml:"home_latest_timeline_qid,omitempty"`
 	BookmarksQID             string    `yaml:"bookmarks_qid,omitempty"`
@@ -108,6 +110,8 @@ type fileConfig struct {
 	CT0                      string `yaml:"ct0,omitempty"`
 	CreateTweetQID           string `yaml:"create_tweet_qid,omitempty"`
 	CreateNoteTweetQID       string `yaml:"create_note_tweet_qid,omitempty"`
+	CreateRetweetQID         string `yaml:"create_retweet_qid,omitempty"`
+	DeleteRetweetQID         string `yaml:"delete_retweet_qid,omitempty"`
 	HomeTimelineQID          string `yaml:"home_timeline_qid,omitempty"`
 	HomeLatestTimelineQID    string `yaml:"home_latest_timeline_qid,omitempty"`
 	BookmarksQID             string `yaml:"bookmarks_qid,omitempty"`
@@ -168,6 +172,8 @@ func (cm *ConfigManager) Load() (*Config, error) {
 	config := &Config{
 		CreateTweetQID:           fc.CreateTweetQID,
 		CreateNoteTweetQID:       fc.CreateNoteTweetQID,
+		CreateRetweetQID:         fc.CreateRetweetQID,
+		DeleteRetweetQID:         fc.DeleteRetweetQID,
 		HomeTimelineQID:          fc.HomeTimelineQID,
 		HomeLatestTimelineQID:    fc.HomeLatestTimelineQID,
 		BookmarksQID:             fc.BookmarksQID,
@@ -300,6 +306,8 @@ func (cm *ConfigManager) save(config *Config) error {
 		return cm.writeFile(&fileConfig{
 			CreateTweetQID: config.CreateTweetQID, HomeTimelineQID: config.HomeTimelineQID,
 			CreateNoteTweetQID:    config.CreateNoteTweetQID,
+			CreateRetweetQID:      config.CreateRetweetQID,
+			DeleteRetweetQID:      config.DeleteRetweetQID,
 			HomeLatestTimelineQID: config.HomeLatestTimelineQID,
 			BookmarksQID:          config.BookmarksQID,
 			SearchTimelineQID:     config.SearchTimelineQID,
@@ -412,6 +420,8 @@ func fileConfigFor(config *Config) *fileConfig {
 	result := &fileConfig{
 		CreateTweetQID:           config.CreateTweetQID,
 		CreateNoteTweetQID:       config.CreateNoteTweetQID,
+		CreateRetweetQID:         config.CreateRetweetQID,
+		DeleteRetweetQID:         config.DeleteRetweetQID,
 		HomeTimelineQID:          config.HomeTimelineQID,
 		HomeLatestTimelineQID:    config.HomeLatestTimelineQID,
 		BookmarksQID:             config.BookmarksQID,

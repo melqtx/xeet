@@ -7,8 +7,10 @@ import (
 	"hash/fnv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/melqtx/xeet/internal/clip"
+	"github.com/melqtx/xeet/internal/media"
 	"github.com/melqtx/xeet/internal/theme"
 	"github.com/melqtx/xeet/pkg/api"
 	"github.com/melqtx/xeet/pkg/config"
@@ -19,6 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var (
@@ -28,6 +31,7 @@ var (
 	muted    lipgloss.Color
 	red      lipgloss.Color
 	yellow   lipgloss.Color
+	green    lipgloss.Color
 	bright   lipgloss.Color
 	dim      lipgloss.Color
 )
@@ -38,6 +42,7 @@ func init() { ApplyTheme(theme.Default()) }
 func ApplyTheme(p theme.Palette) {
 	blue, lavender, pink, muted = p.Blue, p.Lavender, p.Pink, p.Muted
 	red, yellow, bright, dim = p.Red, p.Yellow, p.Bright, p.Dim
+	green = p.Green
 }
 
 type ActionKind int
@@ -82,6 +87,15 @@ type threadState struct {
 	focusID  string
 }
 
+// feedSnapshot lives only for this terminal session. A tab restores instantly;
+// refreshing is explicit so switching never rearranges what the user is reading.
+type feedSnapshot struct {
+	posts            []api.TimelinePost
+	cursor           string
+	selected, offset int
+	expanded         bool
+}
+
 type Model struct {
 	// ctx bounds every request this model starts. It carries the process's
 	// interrupt signal, so a SIGINT or SIGTERM cancels in-flight fetches
@@ -92,6 +106,7 @@ type Model struct {
 	imageNote     string
 	feed          FeedKind
 	searchQuery   string
+	feedCache     map[FeedKind]feedSnapshot
 	feedSeq       int
 	posts         []api.TimelinePost
 	cursor        string
@@ -102,6 +117,7 @@ type Model struct {
 	loadingMore   bool
 	refreshing    bool
 	help          bool
+	helpScroll    int
 	altText       bool
 	altTextScroll int
 	expanded      bool
@@ -111,29 +127,39 @@ type Model struct {
 	toast         string
 	toastSeq      int
 	err           error
+	reposting     map[string]bool
 	liking        map[string]bool
 	previews      map[string]previewState
 	spinner       spinner.Model
 	viewport      viewport.Model
 	wezFrameKey   string
 
-	mode          mode
-	feedSelected  int
-	threadRootID  string
-	threadPosts   []api.ConversationPost
-	threadCursor  string
-	threadLoading bool
-	threadMore    bool
-	threadErr     error
-	threadSeq     int
-	replyReturn   mode
-	replyEditor   textarea.Model
-	replyPost     api.TimelinePost
-	replyPosting  bool
-	replyErr      error
-	replyNotice   string
-	searchInput   textinput.Model
-	searchReturn  mode
+	mode                    mode
+	feedSelected            int
+	threadRootID            string
+	threadPosts             []api.ConversationPost
+	threadCursor            string
+	threadLoading           bool
+	threadMore              bool
+	threadErr               error
+	threadSeq               int
+	replyAttachments        []media.Attachment
+	replyAttachmentSelected int
+	replyAttachmentsFocused bool
+	replyPath               textinput.Model
+	replyPathOpen           bool
+	replyMediaLoading       bool
+	replyMediaSeq           int
+	replyDrafts             map[string]replyDraft
+	replyReturn             mode
+	replyEditor             textarea.Model
+	replyPost               api.TimelinePost
+	replyCancel             context.CancelFunc
+	replyPosting            bool
+	replyErr                error
+	replyNotice             string
+	searchInput             textinput.Model
+	searchReturn            mode
 
 	notifications              []api.Notification
 	notificationCursor         string
@@ -390,6 +416,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(clockTick(), m.activateNotificationPopup())
 	}
+	if result, ok := msg.(repostMsg); ok {
+		delete(m.reposting, result.id)
+		text := "reposted"
+		if !result.reposted {
+			text = "repost removed"
+		}
+		if result.err != nil {
+			m.applyRepost(result.id, !result.reposted)
+			text = result.err.Error()
+		}
+		if m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications {
+			m.syncViewport()
+			return m, m.imageRepaint(m.showToast(text))
+		}
+		return m, nil
+	}
 	// Polling results are global so editors and overlays cannot drop them.
 	switch note := msg.(type) {
 	case notificationMsg:
@@ -448,6 +490,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch key.String() {
 			case "q", "ctrl+c":
 				return m, tea.Quit
+			case "j", "down", "pgdown", "ctrl+d":
+				step := 1
+				if key.String() == "pgdown" || key.String() == "ctrl+d" {
+					step = m.helpVisibleRows()
+				}
+				m.helpScroll = min(m.helpMaxScroll(), m.helpScroll+step)
+				return m, nil
+			case "k", "up", "pgup", "ctrl+u":
+				step := 1
+				if key.String() == "pgup" || key.String() == "ctrl+u" {
+					step = m.helpVisibleRows()
+				}
+				m.helpScroll = max(0, m.helpScroll-step)
+				return m, nil
 			case "?", "esc", "enter":
 				m.help = false
 				return m, m.imageRepaint()
@@ -494,6 +550,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.imageRepaint()
 			}
 			return m, nil
+		}
+	}
+	if m.expanded && (m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications) {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "pgdown", "ctrl+d":
+				m.scrollExpanded(1)
+				return m, m.imageRepaint()
+			case "pgup", "ctrl+u":
+				m.scrollExpanded(-1)
+				return m, m.imageRepaint()
+			}
+		}
+	}
+	if key, ok := msg.(tea.KeyMsg); ok && (m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications) {
+		if key.String() == "t" {
+			return m, m.imageRepaint(m.toggleSelectedRepost())
+		}
+		if key.String() == "c" || key.String() == "P" {
+			m.action = Action{Kind: ActionCompose}
+			return m, tea.Quit
 		}
 	}
 	switch m.mode {
@@ -543,6 +620,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case "?", "f1":
+		m.helpScroll = 0
 		m.help = true
 		return m, m.imageRepaint()
 	case "j", "down":
@@ -566,6 +644,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		m.syncViewport()
 		return m, func() tea.Msg { return tea.ClearScreen() }
+	case "1":
+		return m, m.setFeed(FeedForYou)
+	case "2":
+		return m, m.setFeed(FeedFollowing)
+	case "3":
+		return m, m.setFeed(FeedBookmarks)
 	case "tab":
 		return m, m.cycleFeed(1)
 	case "shift+tab":
@@ -593,6 +677,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.imageRepaint(m.dismissNotificationPopup())
 		}
 	case "R", "ctrl+r":
+		if m.loading || m.refreshing {
+			return m, nil
+		}
+		m.feedSeq++
+		m.loadingMore = false
 		if len(m.posts) == 0 {
 			m.loading = true
 		} else {
@@ -770,8 +859,27 @@ func (m *Model) moveSelection(target int) {
 	m.ensureSelectedVisible()
 }
 
-// setFeed resets feed state and kicks off a fresh first page for kind.
+func (m *Model) rememberFeed() {
+	if m.feedCache == nil {
+		m.feedCache = make(map[FeedKind]feedSnapshot)
+	}
+	if m.feed != FeedSearch && (len(m.posts) > 0 || (!m.loading && m.err == nil)) {
+		m.feedCache[m.feed] = feedSnapshot{
+			posts: append([]api.TimelinePost(nil), m.posts...), cursor: m.cursor,
+			selected: m.selected, offset: m.viewport.YOffset, expanded: m.expanded,
+		}
+	}
+}
+
+// setFeed saves the current tab and restores a visited tab without a request.
+// Search remains ephemeral: each submitted query starts a fresh result set.
 func (m *Model) setFeed(kind FeedKind) tea.Cmd {
+	if kind == m.feed && kind != FeedSearch {
+		return nil
+	}
+	if m.mode == modeFeed || (m.mode == modeSearch && m.searchReturn == modeFeed) {
+		m.rememberFeed()
+	}
 	m.feed = kind
 	m.feedSeq++
 	m.posts = nil
@@ -782,7 +890,18 @@ func (m *Model) setFeed(kind FeedKind) tea.Cmd {
 	m.loadingMore = false
 	m.refreshing = false
 	m.err = nil
+	m.toast = ""
+	m.toastSeq++
 	m.viewport.YOffset = 0
+	if cached, ok := m.feedCache[kind]; ok && kind != FeedSearch {
+		m.posts = append([]api.TimelinePost(nil), cached.posts...)
+		m.cursor, m.selected, m.expanded = cached.cursor, cached.selected, cached.expanded
+		m.loading = false
+		m.syncViewport()
+		m.viewport.SetYOffset(cached.offset)
+		m.ensureSelectedVisible()
+		return m.imageRepaint(m.requestPreviews())
+	}
 	m.syncViewport()
 	return m.imageRepaint(tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, "", false, m.feedSeq)))
 }
@@ -818,7 +937,7 @@ func (m *Model) switchFeed() tea.Cmd {
 }
 
 func (m *Model) maybeLoadMore() tea.Cmd {
-	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore {
+	if len(m.posts) > 0 && m.selected >= len(m.posts)-5 && m.cursor != "" && !m.loadingMore && !m.refreshing && !m.loading {
 		m.loadingMore = true
 		return tea.Batch(m.spinner.Tick, fetchPageSeq(m.requestContext(), m.feed, m.searchQuery, m.cursor, true, m.feedSeq))
 	}
@@ -892,6 +1011,12 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 	} else {
 		m.selected = feedIndex
 	}
+	if threadContext && m.feed != FeedSearch && m.feedCache != nil {
+		cached := m.feedCache[m.feed]
+		cached.posts = append([]api.TimelinePost(nil), m.posts...)
+		cached.cursor, cached.selected = m.cursor, feedIndex
+		m.feedCache[m.feed] = cached
+	}
 	if m.mode == modeReply {
 		return m, toast
 	}
@@ -949,7 +1074,8 @@ func (m *Model) resize() {
 	m.viewport.Width = w
 	m.viewport.Height = viewportHeight
 	m.replyEditor.SetWidth(max(20, w-6))
-	m.replyEditor.SetHeight(min(7, max(3, m.height-16)))
+	m.replyEditor.SetHeight(min(7, max(1, m.height-17-len(m.replyAttachments))))
+	m.replyPath.Width = max(10, w-8)
 	m.searchInput.Width = max(10, w-16)
 	m.searchInput.SetCursor(m.searchInput.Position())
 	m.syncViewport()
@@ -971,6 +1097,16 @@ func (m *Model) syncViewport() {
 	m.viewport.SetContent(content)
 }
 
+// scrollExpanded keeps page navigation inside the selected post.
+func (m *Model) scrollExpanded(direction int) {
+	if m.selected < 0 || m.selected >= len(m.starts) {
+		return
+	}
+	start, end := m.starts[m.selected], m.ends[m.selected]
+	last := max(start, end-m.viewport.Height+1)
+	m.viewport.SetYOffset(max(start, min(last, m.viewport.YOffset+direction*max(1, m.viewport.Height-2))))
+}
+
 func (m *Model) ensureSelectedVisible() {
 	if m.selected < 0 || m.selected >= len(m.starts) {
 		return
@@ -981,6 +1117,11 @@ func (m *Model) ensureSelectedVisible() {
 	start := m.starts[m.selected]
 	end := m.ends[m.selected]
 	top := m.viewport.YOffset
+	if m.expanded && end-start+1 > m.viewport.Height {
+		// Async previews and clock ticks must not snap a long read back to its top.
+		m.viewport.SetYOffset(max(start, min(top, end-m.viewport.Height+1)))
+		return
+	}
 	if start-margin < top {
 		top = max(0, start-margin)
 	} else if end+margin >= top+m.viewport.Height {
@@ -1046,6 +1187,11 @@ func (m *Model) applyLike(id string, liked bool) {
 	for i := range m.posts {
 		apply(&m.posts[i])
 	}
+	for _, cached := range m.feedCache {
+		for i := range cached.posts {
+			apply(&cached.posts[i])
+		}
+	}
 	for i := range m.threadPosts {
 		apply(&m.threadPosts[i].TimelinePost)
 	}
@@ -1104,5 +1250,15 @@ func relativeTime(value time.Time) string {
 }
 
 func cleanText(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	value = strings.ReplaceAll(value, "\t", "    ")
+	value = ansi.Strip(value)
+	value = strings.Map(func(r rune) rune {
+		if r != '\n' && unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, value)
+	return strings.TrimSpace(value)
 }

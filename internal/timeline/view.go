@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
+	"github.com/melqtx/xeet/internal/media"
 	"github.com/melqtx/xeet/pkg/api"
 
 	"github.com/charmbracelet/lipgloss"
@@ -99,57 +101,61 @@ func (m Model) contentWidth() int {
 }
 
 func (m Model) header(width int) string {
-	status := m.feedSwitcher()
-	if m.feed == FeedSearch {
-		status = ansi.Truncate("search · “"+m.searchQuery+"”", max(9, width-12), "…")
-	}
-	if m.mode == modeNotifications {
-		status = "notifications"
-	} else if m.mode == modeThread {
-		status = "replies"
-		if root, ok := m.threadRootPost(); ok && root.Handle != "" {
-			status = truncateRunes("replies to @"+root.Handle, max(9, width-12))
-		}
-	}
-	if m.mode == modeThread && (m.threadLoading || m.threadMore) {
-		status = m.spinner.View() + " loading replies"
-	} else if m.mode == modeNotifications && (m.notificationLoading || m.notificationMore) {
-		status = m.spinner.View() + " loading notifications"
-	} else if m.refreshing {
-		status = m.spinner.View() + " refreshing"
-	} else if m.loadingMore {
-		status = m.spinner.View() + " loading more"
-	}
-	face := "( o.o )"
-	if m.err != nil || (m.mode == modeThread && m.threadErr != nil) {
-		face = "( >.< )"
-	}
 	brand := lipgloss.NewStyle().Foreground(pink).Render(" /\\_/\\") +
 		lipgloss.NewStyle().Foreground(blue).Bold(true).Render("   xeet")
-	indicator := m.notificationIndicator()
-	gap := max(1, width-ansi.StringWidth(brand)-ansi.StringWidth(indicator))
-	first := ansi.Truncate(brand+strings.Repeat(" ", gap)+indicator, width, "")
-	second := lipgloss.NewStyle().Foreground(pink).Render(face) + "   " + status
-	second = ansi.Truncate(second, width, "…")
-	return lipgloss.NewStyle().Width(width).Render(first + "\n" + second)
+	status := ""
+	switch {
+	case m.mode == modeThread && (m.threadLoading || m.threadMore):
+		status = m.spinner.View() + " replies"
+	case m.mode == modeNotifications && (m.notificationLoading || m.notificationMore):
+		status = m.spinner.View() + " inbox"
+	case m.refreshing:
+		status = m.spinner.View() + " refreshing"
+	case m.loadingMore:
+		status = m.spinner.View() + " more posts"
+	case m.loading && m.mode == modeFeed:
+		status = m.spinner.View() + " loading"
+	}
+	right := m.notificationIndicator()
+	if width >= 48 && status != "" {
+		right = lipgloss.NewStyle().Foreground(muted).Render(status) + "   " + right
+	}
+	gap := max(1, width-ansi.StringWidth(brand)-ansi.StringWidth(right))
+	first := ansi.Truncate(brand+strings.Repeat(" ", gap)+right, width, "")
+	second := m.feedSwitcher()
+	if m.feed == FeedSearch {
+		second = "search · “" + m.searchQuery + "”"
+	}
+	if m.mode == modeNotifications {
+		second = "esc back  /  notifications"
+	}
+	if m.mode == modeThread {
+		second = "esc back  /  replies"
+		if root, ok := m.threadRootPost(); ok && root.Handle != "" {
+			second = "esc back  /  replies to @" + root.Handle
+		}
+	}
+	if width >= 48 {
+		face := "( o.o )"
+		if m.err != nil || (m.mode == modeThread && m.threadErr != nil) {
+			face = "( >.< )"
+		}
+		second = lipgloss.NewStyle().Foreground(pink).Render(face) + "   " + second
+	}
+	return lipgloss.NewStyle().Width(width).Render(first + "\n" + ansi.Truncate(second, width, "…"))
 }
 
 func (m Model) feedSwitcher() string {
-	items := []struct {
-		kind  FeedKind
-		label string
-	}{
-		{FeedForYou, "for you"},
-		{FeedFollowing, "following"},
-		{FeedBookmarks, "bookmarks"},
+	labels := []string{"for you", "following", "bookmarks"}
+	if m.contentWidth() < 48 {
+		labels = []string{"home", "following", "saved"}
 	}
-	parts := make([]string, 0, len(items))
-	for _, item := range items {
-		label := item.label
+	parts := make([]string, 0, 3)
+	for i, label := range labels {
 		style := lipgloss.NewStyle().Foreground(muted)
-		if m.feed == item.kind {
+		if m.feed == FeedKind(i) {
 			label = "[" + label + "]"
-			style = lipgloss.NewStyle().Foreground(blue).Bold(true)
+			style = style.Foreground(blue).Bold(true)
 		}
 		parts = append(parts, style.Render(label))
 	}
@@ -182,7 +188,7 @@ func (m Model) footer() string {
 	if m.feed == FeedSearch {
 		var footer string
 		if m.expanded {
-			footer = fmt.Sprintf("%d/%d · / edit · e collapse · o browser · ? help", position, len(m.posts))
+			footer = fmt.Sprintf("%d/%d · / edit · pgup/dn scroll · e collapse · ? help", position, len(m.posts))
 		} else {
 			footer = fmt.Sprintf("%d/%d · / edit search · R refresh · enter replies · ? help", position, len(m.posts))
 		}
@@ -192,12 +198,12 @@ func (m Model) footer() string {
 		return footer
 	}
 	if m.contentWidth() < 50 || len(m.posts) == 0 {
-		return fmt.Sprintf("%d/%d  ·  n inbox  ·  ? help", position, len(m.posts))
+		return m.primaryActions()
 	}
 	if m.expanded {
-		return fmt.Sprintf("%d/%d · e collapse · o browser · ? help", position, len(m.posts))
+		return fmt.Sprintf("%d/%d · pgup/dn scroll · e collapse · ? help", position, len(m.posts))
 	}
-	return fmt.Sprintf("%d/%d · enter replies · r reply · n inbox · ? help", position, len(m.posts))
+	return m.primaryActions()
 }
 
 func (m Model) errorFooter(includeQuit bool) string {
@@ -265,11 +271,10 @@ func (m Model) threadFooter() string {
 		parts = append(parts, "esc back")
 		return strings.Join(parts, "  ·  ")
 	}
-	position := 0
-	if len(m.threadPosts) > 0 {
-		position = m.selected + 1
+	if m.expanded {
+		return "pgup/dn scroll · e collapse · esc back"
 	}
-	return fmt.Sprintf("%d/%d · r reply · n inbox · esc back · ? help", position, len(m.threadPosts))
+	return m.primaryActions()
 }
 
 func (m Model) renderThreadContent() (string, []int, []int) {
@@ -411,8 +416,8 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 	}
 	when := relativeTime(post.CreatedAt)
 
-	nameColor := dim
-	textColor := dim
+	nameColor := bright
+	textColor := bright
 	handleColor := muted
 	gutter := threadRail(depth, selected)
 	if selected {
@@ -442,7 +447,7 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 		textLines := strings.Split(wrapped, "\n")
 		if !(selected && m.expanded) && len(textLines) > 4 {
 			textLines = textLines[:4]
-			textLines[3] = ansi.Truncate(textLines[3], max(2, width-pad-2), "…")
+			textLines[3] = ansi.Truncate(textLines[3], max(2, width-pad-2), "") + " …"
 		}
 		for _, line := range textLines {
 			parts = append(parts, indent+line)
@@ -493,10 +498,10 @@ func (m Model) renderPost(post api.TimelinePost, selected, nearSelection bool, d
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// renderQuoteCard keeps an embedded quote visually separate from its authoring
-// post while using the same preview formats as the main timeline.
+// renderQuoteCard uses an imageboard reference and greentext for embedded posts.
 func (m Model) renderQuoteCard(parentID string, quote api.TimelinePost, indent string, width int, showPreview bool) string {
-	cardWidth := max(10, width-lipgloss.Width(indent)-2)
+	available := max(3, width-lipgloss.Width(indent))
+	cardWidth := available - 2
 	handle := quote.Handle
 	if handle == "" {
 		handle = "unknown"
@@ -505,17 +510,28 @@ func (m Model) renderQuoteCard(parentID string, quote api.TimelinePost, indent s
 	if name == "" {
 		name = "someone"
 	}
-	header := ansi.Truncate(name+"  @"+handle, max(8, cardWidth-1), "…")
+	header := lipgloss.NewStyle().Foreground(blue).Bold(true).Render(">>@"+handle) +
+		"  " + lipgloss.NewStyle().Foreground(bright).Render(name)
+	if when := relativeTime(quote.CreatedAt); when != "" {
+		header += lipgloss.NewStyle().Foreground(muted).Render(" · " + when)
+	}
 	lines := []string{
-		indent + lipgloss.NewStyle().Foreground(muted).Render("╭─ "+header),
+		indent + ansi.Truncate(header, available, "…"),
 	}
-	text := strings.Split(lipgloss.NewStyle().Width(cardWidth).Render(cleanText(quote.Text)), "\n")
-	if len(text) > 3 {
-		text = text[:3]
-		text[2] = ansi.Truncate(text[2], max(2, cardWidth-1), "…")
+	body := strings.TrimSpace(cleanText(quote.Text))
+	if len(quote.Media) > 0 {
+		body = stripTrailingMediaLink(body)
 	}
-	for _, line := range text {
-		lines = append(lines, indent+"│ "+lipgloss.NewStyle().Foreground(muted).Render(line))
+	if body != "" {
+		text := strings.Split(ansi.Wrap(body, cardWidth, ""), "\n")
+		if len(text) > 4 {
+			text = text[:4]
+			text[3] = strings.TrimRight(ansi.Truncate(text[3], max(0, cardWidth-2), ""), " ") + " …"
+			text[3] = ansi.Truncate(text[3], cardWidth, "…")
+		}
+		for _, line := range text {
+			lines = append(lines, indent+lipgloss.NewStyle().Foreground(green).Render("> "+line))
+		}
 	}
 
 	preview, hasPreview := m.previews[quotePreviewKey(parentID, quote.ID)]
@@ -531,15 +547,14 @@ func (m Model) renderQuoteCard(parentID string, quote api.TimelinePost, indent s
 			imageBlock = preview.content
 		}
 		if imageBlock != "" {
-			lines = append(lines, indent+"│")
-			lines = append(lines, prefixLines(imageBlock, indent+"│ "))
+			prefix := imagePrefix(indent+"  ", indent, width, previewColumns(preview))
+			lines = append(lines, prefixLines(imageBlock, prefix))
 			imageShown = true
 		}
 	}
 	if len(quote.Media) > 0 && !imageShown {
-		lines = append(lines, indent+"│ "+lipgloss.NewStyle().Foreground(muted).Render(mediaChip(quote)))
+		lines = append(lines, indent+"  "+lipgloss.NewStyle().Foreground(muted).Render(mediaChip(quote)))
 	}
-	lines = append(lines, indent+lipgloss.NewStyle().Foreground(muted).Render("╰─"))
 	return strings.Join(lines, "\n")
 }
 
@@ -595,8 +610,12 @@ func (m Model) actionLine(post api.TimelinePost) string {
 	if post.ReplyCount > 0 {
 		segments = append(segments, quiet.Render("↩ "+formatCount(post.ReplyCount)))
 	}
-	if post.RepostCount > 0 {
-		segments = append(segments, quiet.Render("⟳ "+formatCount(post.RepostCount)))
+	if post.RepostCount > 0 || post.Reposted {
+		style := quiet
+		if post.Reposted {
+			style = lipgloss.NewStyle().Foreground(blue).Bold(true)
+		}
+		segments = append(segments, style.Render("⟳ "+formatCount(post.RepostCount)))
 	}
 	if views, err := strconv.Atoi(post.ViewCount); err == nil && views > 0 {
 		segments = append(segments, quiet.Render(formatCount(views)+" views"))
@@ -622,31 +641,48 @@ func highlightEntities(text string, base lipgloss.Color) string {
 	mention := lipgloss.NewStyle().Foreground(blue)
 	hashtag := lipgloss.NewStyle().Foreground(lavender)
 	link := lipgloss.NewStyle().Foreground(blue).Underline(true)
-	words := strings.Fields(text)
-	for i, word := range words {
+	var result strings.Builder
+	for len(text) > 0 {
+		if end := strings.IndexFunc(text, func(r rune) bool { return !unicode.IsSpace(r) }); end != 0 {
+			if end < 0 {
+				result.WriteString(text)
+				break
+			}
+			result.WriteString(text[:end])
+			text = text[end:]
+		}
+		end := strings.IndexFunc(text, unicode.IsSpace)
+		if end < 0 {
+			end = len(text)
+		}
+		word := text[:end]
 		switch {
 		case len(word) > 1 && word[0] == '@':
-			words[i] = mention.Render(word)
+			result.WriteString(mention.Render(word))
 		case len(word) > 1 && word[0] == '#':
-			words[i] = hashtag.Render(word)
+			result.WriteString(hashtag.Render(word))
 		case strings.HasPrefix(word, "https://") || strings.HasPrefix(word, "http://"):
 			trimmed := strings.TrimPrefix(strings.TrimPrefix(word, "https://"), "http://")
-			words[i] = link.Render(trimmed)
+			result.WriteString(link.Render(trimmed))
 		default:
-			words[i] = baseStyle.Render(word)
+			result.WriteString(baseStyle.Render(word))
 		}
+		text = text[end:]
 	}
-	return strings.Join(words, " ")
+	return result.String()
 }
 
 // stripTrailingMediaLink removes the t.co link X appends to a post's text
 // when its media is attached; the timeline renders the image itself instead.
 func stripTrailingMediaLink(text string) string {
-	if index := strings.LastIndex(text, " https://t.co/"); index >= 0 && !strings.Contains(text[index+1:], " ") {
-		return text[:index]
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return text
 	}
-	if strings.HasPrefix(text, "https://t.co/") && !strings.Contains(text, " ") {
-		return ""
+	last := fields[len(fields)-1]
+	if strings.HasPrefix(last, "https://t.co/") {
+		trimmed := strings.TrimRightFunc(text, unicode.IsSpace)
+		return strings.TrimRightFunc(strings.TrimSuffix(trimmed, last), unicode.IsSpace)
 	}
 	return text
 }
@@ -673,6 +709,12 @@ func compactCount(value, unit int, suffix string) string {
 
 func (m Model) viewReply() string {
 	w := m.contentWidth()
+	if m.replyPathOpen {
+		body := "attach image\n\n" + m.replyPath.View() + "\n\nenter attach · esc back"
+		box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(blue).Padding(1, 1).Width(w - 2).Render(body)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	}
+
 	title := "replying to @" + m.replyPost.Handle
 	original := lipgloss.NewStyle().Foreground(muted).Width(max(20, w-8)).Render(cleanText(m.replyPost.Text))
 	originalLines := strings.Split(original, "\n")
@@ -696,9 +738,11 @@ func (m Model) viewReply() string {
 		counterColor = yellow
 	}
 	status := lipgloss.NewStyle().Foreground(counterColor).Render(api.PostTextCounter(m.replyEditor.Value())) +
-		lipgloss.NewStyle().Foreground(muted).Render("    enter reply  ·  alt+enter newline  ·  esc cancel")
+		lipgloss.NewStyle().Foreground(muted).Render(" · enter reply")
 	if m.replyPosting {
 		status = lipgloss.NewStyle().Foreground(muted).Render(m.spinner.View() + " sending reply…")
+	} else if m.replyMediaLoading {
+		status = "loading image…"
 	} else if m.replyErr != nil {
 		message := m.replyErr.Error()
 		var ambiguous *api.AmbiguousPostError
@@ -710,10 +754,40 @@ func (m Model) viewReply() string {
 		} else if canOpenReplyInX(m.replyErr) {
 			message = "X rejected this reply; add more text or press b to try in X"
 		}
-		status = lipgloss.NewStyle().Foreground(red).Render(message)
+		if len(m.replyAttachments) > 0 && canOpenReplyInX(m.replyErr) {
+			message = "reply not confirmed; check X before retrying · draft kept"
+		}
+		status = lipgloss.NewStyle().Foreground(red).Width(w - 4).Render(message)
 	} else if m.replyNotice != "" {
 		status = lipgloss.NewStyle().Foreground(muted).Render(m.replyNotice)
 	}
+
+	var attachments []string
+	for i, a := range m.replyAttachments {
+		prefix := "  "
+		style := lipgloss.NewStyle().Foreground(muted)
+		if m.replyAttachmentsFocused && i == m.replyAttachmentSelected {
+			prefix = "› "
+			style = style.Foreground(blue)
+		}
+		label := fmt.Sprintf("%s%s · %dx%d · %s", prefix, a.Name, a.Width, a.Height, media.HumanBytes(int(a.Size)))
+		attachments = append(attachments, style.Render(ansi.Truncate(label, w-4, "…")))
+	}
+	if len(attachments) > 0 {
+		editor += "\n" + strings.Join(attachments, "\n")
+	}
+	hints := "ctrl+o attach · ctrl+v paste · tab images · esc back"
+	if m.replyAttachmentsFocused {
+		hints = "←/→ choose · delete remove · tab write"
+	}
+	if m.replyPosting {
+		hints = "esc cancel sending"
+		if m.replyNotice != "" {
+			hints = m.replyNotice
+		}
+	}
+	status = lipgloss.NewStyle().Width(w - 4).Render(status)
+	status += "\n" + lipgloss.NewStyle().Foreground(muted).Width(w-4).Render(hints)
 	content := lipgloss.NewStyle().Foreground(pink).Bold(true).Render(title) + "\n" +
 		strings.Join(originalLines, "\n") + "\n\n" + editor + "\n\n" + status
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
@@ -900,20 +974,20 @@ func (m Model) viewAltText() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func (m Model) viewHelp() string {
+func (m Model) helpContent() string {
 	w := m.contentWidth()
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nl           like / unlike\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n1 / 2 / 3   jump to feed\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nl           like / unlike\nt           repost / undo repost\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nl           like / unlike\nr           reply to selected\nR           refresh replies\ne / space   read full post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nl           like / unlike\nt           repost / undo repost\nr           reply to selected\nR           refresh replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.mode == modeNotifications {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nr           reply\nR           refresh\nenter       open conversation\ne / space   read full post\no           open in browser\ny           copy link\nesc / n     back\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nr           reply\nR           refresh\nenter       open conversation\ne / space   read full post\npgup/down   scroll expanded post\no           open in browser\ny           copy link\nesc / n     back\nq           quit"
 	}
-	if m.height < 25 {
-		keys = "\n\nj/k move · g/G ends\ntab feeds · n inbox\nl like · r reply · y copy\nenter replies · e read\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
+	if m.height < 38 || m.width < 50 {
+		keys = "\n\nj/k move · g/G ends\n1/2/3 tabs · n inbox\nl like · r reply · y copy\nenter replies · e read\npgup/down scroll full post\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
 		if m.mode == modeThread {
 			keys = "\n\nj/k move · g/G ends\nl like · r reply · n inbox\ny copy · e read · i zoom\nA alt · R refresh · o browser\n/ search · esc back · q quit"
 		} else if m.mode == modeNotifications {
@@ -929,10 +1003,28 @@ func (m Model) viewHelp() string {
 		helpTitle = "notification keys"
 	}
 	body := lipgloss.NewStyle().Foreground(pink).Bold(true).Render(helpTitle) + keys +
-		"\n\n" + lipgloss.NewStyle().Foreground(muted).Width(max(20, w-12)).Render(images) +
-		"\n\n" + lipgloss.NewStyle().Foreground(muted).Render("? or esc close")
+		"\n\n" + lipgloss.NewStyle().Foreground(muted).Width(max(20, w-12)).Render(images)
+	return lipgloss.NewStyle().Width(max(10, min(50, m.width-6))).Render(body)
+}
+
+func (m Model) helpVisibleRows() int { return max(1, m.height-4) }
+
+func (m Model) helpMaxScroll() int {
+	return max(0, len(strings.Split(m.helpContent(), "\n"))-m.helpVisibleRows())
+}
+
+func (m Model) viewHelp() string {
+	lines := strings.Split(m.helpContent(), "\n")
+	start := min(m.helpScroll, m.helpMaxScroll())
+	end := min(len(lines), start+m.helpVisibleRows())
+	footer := "? / esc close"
+	if m.helpMaxScroll() > 0 {
+		footer = "↑/↓ scroll · ?/esc close"
+	}
+	innerWidth := max(10, min(50, m.width-6))
+	footer = ansi.Truncate(footer, innerWidth, "…")
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lavender).
-		Padding(1, 2).Width(w - 6).Render(body)
+		Padding(0, 1).Width(innerWidth + 2).Render(strings.Join(lines[start:end], "\n") + "\n" + lipgloss.NewStyle().Foreground(muted).Render(footer))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
