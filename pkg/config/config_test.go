@@ -46,7 +46,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	in := &Config{
 		AuthToken: "tok123", CT0: "csrf456", CreateTweetQID: "qid789", CreateNoteTweetQID: "note123", CreateRetweetQID: "rt123", DeleteRetweetQID: "undo123",
 		HomeTimelineQID: "home123", BookmarksQID: "bookmarks123", SearchTimelineQID: "search123",
-		FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123",
+		FavoriteTweetQID: "like123", UnfavoriteTweetQID: "unlike123", ViewerQID: "viewer123", UserByScreenNameQID: "profile123", UserTweetsQID: "userposts123",
 		TweetDetailQID: "detail123", NotificationsQID: "notifications123",
 		NotificationsDeliveredID: "200", NotificationsReadID: "190", NotificationsAccountID: "42",
 		SessionBrowser: "Firefox", SessionProfile: "default-release", SessionDomain: "x.com",

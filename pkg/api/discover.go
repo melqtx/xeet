@@ -103,6 +103,9 @@ func webpackChunkURLs(runtime, operation string) []string {
 }
 
 func operationHint(operation string) string {
+	if operation == "UserByScreenName" || operation == "UserTweets" {
+		return "Profile"
+	}
 	if operation == "TweetDetail" {
 		return "TweetDetail"
 	}

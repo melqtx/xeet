@@ -38,6 +38,8 @@ type Config struct {
 	FavoriteTweetQID         string    `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID       string    `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID                string    `yaml:"viewer_qid,omitempty"`
+	UserByScreenNameQID      string    `yaml:"user_by_screen_name_qid,omitempty"`
+	UserTweetsQID            string    `yaml:"user_tweets_qid,omitempty"`
 	TweetDetailQID           string    `yaml:"tweet_detail_qid,omitempty"`
 	NotificationsQID         string    `yaml:"notifications_timeline_qid,omitempty"`
 	NotificationsDeliveredID string    `yaml:"notifications_delivered_id,omitempty"`
@@ -119,6 +121,8 @@ type fileConfig struct {
 	FavoriteTweetQID         string `yaml:"favorite_tweet_qid,omitempty"`
 	UnfavoriteTweetQID       string `yaml:"unfavorite_tweet_qid,omitempty"`
 	ViewerQID                string `yaml:"viewer_qid,omitempty"`
+	UserByScreenNameQID      string `yaml:"user_by_screen_name_qid,omitempty"`
+	UserTweetsQID            string `yaml:"user_tweets_qid,omitempty"`
 	TweetDetailQID           string `yaml:"tweet_detail_qid,omitempty"`
 	NotificationsQID         string `yaml:"notifications_timeline_qid,omitempty"`
 	NotificationsDeliveredID string `yaml:"notifications_delivered_id,omitempty"`
@@ -181,6 +185,8 @@ func (cm *ConfigManager) Load() (*Config, error) {
 		FavoriteTweetQID:         fc.FavoriteTweetQID,
 		UnfavoriteTweetQID:       fc.UnfavoriteTweetQID,
 		ViewerQID:                fc.ViewerQID,
+		UserByScreenNameQID:      fc.UserByScreenNameQID,
+		UserTweetsQID:            fc.UserTweetsQID,
 		TweetDetailQID:           fc.TweetDetailQID,
 		NotificationsQID:         fc.NotificationsQID,
 		NotificationsDeliveredID: fc.NotificationsDeliveredID,
@@ -313,6 +319,8 @@ func (cm *ConfigManager) save(config *Config) error {
 			SearchTimelineQID:     config.SearchTimelineQID,
 			FavoriteTweetQID:      config.FavoriteTweetQID, UnfavoriteTweetQID: config.UnfavoriteTweetQID,
 			ViewerQID: config.ViewerQID, TweetDetailQID: config.TweetDetailQID,
+			UserByScreenNameQID:      config.UserByScreenNameQID,
+			UserTweetsQID:            config.UserTweetsQID,
 			NotificationsQID:         config.NotificationsQID,
 			NotificationsDeliveredID: config.NotificationsDeliveredID,
 			NotificationsReadID:      config.NotificationsReadID,
@@ -429,6 +437,8 @@ func fileConfigFor(config *Config) *fileConfig {
 		FavoriteTweetQID:         config.FavoriteTweetQID,
 		UnfavoriteTweetQID:       config.UnfavoriteTweetQID,
 		ViewerQID:                config.ViewerQID,
+		UserByScreenNameQID:      config.UserByScreenNameQID,
+		UserTweetsQID:            config.UserTweetsQID,
 		TweetDetailQID:           config.TweetDetailQID,
 		NotificationsQID:         config.NotificationsQID,
 		NotificationsDeliveredID: config.NotificationsDeliveredID,

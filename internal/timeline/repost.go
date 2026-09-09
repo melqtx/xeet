@@ -3,6 +3,7 @@ package timeline
 import (
 	"context"
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -64,6 +65,19 @@ func (m *Model) applyRepost(id string, reposted bool) {
 			post.RepostCount--
 		}
 	}
+	for i := range m.profile.posts {
+		apply(&m.profile.posts[i])
+	}
+	for j := range m.profileStack {
+		if state := m.profileStack[j].thread; state != nil {
+			for i := range state.posts {
+				apply(&state.posts[i].TimelinePost)
+			}
+		}
+		for i := range m.profileStack[j].profile.posts {
+			apply(&m.profileStack[j].profile.posts[i])
+		}
+	}
 	for i := range m.posts {
 		apply(&m.posts[i])
 	}
@@ -101,5 +115,5 @@ func (m Model) primaryActions() string {
 	if m.contentWidth() < 48 {
 		return "l ♥  t rt  r reply  c post  ?"
 	}
-	return fmt.Sprintf("l %s · t %s · r reply · c post · ? help", like, repost)
+	return ansi.Truncate(fmt.Sprintf("l %s · t %s · r reply · u profile · c post · ? help", like, repost), m.contentWidth(), "…")
 }

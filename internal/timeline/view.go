@@ -36,6 +36,13 @@ func (m Model) View() string {
 	if m.mode == modeNotifications {
 		return m.viewNotifications()
 	}
+	if m.mode == modeProfile {
+		footer := "j/k move · u author · enter replies · esc back · ? help"
+		if m.toast != "" {
+			footer = m.toast
+		}
+		return m.shell(m.viewport.View(), ansi.Truncate(footer, m.contentWidth(), "…"))
+	}
 	if m.mode == modeThread {
 		return m.viewThread()
 	}
@@ -134,6 +141,9 @@ func (m Model) header(width int) string {
 		if root, ok := m.threadRootPost(); ok && root.Handle != "" {
 			second = "esc back  /  replies to @" + root.Handle
 		}
+	}
+	if m.mode == modeProfile {
+		second = "esc back  /  @" + cleanText(m.profile.info.Handle) + " / posts"
 	}
 	if width >= 48 {
 		face := "( o.o )"
@@ -979,15 +989,18 @@ func (m Model) helpContent() string {
 	if w > 54 {
 		w = 54
 	}
-	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n1 / 2 / 3   jump to feed\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nl           like / unlike\nt           repost / undo repost\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	keys := "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\n1 / 2 / 3   jump to feed\ntab         next feed\nshift+tab   previous feed\nf / b       quick feed toggles\nn           notifications\n/           search\nu           author profile\nl           like / unlike\nt           repost / undo repost\nr           reply\nR           refresh\nenter       open replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\nP           new post\ng / G       top / bottom\nctrl+l      redraw screen\nq           quit"
+	if m.mode == modeProfile {
+		keys = "\n\nj/k move · g/G ends\nu author profile · esc back\nenter replies · r reply\nl like · t repost · c compose\ne expand · pgup/down scroll\ni image · v video · A alt\no browser · y copy post link\nR refresh/retry · q quit"
+	}
 	if m.mode == modeThread {
-		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nl           like / unlike\nt           repost / undo repost\nr           reply to selected\nR           refresh replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
+		keys = "\n\n↑ / k       previous\n↓ / j       next\nctrl+d/u    jump five\nn           notifications\n/           search\nu           author profile\nl           like / unlike\nt           repost / undo repost\nr           reply to selected\nR           refresh replies\ne / space   read full post\npgup/down   scroll expanded post\ni           zoom image\nv           play video (mpv)\nA           image alt text\no           open in browser\ny           copy link\ng / G       top / bottom\nctrl+l      redraw screen\nesc         back to timeline\nq           quit"
 	}
 	if m.mode == modeNotifications {
 		keys = "\n\n↑ / k       previous\n↓ / j       next\nr           reply\nR           refresh\nenter       open conversation\ne / space   read full post\npgup/down   scroll expanded post\no           open in browser\ny           copy link\nesc / n     back\nq           quit"
 	}
-	if m.height < 38 || m.width < 50 {
-		keys = "\n\nj/k move · g/G ends\n1/2/3 tabs · n inbox\nl like · r reply · y copy\nenter replies · e read\npgup/down scroll full post\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
+	if (m.height < 38 || m.width < 50) && m.mode != modeProfile {
+		keys = "\n\nj/k move · g/G ends\n1/2/3 tabs · n inbox\nl like · r reply · u profile\ny copy · enter replies · e read\npgup/down scroll full post\ni zoom · A alt · o browser\nR refresh · P new · / search\n^L redraw · q quit"
 		if m.mode == modeThread {
 			keys = "\n\nj/k move · g/G ends\nl like · r reply · n inbox\ny copy · e read · i zoom\nA alt · R refresh · o browser\n/ search · esc back · q quit"
 		} else if m.mode == modeNotifications {

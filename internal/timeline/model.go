@@ -70,6 +70,7 @@ type mode int
 const (
 	modeFeed mode = iota
 	modeThread
+	modeProfile
 	modeReply
 	modeSearch
 	modeNotifications
@@ -97,6 +98,10 @@ type feedSnapshot struct {
 }
 
 type Model struct {
+	profile                                    profileState
+	profileStack                               []profileBack
+	profileSeq, profileSelected, profileOffset int
+
 	// ctx bounds every request this model starts. It carries the process's
 	// interrupt signal, so a SIGINT or SIGTERM cancels in-flight fetches
 	// instead of leaving them to run out their own timeouts.
@@ -416,6 +421,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(clockTick(), m.activateNotificationPopup())
 	}
+	if result, ok := msg.(threadMsg); ok {
+		for i := range m.profileStack {
+			state := m.profileStack[i].thread
+			if state != nil && result.seq == state.seq && result.rootID == state.rootID {
+				copy := m
+				copy.restoreThread(state)
+				updated, _ := copy.applyThreadPage(result, false)
+				m.profileStack[i].thread = updated.(Model).snapshotThread()
+			}
+		}
+	}
+	if result, ok := msg.(profileMsg); ok {
+		return m.applyProfilePage(result)
+	}
 	if result, ok := msg.(repostMsg); ok {
 		delete(m.reposting, result.id)
 		text := "reposted"
@@ -426,7 +445,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyRepost(result.id, !result.reposted)
 			text = result.err.Error()
 		}
-		if m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications {
+		if m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications || m.mode == modeProfile {
 			m.syncViewport()
 			return m, m.imageRepaint(m.showToast(text))
 		}
@@ -552,7 +571,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.expanded && (m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications) {
+	if m.expanded && (m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications || m.mode == modeProfile) {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.String() {
 			case "pgdown", "ctrl+d":
@@ -564,7 +583,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	if key, ok := msg.(tea.KeyMsg); ok && (m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications) {
+	if key, ok := msg.(tea.KeyMsg); ok && (m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications || m.mode == modeProfile) {
+		if key.String() == "u" {
+			if post, ok := m.currentPost(); ok {
+				return m.beginProfile(post)
+			}
+		}
 		if key.String() == "t" {
 			return m, m.imageRepaint(m.toggleSelectedRepost())
 		}
@@ -578,6 +602,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateReply(msg)
 	case modeSearch:
 		return m.updateSearch(msg)
+	case modeProfile:
+		return m.updateProfile(msg)
 	case modeThread:
 		return m.updateThread(msg)
 	case modeNotifications:
@@ -958,7 +984,7 @@ func (m Model) applyFeedPage(msg pageMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.err = nil
-	threadContext := m.mode == modeThread || m.mode == modeNotifications ||
+	threadContext := m.mode == modeThread || m.mode == modeNotifications || m.mode == modeProfile ||
 		(m.mode == modeReply && m.replyReturn != modeFeed) ||
 		(m.mode == modeSearch && m.searchReturn != modeFeed)
 	feedIndex := m.selected
@@ -1085,7 +1111,9 @@ func (m *Model) resize() {
 func (m *Model) syncViewport() {
 	var content string
 	var starts, ends []int
-	if m.mode == modeThread {
+	if m.mode == modeProfile {
+		content, starts, ends = m.renderProfileContent()
+	} else if m.mode == modeThread {
 		content, starts, ends = m.renderThreadContent()
 	} else if m.mode == modeNotifications {
 		content, starts, ends = m.renderNotificationContent()
@@ -1108,6 +1136,10 @@ func (m *Model) scrollExpanded(direction int) {
 }
 
 func (m *Model) ensureSelectedVisible() {
+	// Keep the author header visible until the reader moves into the posts.
+	if m.mode == modeProfile && m.selected == 0 && m.viewport.YOffset == 0 && !m.expanded {
+		return
+	}
 	if m.selected < 0 || m.selected >= len(m.starts) {
 		return
 	}
@@ -1136,6 +1168,9 @@ func (m *Model) ensureSelectedVisible() {
 }
 
 func (m Model) activePosts() []api.TimelinePost {
+	if m.mode == modeProfile {
+		return m.profile.posts
+	}
 	if m.mode == modeNotifications {
 		posts := make([]api.TimelinePost, len(m.notifications))
 		for i := range m.notifications {
@@ -1154,6 +1189,12 @@ func (m Model) activePosts() []api.TimelinePost {
 }
 
 func (m Model) currentPost() (api.TimelinePost, bool) {
+	if m.mode == modeProfile {
+		if m.selected < 0 || m.selected >= len(m.profile.posts) {
+			return api.TimelinePost{}, false
+		}
+		return m.profile.posts[m.selected], true
+	}
 	if m.mode == modeNotifications {
 		if m.selected < 0 || m.selected >= len(m.notifications) {
 			return api.TimelinePost{}, false
@@ -1182,6 +1223,19 @@ func (m *Model) applyLike(id string, liked bool) {
 			post.LikeCount++
 		} else if post.LikeCount > 0 {
 			post.LikeCount--
+		}
+	}
+	for i := range m.profile.posts {
+		apply(&m.profile.posts[i])
+	}
+	for j := range m.profileStack {
+		if state := m.profileStack[j].thread; state != nil {
+			for i := range state.posts {
+				apply(&state.posts[i].TimelinePost)
+			}
+		}
+		for i := range m.profileStack[j].profile.posts {
+			apply(&m.profileStack[j].profile.posts[i])
 		}
 	}
 	for i := range m.posts {
