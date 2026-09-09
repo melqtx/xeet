@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/melqtx/xeet/internal/media"
 	"github.com/melqtx/xeet/pkg/api"
 	"github.com/melqtx/xeet/pkg/config"
 
@@ -16,7 +18,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func sendReply(parent context.Context, tweetID, text string) tea.Cmd {
+func sendReply(parent context.Context, tweetID, text string, attachments ...media.Attachment) tea.Cmd {
+	attachments = append([]media.Attachment(nil), attachments...)
 	return func() tea.Msg {
 		mgr, err := config.NewConfigManager()
 		if err != nil {
@@ -26,10 +29,14 @@ func sendReply(parent context.Context, tweetID, text string) tea.Cmd {
 		if err != nil {
 			return replyResultMsg{err: err}
 		}
-		ctx, cancel := context.WithTimeout(parent, 40*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 		defer cancel()
 		client := api.NewWebClient(cfg)
-		id, err := client.PostTweet(ctx, text, tweetID, nil, nil)
+		uploads := make([]api.Upload, 0, len(attachments))
+		for _, a := range attachments {
+			uploads = append(uploads, api.Upload{Filename: a.Name, ContentType: a.MIME, Data: a.Data})
+		}
+		id, err := client.PostTweet(ctx, text, tweetID, uploads, nil)
 		if client.ApplyRefreshedQueryIDs(cfg) {
 			_ = mgr.Save(cfg)
 		}
@@ -44,12 +51,37 @@ func (m Model) beginReply(post api.TimelinePost) (tea.Model, tea.Cmd) {
 	m.replyErr = nil
 	m.replyNotice = ""
 	m.replyEditor.Reset()
+	m.replyMediaSeq++
+	m.replyMediaLoading = false
+	m.replyAttachmentsFocused = false
+	m.replyPathOpen = false
+	m.replyPath = textinput.New()
+	m.replyPath.Prompt = "> "
+	m.replyPath.Placeholder = "~/Pictures/photo.png"
+	m.replyPath.CharLimit = 4096
+	draft := m.replyDrafts[post.ID]
+	m.replyEditor.SetValue(draft.text)
+	m.replyAttachments = append([]media.Attachment(nil), draft.attachments...)
+	m.replyAttachmentSelected = 0
 	m.resize()
 	return m, m.imageRepaint(m.replyEditor.Focus())
 }
 
 func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case replyMediaMsg:
+		if msg.seq != m.replyMediaSeq {
+			return m, nil
+		}
+		m.replyMediaLoading = false
+		m.replyErr = msg.err
+		if msg.err == nil && msg.attachment != nil {
+			m.replyErr = m.addReplyAttachment(*msg.attachment)
+		}
+		if msg.err == nil && msg.text != "" {
+			m.replyEditor.InsertString(msg.text)
+		}
+		return m, nil
 	case threadMsg:
 		if m.replyReturn == modeThread {
 			return m.applyThreadPage(msg, false)
@@ -75,12 +107,18 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case replyResultMsg:
+		if m.replyCancel != nil {
+			m.replyCancel()
+			m.replyCancel = nil
+		}
 		m.replyPosting = false
 		if msg.err != nil {
 			m.replyErr = msg.err
 			m.replyNotice = ""
 			return m, m.replyEditor.Focus()
 		}
+		delete(m.replyDrafts, m.replyPost.ID)
+		m.replyAttachments = nil
 		m.mode = m.replyReturn
 		m.replyEditor.Blur()
 		m.replyEditor.Reset()
@@ -106,14 +144,76 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyMsg)
 	if ok {
 		if m.replyPosting {
+			if (key.String() == "esc" || key.String() == "ctrl+c") && m.replyCancel != nil {
+				m.replyCancel()
+				m.replyNotice = "cancelling…"
+			}
+			return m, nil
+		}
+		if m.replyPathOpen {
+			switch key.String() {
+			case "esc":
+				m.replyPathOpen = false
+				return m, m.replyEditor.Focus()
+			case "enter":
+				m.replyPathOpen = false
+				m.replyErr = nil
+				return m, tea.Batch(m.replyEditor.Focus(), m.loadReplyMedia(m.replyPath.Value(), false))
+			}
+			var cmd tea.Cmd
+			m.replyPath, cmd = m.replyPath.Update(msg)
+			return m, cmd
+		}
+		if m.replyAttachmentsFocused {
+			switch key.String() {
+			case "tab", "enter", "esc":
+				m.replyAttachmentsFocused = false
+				return m, m.replyEditor.Focus()
+			case "left", "up", "shift+tab":
+				m.replyAttachmentSelected = max(0, m.replyAttachmentSelected-1)
+			case "right", "down":
+				m.replyAttachmentSelected = min(len(m.replyAttachments)-1, m.replyAttachmentSelected+1)
+			case "backspace", "delete", "ctrl+x":
+				i := m.replyAttachmentSelected
+				if i >= 0 && i < len(m.replyAttachments) {
+					m.replyAttachments = append(m.replyAttachments[:i], m.replyAttachments[i+1:]...)
+					m.replyAttachmentSelected = max(0, min(i, len(m.replyAttachments)-1))
+					m.resize()
+				}
+				if len(m.replyAttachments) == 0 {
+					m.replyAttachmentsFocused = false
+					return m, m.replyEditor.Focus()
+				}
+			}
 			return m, nil
 		}
 		switch key.String() {
+		case "ctrl+o":
+			if m.replyMediaLoading {
+				return m, nil
+			}
+			m.replyPathOpen = true
+			m.replyPath.SetValue("")
+			m.replyEditor.Blur()
+			return m, m.replyPath.Focus()
+		case "ctrl+v":
+			if m.replyMediaLoading {
+				return m, nil
+			}
+			return m, m.loadReplyMedia("", true)
+		case "tab":
+			if len(m.replyAttachments) > 0 {
+				m.replyAttachmentsFocused = true
+				m.replyEditor.Blur()
+			}
+			return m, nil
 		case "b":
-			if canOpenReplyInX(m.replyErr) {
+			if canOpenReplyInX(m.replyErr) && len(m.replyAttachments) == 0 {
 				return m, openReplyInX(m.replyPost.ID, m.replyEditor.Value())
 			}
 		case "esc", "ctrl+c":
+			m.saveReplyDraft()
+			m.replyMediaSeq++
 			m.mode = m.replyReturn
 			m.replyEditor.Blur()
 			m.replyErr = nil
@@ -121,7 +221,10 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 			return m, m.imageRepaint(m.requestPreviews())
 		case "enter":
-			if strings.TrimSpace(m.replyEditor.Value()) == "" {
+			if m.replyMediaLoading {
+				return m, nil
+			}
+			if strings.TrimSpace(m.replyEditor.Value()) == "" && len(m.replyAttachments) == 0 {
 				m.replyErr = fmt.Errorf("write a reply first")
 				return m, nil
 			}
@@ -133,7 +236,9 @@ func (m Model) updateReply(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replyErr = nil
 			m.replyNotice = ""
 			m.replyEditor.Blur()
-			return m, tea.Batch(m.spinner.Tick, sendReply(m.requestContext(), m.replyPost.ID, m.replyEditor.Value()))
+			ctx, cancel := context.WithCancel(m.requestContext())
+			m.replyCancel = cancel
+			return m, tea.Batch(m.spinner.Tick, sendReply(ctx, m.replyPost.ID, m.replyEditor.Value(), m.replyAttachments...))
 		case "alt+enter", "ctrl+j":
 			m.replyEditor.InsertString("\n")
 			return m, nil
