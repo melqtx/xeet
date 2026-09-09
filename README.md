@@ -339,3 +339,12 @@ and a paginated list of posts. Profiles use the same forum-style text and media
 previews as the feed. `enter` opens replies, `r` replies, and `l` / `t` like or
 repost. `R` refreshes or retries; `g` returns to the profile header. `esc` restores
 the previous screen and reading position, including when browsing another author.
+
+### quotes
+
+`Q` opens the selected post's embedded quote as a full conversation; `esc`
+returns to your previous screen and reading position. Press `alt+q` to quote
+any selected post with your own comment. The small composer shows the original
+above your text: `enter` publishes, `alt+enter` adds a line, and `esc` keeps the
+draft for this session. Image attachment keys match replies. Quote drafts and
+reply drafts stay separate, even for the same post.

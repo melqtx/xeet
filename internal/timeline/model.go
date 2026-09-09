@@ -98,6 +98,10 @@ type feedSnapshot struct {
 }
 
 type Model struct {
+	replyQuote, replyExpanded                  bool
+	replyOffset                                int
+	quoteStack                                 []quoteBack
+	threadRequestSeq                           int
 	profile                                    profileState
 	profileStack                               []profileBack
 	profileSeq, profileSelected, profileOffset int
@@ -422,6 +426,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(clockTick(), m.activateNotificationPopup())
 	}
 	if result, ok := msg.(threadMsg); ok {
+		for i := range m.quoteStack {
+			state := m.quoteStack[i].thread
+			if state != nil && result.seq == state.seq && result.rootID == state.rootID {
+				copy := m
+				copy.restoreThread(state)
+				updated, _ := copy.applyThreadPage(result, false)
+				m.quoteStack[i].thread = updated.(Model).snapshotThread()
+			}
+		}
 		for i := range m.profileStack {
 			state := m.profileStack[i].thread
 			if state != nil && result.seq == state.seq && result.rootID == state.rootID {
@@ -584,6 +597,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if key, ok := msg.(tea.KeyMsg); ok && (m.mode == modeFeed || m.mode == modeThread || m.mode == modeNotifications || m.mode == modeProfile) {
+		if key.String() == "Q" {
+			return m.openSelectedQuote()
+		}
+		if key.String() == "alt+q" {
+			if post, ok := m.currentPost(); ok {
+				return m.beginPostComposer(post, true)
+			}
+		}
 		if key.String() == "u" {
 			if post, ok := m.currentPost(); ok {
 				return m.beginProfile(post)
@@ -1227,6 +1248,13 @@ func (m *Model) applyLike(id string, liked bool) {
 	}
 	for i := range m.profile.posts {
 		apply(&m.profile.posts[i])
+	}
+	for j := range m.quoteStack {
+		if state := m.quoteStack[j].thread; state != nil {
+			for i := range state.posts {
+				apply(&state.posts[i].TimelinePost)
+			}
+		}
 	}
 	for j := range m.profileStack {
 		if state := m.profileStack[j].thread; state != nil {

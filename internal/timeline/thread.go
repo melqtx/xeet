@@ -39,7 +39,8 @@ func fetchThread(parent context.Context, tweetID, cursor string, more bool, seq 
 }
 
 func (m *Model) requestThread(cursor string, more bool) tea.Cmd {
-	m.threadSeq++
+	m.threadRequestSeq = max(m.threadRequestSeq, m.threadSeq) + 1
+	m.threadSeq = m.threadRequestSeq
 	return fetchThread(m.requestContext(), m.threadRootID, cursor, more, m.threadSeq)
 }
 
@@ -325,6 +326,9 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) leaveThread() (tea.Model, tea.Cmd) {
+	if len(m.quoteStack) > 0 && m.quoteStack[len(m.quoteStack)-1].rootID == m.threadRootID {
+		return m.leaveQuote()
+	}
 	returnTo := m.threadReturn
 	if returnTo != modeNotifications && returnTo != modeProfile {
 		returnTo = modeFeed

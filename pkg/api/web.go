@@ -434,6 +434,7 @@ var createTweetFeatures = map[string]bool{
 }
 
 type createTweetVariables struct {
+	AttachmentURL             string                      `json:"attachment_url,omitempty"`
 	TweetText                 string                      `json:"tweet_text"`
 	Media                     ctMedia                     `json:"media"`
 	SemanticAnnotationIDs     []string                    `json:"semantic_annotation_ids"`
@@ -474,6 +475,19 @@ func newCreateTweetVariables(text string) createTweetVariables {
 // PostTweet posts through the web GraphQL endpoint and returns the created id.
 // Media is uploaded first and attached to the same CreateTweet operation.
 func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploads []Upload, progress ProgressFunc) (string, error) {
+	return c.postTweet(ctx, text, replyToID, "", uploads, progress)
+}
+
+// PostQuote attaches the original post rather than turning it into a reply or
+// adding its URL to the user's commentary.
+func (c *WebClient) PostQuote(ctx context.Context, text, quoteID string, uploads []Upload, progress ProgressFunc) (string, error) {
+	if quoteID == "" || strings.IndexFunc(quoteID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return "", fmt.Errorf("invalid quoted post id")
+	}
+	return c.postTweet(ctx, text, "", quoteID, uploads, progress)
+}
+
+func (c *WebClient) postTweet(ctx context.Context, text, replyToID, quoteID string, uploads []Upload, progress ProgressFunc) (string, error) {
 	c.lastDiagnostic = ""
 	if c.authToken == "" || c.ct0 == "" {
 		return "", fmt.Errorf("no session; run 'xeet auth' first")
@@ -500,6 +514,9 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 		return "", err
 	}
 	vars := newCreateTweetVariables(text)
+	if quoteID != "" {
+		vars.AttachmentURL = "https://x.com/i/status/" + quoteID
+	}
 	for i, upload := range uploads {
 		emitProgress(progress, PostEvent{Stage: PostStageUploading, Current: i + 1, Total: len(uploads), Name: upload.Filename})
 		var mediaID string
@@ -536,14 +553,20 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	var res *httpResult
 	var err error
 	var attemptedAt time.Time
+	finishAmbiguous := func(diagnostic string) (string, error) {
+		// Text alone cannot distinguish a quote from a normal post with the same
+		// commentary. Keep uncertain quote submissions editable, without retrying.
+		if quoteID != "" {
+			c.lastDiagnostic = appendDiagnostic(diagnostic, "reconcile=skipped_quote")
+			return "", withDiagnostic(&AmbiguousPostError{Reconciliation: "quote results cannot be verified safely"}, c.lastDiagnostic)
+		}
+		return c.finishAmbiguousCreate(ctx, text, replyToID, len(uploads), attemptedAt, diagnostic, progress)
+	}
 	for {
 		attemptedAt = time.Now()
 		res, err = c.doCreatePost(ctx, vars, queryID, operation)
 		if err != nil {
-			return c.finishAmbiguousCreate(
-				ctx, text, replyToID, len(uploads), attemptedAt,
-				createTransportDiagnostic(err), progress,
-			)
+			return finishAmbiguous(createTransportDiagnostic(err))
 		}
 
 		// A 404 (or a 400 blaming the persisted query) means the query id rotated.
@@ -557,10 +580,7 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 			attemptedAt = time.Now()
 			res, err = c.doCreatePost(ctx, vars, fresh, operation)
 			if err != nil {
-				return c.finishAmbiguousCreate(
-					ctx, text, replyToID, len(uploads), attemptedAt,
-					createTransportDiagnostic(err), progress,
-				)
+				return finishAmbiguous(createTransportDiagnostic(err))
 			}
 		}
 
@@ -584,10 +604,7 @@ func (c *WebClient) PostTweet(ctx context.Context, text, replyToID string, uploa
 	outcome := parseCreateTweetResponse(res)
 	c.lastDiagnostic = outcome.diagnostic
 	if outcome.ambiguous {
-		return c.finishAmbiguousCreate(
-			ctx, text, replyToID, len(uploads), attemptedAt,
-			outcome.diagnostic, progress,
-		)
+		return finishAmbiguous(outcome.diagnostic)
 	}
 	if outcome.err != nil {
 		if operation == "CreateNoteTweet" {
