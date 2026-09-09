@@ -15,6 +15,7 @@ type Profile struct {
 	Bio, Location, Website, Joined       string
 	Followers, Following, Posts          int
 	Protected                            bool
+	YouFollow, FollowsYou                bool
 	HasFollowers, HasFollowing, HasPosts bool
 }
 
@@ -99,6 +100,8 @@ func parseProfileResult(result map[string]any) (*Profile, error) {
 	if website, ok := object("website")["url"].(string); ok {
 		p.Website = website
 	}
+	p.YouFollow, _ = legacy["following"].(bool)
+	p.FollowsYou, _ = legacy["followed_by"].(bool)
 	p.Protected, _ = legacy["protected"].(bool)
 	if protected, ok := object("privacy")["protected"].(bool); ok {
 		p.Protected = protected

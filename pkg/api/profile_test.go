@@ -101,3 +101,22 @@ func TestProfileCountsDistinguishZeroFromMissing(t *testing.T) {
 		t.Fatalf("presence or fallback incorrect: %+v", p)
 	}
 }
+
+func TestProfileRelationships(t *testing.T) {
+	result := map[string]any{"rest_id": "42", "core": map[string]any{"name": "Alice", "screen_name": "alice"}}
+	p, err := parseProfileResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.YouFollow || p.FollowsYou {
+		t.Fatal("missing relationships must not produce badges")
+	}
+	result["legacy"] = map[string]any{"following": true, "followed_by": true}
+	p, err = parseProfileResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.YouFollow || !p.FollowsYou {
+		t.Fatal("explicit relationships not parsed")
+	}
+}
