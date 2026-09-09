@@ -77,6 +77,24 @@ func TestMediaChip(t *testing.T) {
 	}
 }
 
+func TestQuoteCardRendersTextAndInlinePreview(t *testing.T) {
+	m := NewWithImageMode("off")
+	m.width = 80
+	quote := api.TimelinePost{
+		ID: "quoted", AuthorName: "Quoted Author", Handle: "quoted", Text: "the quoted post",
+		Media: []api.TimelineMedia{{URL: "https://pbs.twimg.com/media/quoted", Type: "photo"}},
+	}
+	m.posts = []api.TimelinePost{{ID: "outer", AuthorName: "Outer", Handle: "outer", Text: "my comment", Quote: &quote}}
+	m.previews[quotePreviewKey("outer", "quoted")] = previewState{content: "QUOTE-IMAGE"}
+	content, _, _ := m.renderFeedContent()
+	plain := ansi.Strip(content)
+	for _, want := range []string{"╭─ Quoted Author  @quoted", "the quoted post", "QUOTE-IMAGE", "╰─"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("quote card is missing %q:\n%s", want, plain)
+		}
+	}
+}
+
 func TestUnselectedPostNearSelectionRendersCachedImage(t *testing.T) {
 	m := New()
 	m.loading = false

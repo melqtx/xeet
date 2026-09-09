@@ -385,6 +385,23 @@ func TestPreviewsPrefetchAroundSelection(t *testing.T) {
 	}
 }
 
+func TestPreviewsFetchQuotedMediaAtCardWidth(t *testing.T) {
+	m := NewWithImageMode("ansi")
+	m.loading = false
+	quote := mediaPosts(1)[0]
+	quote.ID = "quoted"
+	m.posts = []api.TimelinePost{{ID: "outer", Text: "quote", Quote: &quote}}
+	m.syncViewport()
+
+	if cmd := m.requestPreviews(); cmd == nil {
+		t.Fatal("quoted image was not requested")
+	}
+	preview, ok := m.previews[quotePreviewKey("outer", "quoted")]
+	if !ok || !preview.loading {
+		t.Fatalf("quoted preview state=%+v", preview)
+	}
+}
+
 func TestThreadRefetchesAPreviewTooWideForItsRail(t *testing.T) {
 	m := NewWithImageMode("ansi")
 	m.loading = false
